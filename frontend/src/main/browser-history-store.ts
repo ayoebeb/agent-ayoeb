@@ -35,6 +35,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** One stored or received history entry, or null when it is not a valid one. */
+export function normalizeBrowserHistoryEntry(value: unknown): BrowserHistoryEntry | null {
+	return normalizeEntry(value);
+}
+
 function normalizeEntry(value: unknown): BrowserHistoryEntry | null {
 	if (!isRecord(value) || typeof value.url !== "string" || value.url.length > HISTORY_MAX_URL_LENGTH) return null;
 	let parsed: URL;
@@ -225,6 +230,15 @@ export class BrowserHistoryStore {
 			);
 			this.cache.set(profileId, entries);
 		});
+	}
+
+	/** Every entry, newest first, for a linked machine copying this profile. */
+	async entries(profileId: string): Promise<BrowserHistoryEntry[]> {
+		let entries: BrowserHistoryEntry[] = [];
+		await this.enqueue(profileId, async () => {
+			entries = await this.load(profileId);
+		});
+		return entries;
 	}
 
 	async suggest(profileId: string, rawQuery: string): Promise<BrowserHistorySuggestion[]> {

@@ -16,11 +16,32 @@ const UNSAFE_RECORD_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 export type BrowserProfileId = string;
 
+export const BROWSER_PROFILE_SOURCE_BROWSER_MAX_LENGTH = 64;
+export const BROWSER_PROFILE_MACHINE_NAME_MAX_LENGTH = 128;
+const HOST_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+/**
+ * Where a profile's data came from. An import records the browser; a copy
+ * records the linked machine and the profile there, so it can be updated and
+ * so it is never shared onward (no re-sharing chains).
+ */
+export type BrowserProfileSource =
+	| { kind: "import"; browser: string }
+	| {
+		kind: "copy";
+		browser?: string;
+		hostId: string;
+		machineName: string;
+		remoteProfileId: BrowserProfileId;
+		copiedAt: string;
+	};
+
 export type BrowserProfile = {
 	id: BrowserProfileId;
 	name: string;
 	createdAt: string;
 	updatedAt: string;
+	source?: BrowserProfileSource;
 };
 
 export type BrowserProfileBinding = {
@@ -124,6 +145,49 @@ export function normalizeBrowserProfileName(value: unknown): string | null {
 		return null;
 	}
 	return name;
+}
+
+/** Display text from another machine or browser: trimmed, bounded, no control characters. */
+export function normalizeBrowserProfileLabel(value: unknown, maxLength: number): string | null {
+	if (typeof value !== "string") return null;
+	const label = value.trim();
+	if (label.length === 0 || label.length > maxLength || /[\u0000-\u001f\u007f]/u.test(label)) return null;
+	return label;
+}
+
+/** A stored or received source record, or null when it is not one. */
+export function normalizeBrowserProfileSource(value: unknown): BrowserProfileSource | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	if (record.kind === "import") {
+		const browser = normalizeBrowserProfileLabel(record.browser, BROWSER_PROFILE_SOURCE_BROWSER_MAX_LENGTH);
+		return browser ? { kind: "import", browser } : null;
+	}
+	if (record.kind !== "copy") return null;
+	const machineName = normalizeBrowserProfileLabel(record.machineName, BROWSER_PROFILE_MACHINE_NAME_MAX_LENGTH);
+	const remoteProfileId = normalizeBrowserProfileId(record.remoteProfileId);
+	const browser = record.browser === undefined
+		? undefined
+		: normalizeBrowserProfileLabel(record.browser, BROWSER_PROFILE_SOURCE_BROWSER_MAX_LENGTH);
+	if (
+		typeof record.hostId !== "string" ||
+		!HOST_ID_PATTERN.test(record.hostId) ||
+		!machineName ||
+		!remoteProfileId ||
+		browser === null ||
+		typeof record.copiedAt !== "string" ||
+		!Number.isFinite(Date.parse(record.copiedAt))
+	) {
+		return null;
+	}
+	return {
+		kind: "copy",
+		...(browser ? { browser } : {}),
+		hostId: record.hostId,
+		machineName,
+		remoteProfileId,
+		copiedAt: record.copiedAt,
+	};
 }
 
 export function isValidBrowserProfileSessionId(value: unknown): value is string {

@@ -16,6 +16,8 @@ import {
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 import { BrowserImportDialog } from "./BrowserImportDialog";
+import { BrowserOtherMachinesSection } from "./BrowserOtherMachinesSection";
+import { Switch } from "../ui/switch";
 
 type ProfileBridge = AoBridge["browserProfiles"];
 type Profile = Awaited<ReturnType<ProfileBridge["list"]>>["profiles"][number];
@@ -44,6 +46,8 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 	const [usageError, setUsageError] = useState("");
 	const [usageRevision, setUsageRevision] = useState(0);
 	const [importOpen, setImportOpen] = useState(false);
+	const [sharing, setSharing] = useState<boolean | null>(null);
+	const [sharingError, setSharingError] = useState("");
 
 	const refresh = async () => {
 		if (!bridge) return;
@@ -66,6 +70,27 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 		// the load for every i18n/theme render.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [bridge]);
+
+	useEffect(() => {
+		if (!bridge) return;
+		let cancelled = false;
+		void bridge.getSharing()
+			.then((state) => { if (!cancelled) setSharing(state.enabled); })
+			.catch(() => { if (!cancelled) setSharing(false); });
+		return () => { cancelled = true; };
+	}, [bridge]);
+
+	const toggleSharing = async (enabled: boolean) => {
+		if (!bridge) return;
+		setSharingError("");
+		try {
+			const state = await bridge.setSharing(enabled);
+			setSharing(state.enabled);
+			if (state.error) setSharingError(t("settings.browserProfiles.sharing.saveFailed"));
+		} catch {
+			setSharingError(t("settings.browserProfiles.sharing.saveFailed"));
+		}
+	};
 
 	useEffect(() => {
 		if (!bridge || pendingAction?.kind !== "delete" || actionBusy) return;
@@ -188,6 +213,19 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 					</Button>
 				</SettingsRow>
 				<SettingsRow
+					label={t("settings.browserProfiles.sharing.label")}
+					description={sharingError
+						? <span className="text-error" role="alert">{sharingError}</span>
+						: t("settings.browserProfiles.sharing.description")}
+				>
+					<Switch
+						aria-label={t("settings.browserProfiles.sharing.label")}
+						checked={sharing === true}
+						disabled={!bridge || sharing === null}
+						onCheckedChange={(checked) => void toggleSharing(checked)}
+					/>
+				</SettingsRow>
+				<SettingsRow
 					label={t("settings.browserProfiles.create")}
 					description={t("settings.browserProfiles.description")}
 				>
@@ -244,6 +282,12 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 					))
 				)}
 			</SettingsSection>
+			<BrowserOtherMachinesSection
+				bridge={bridge}
+				localProfiles={profiles}
+				onChanged={() => void refresh()}
+				onRemove={(profile) => requestAction("delete", profile)}
+			/>
 			<ConfirmDialog
 				open={pendingAction !== null}
 				onOpenChange={(open) => {

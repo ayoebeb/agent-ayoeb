@@ -4315,6 +4315,40 @@ export interface paths {
         patch: operations["updateVersionRefresh"];
         trace?: never;
     };
+    "/api/v1/shared-browser-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the browser profiles this machine shares with its linked machines */
+        get: operations["listSharedBrowserProfiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shared-browser-profiles/{profileId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one page of a shared browser profile's cookies and history for a linked machine */
+        get: operations["exportSharedBrowserProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/shell-terminals": {
         parameters: {
             query?: never;
@@ -7687,6 +7721,40 @@ export interface components {
             trackerIntakeEnabled: boolean;
             /** @description After a harness update, idle open sessions restart on the new release instead of running the old one until they happen to restart. */
             versionRefresh: boolean;
+        };
+        SharedBrowserCookie: {
+            domain: string;
+            expirationDate?: null | number;
+            hostOnly: boolean;
+            httpOnly: boolean;
+            name: string;
+            path: string;
+            sameSite?: string;
+            secure: boolean;
+            value: string;
+        };
+        SharedBrowserHistoryEntry: {
+            lastVisited: string;
+            title?: string;
+            url: string;
+            visitCount: number;
+        };
+        SharedBrowserProfile: {
+            cookieCount: number;
+            historyCount: number;
+            id: string;
+            name: string;
+            sourceBrowser?: string;
+            updatedAt: string;
+        };
+        SharedBrowserProfileExportResponse: {
+            cookies: components["schemas"]["SharedBrowserCookie"][];
+            history: components["schemas"]["SharedBrowserHistoryEntry"][];
+            nextCursor?: string;
+            profile: components["schemas"]["SharedBrowserProfile"];
+        };
+        SharedBrowserProfilesResponse: {
+            profiles: components["schemas"]["SharedBrowserProfile"][];
         };
         ShellTerminalEnvelope: {
             shellTerminal: components["schemas"]["ShellTerminalResponse"];
@@ -24603,6 +24671,160 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listSharedBrowserProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedBrowserProfilesResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    exportSharedBrowserProfile: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from the previous page's nextCursor; omit for the first page. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Browser profile identifier on this machine. */
+                profileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedBrowserProfileExportResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Gateway Timeout */
+            504: {
                 headers: {
                     [name: string]: unknown;
                 };

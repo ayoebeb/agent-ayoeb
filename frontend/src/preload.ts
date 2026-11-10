@@ -104,6 +104,11 @@ import type {
 	BrowserImportResult,
 } from "./shared/browser-profile-import";
 import type {
+	BrowserProfileCopyResult,
+	BrowserProfileSharingState,
+	OtherMachinesResult,
+} from "./shared/browser-profile-share";
+import type {
 	BrowserDownloadActionInput,
 	BrowserDownloadsState,
 } from "./shared/browser-downloads";
@@ -778,6 +783,14 @@ const api = {
 				: ipcRenderer.invoke("browserProfiles:import:discover", input)) as Promise<BrowserImportDiscovery>,
 		import: (input: BrowserImportRequest) =>
 			ipcRenderer.invoke("browserProfiles:import:start", input) as Promise<BrowserImportResult>,
+		getSharing: () => ipcRenderer.invoke("browserProfiles:sharing:get") as Promise<BrowserProfileSharingState>,
+		setSharing: (enabled: boolean) =>
+			ipcRenderer.invoke("browserProfiles:sharing:set", { enabled }) as Promise<BrowserProfileSharingState>,
+		listOtherMachines: () => ipcRenderer.invoke("browserProfiles:machines:list") as Promise<OtherMachinesResult>,
+		copyFromMachine: (input: { hostId: string; profileId: string; name?: string }) =>
+			ipcRenderer.invoke("browserProfiles:machines:copy", input) as Promise<BrowserProfileCopyResult>,
+		updateCopy: (id: string) =>
+			ipcRenderer.invoke("browserProfiles:machines:update", { id }) as Promise<BrowserProfileCopyResult>,
 		onImportProgress: (listener: (progress: BrowserImportProgress) => void) => {
 			const wrapped = (_event: Electron.IpcRendererEvent, progress: BrowserImportProgress) => listener(progress);
 			ipcRenderer.on("browserProfiles:import:progress", wrapped);

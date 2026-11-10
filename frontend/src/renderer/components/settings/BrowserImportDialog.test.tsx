@@ -75,6 +75,11 @@ describe("BrowserImportDialog", () => {
 				}],
 			})),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		aoBridge.browserProfiles = bridge;
 		const onImported = vi.fn();
@@ -135,6 +140,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources,
 			import: vi.fn(),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
@@ -163,6 +173,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources,
 			import: vi.fn(),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
@@ -189,6 +204,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [source, firefoxSource] })),
 			import: vi.fn(async () => { throw new Error("Firefox cookie data is unavailable."); }),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		aoBridge.browserProfiles = bridge;
 		const onImported = vi.fn();
@@ -215,6 +235,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [source] })),
 			import: vi.fn(async () => ({ sourceName: source.name, entries: [] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Google Chrome");
@@ -234,6 +259,11 @@ describe("BrowserImportDialog", () => {
 				warnings: [{ code: "expired-cookies-skipped" as const, count: 1 }],
 			}] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Safari");
@@ -260,6 +290,11 @@ describe("BrowserImportDialog", () => {
 				importedCookies: 0, importedHistoryEntries: 1, skippedCookies: 0, warnings: [],
 			}] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Safari");
@@ -286,6 +321,11 @@ describe("BrowserImportDialog", () => {
 				importedCookies: imported, importedHistoryEntries: 0, skippedCookies: failure ? 6 : 5, warnings,
 			}] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Google Chrome");
@@ -313,6 +353,11 @@ describe("BrowserImportDialog", () => {
 				warnings: [{ code: "history-limit-truncated" as const, count: 27650 }],
 			}] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Google Chrome");
@@ -343,6 +388,11 @@ describe("BrowserImportDialog", () => {
 				importedCookies: 12, importedHistoryEntries: 0, skippedCookies: 0, warnings: [],
 			}] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Google Chrome");
@@ -362,6 +412,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources: discover,
 			import: vi.fn(async () => { throw new Error("Import failed; please retry."); }),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Google Chrome");
@@ -396,6 +451,11 @@ describe("BrowserImportDialog", () => {
 				throw new Error(`Error invoking remote method 'browserProfiles:import:start': Error: ${message}`);
 			}),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		aoBridge.browserProfiles = bridge;
 
@@ -423,6 +483,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [source] })),
 			import: vi.fn(async () => { throw new Error(message); }),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		render(<BrowserImportDialog onImported={() => undefined} onOpenChange={() => undefined} open />);
 		await screen.findByText("Google Chrome");
@@ -465,6 +530,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [safariSource] })),
 			import: vi.fn(async () => { throw new Error(message); }),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		aoBridge.browserProfiles = bridge;
 
@@ -504,6 +574,11 @@ describe("BrowserImportDialog", () => {
 			discoverImportSources: vi.fn(async () => { throw new Error("Browser discovery failed."); }),
 			import: vi.fn(),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		aoBridge.browserProfiles = bridge;
 

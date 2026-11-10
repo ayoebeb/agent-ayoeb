@@ -2788,6 +2788,66 @@ type LinkPreviewResponse struct {
 	FaviconURL  string `json:"faviconUrl,omitempty"`
 }
 
+// SharedBrowserProfileIDParam names one of this machine's shared browser profiles.
+type SharedBrowserProfileIDParam struct {
+	ProfileID string `path:"profileId" description:"Browser profile identifier on this machine."`
+}
+
+// SharedBrowserProfileExportQuery selects one page of a profile export.
+type SharedBrowserProfileExportQuery struct {
+	Cursor string `query:"cursor,omitempty" description:"Opaque cursor from the previous page's nextCursor; omit for the first page."`
+}
+
+// SharedBrowserProfile describes one browser profile this machine shares with
+// the machines linked to it. It carries counts only, never cookie values.
+type SharedBrowserProfile struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// SourceBrowser is the browser the profile was imported from, when known.
+	SourceBrowser string `json:"sourceBrowser,omitempty"`
+	CookieCount   int    `json:"cookieCount"`
+	HistoryCount  int    `json:"historyCount"`
+	UpdatedAt     string `json:"updatedAt"`
+}
+
+// SharedBrowserProfilesResponse is the body of GET /api/v1/shared-browser-profiles.
+type SharedBrowserProfilesResponse struct {
+	Profiles []SharedBrowserProfile `json:"profiles"`
+}
+
+// SharedBrowserCookie is one cookie of a shared profile, in the desktop
+// browser's own form. Only a linked machine copying the profile receives it.
+type SharedBrowserCookie struct {
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Domain   string `json:"domain"`
+	HostOnly bool   `json:"hostOnly"`
+	Path     string `json:"path"`
+	Secure   bool   `json:"secure"`
+	HTTPOnly bool   `json:"httpOnly"`
+	SameSite string `json:"sameSite,omitempty"`
+	// ExpirationDate is seconds since the epoch; absent for a session cookie.
+	ExpirationDate *float64 `json:"expirationDate,omitempty"`
+}
+
+// SharedBrowserHistoryEntry is one visited page of a shared profile.
+type SharedBrowserHistoryEntry struct {
+	URL         string `json:"url"`
+	Title       string `json:"title,omitempty"`
+	LastVisited string `json:"lastVisited"`
+	VisitCount  int    `json:"visitCount"`
+}
+
+// SharedBrowserProfileExportResponse is one page of
+// GET /api/v1/shared-browser-profiles/{profileId}/export. A page fits the
+// desktop bridge's frame limit; NextCursor is empty on the last page.
+type SharedBrowserProfileExportResponse struct {
+	Profile    SharedBrowserProfile        `json:"profile"`
+	Cookies    []SharedBrowserCookie       `json:"cookies"`
+	History    []SharedBrowserHistoryEntry `json:"history"`
+	NextCursor string                      `json:"nextCursor,omitempty"`
+}
+
 // MobileStatusResponse is the body of the Connect Mobile status/enable/disable/
 // regenerate endpoints. Password is populated only transiently, on enable and
 // regenerate responses (empty otherwise) — it is never persisted in plaintext.

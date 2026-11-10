@@ -655,6 +655,14 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersMobileDevicesResponse":         "MobileDevicesResponse",
 	"ControllersInstallIDParam":                "InstallIDParam",
 	"ControllersPushPairingIDParam":            "PushPairingIDParam",
+	// httpd/controllers: browser profiles shared with linked machines
+	"ControllersSharedBrowserProfileIDParam":        "SharedBrowserProfileIDParam",
+	"ControllersSharedBrowserProfileExportQuery":    "SharedBrowserProfileExportQuery",
+	"ControllersSharedBrowserProfile":               "SharedBrowserProfile",
+	"ControllersSharedBrowserProfilesResponse":      "SharedBrowserProfilesResponse",
+	"ControllersSharedBrowserCookie":                "SharedBrowserCookie",
+	"ControllersSharedBrowserHistoryEntry":          "SharedBrowserHistoryEntry",
+	"ControllersSharedBrowserProfileExportResponse": "SharedBrowserProfileExportResponse",
 	// devimport report
 	"DevimportReport":   "DevImportProjectsReport",
 	"DevimportConflict": "DevImportProjectsConflict",
@@ -802,7 +810,40 @@ func operations() []operation {
 	ops = append(ops, endpointsOperations()...)
 	ops = append(ops, telemetryIdentityOperations()...)
 	ops = append(ops, linkPreviewOperations()...)
+	ops = append(ops, sharedBrowserProfileOperations()...)
 	return ops
+}
+
+// sharedBrowserProfileOperations declares the browser profiles this machine
+// shares with its linked machines. They answer 403 REMOTE_LINK_REQUIRED on the
+// unauthenticated loopback listener: only a bearer-authenticated request on the
+// remote listener reaches them. Must stay 1:1 with the routes
+// SharedBrowserProfilesController.Register mounts (enforced by the parity test).
+func sharedBrowserProfileOperations() []operation {
+	failures := []respUnit{
+		{http.StatusForbidden, envelope.APIError{}},
+		{http.StatusNotImplemented, envelope.APIError{}},
+		{http.StatusBadGateway, envelope.APIError{}},
+		{http.StatusServiceUnavailable, envelope.APIError{}},
+		{http.StatusGatewayTimeout, envelope.APIError{}},
+	}
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/shared-browser-profiles", id: "listSharedBrowserProfiles", tag: "browser",
+			summary: "List the browser profiles this machine shares with its linked machines",
+			resps:   append([]respUnit{{http.StatusOK, controllers.SharedBrowserProfilesResponse{}}}, failures...),
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/shared-browser-profiles/{profileId}/export", id: "exportSharedBrowserProfile", tag: "browser",
+			summary:    "Read one page of a shared browser profile's cookies and history for a linked machine",
+			pathParams: []any{controllers.SharedBrowserProfileIDParam{}, controllers.SharedBrowserProfileExportQuery{}},
+			resps: append([]respUnit{
+				{http.StatusOK, controllers.SharedBrowserProfileExportResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+			}, failures...),
+		},
+	}
 }
 
 func automationOperations() []operation {

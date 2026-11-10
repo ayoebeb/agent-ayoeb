@@ -76,6 +76,7 @@ type APIDeps struct {
 	BrowserLive              *BrowserLiveHub
 	Browser                  controllers.BrowserService
 	BrowserChrome            controllers.BrowserChromeService
+	SharedBrowserProfiles    controllers.SharedBrowserProfileSource
 	PreviewServer            controllers.ManagedPreviewServer
 	SessionCapabilities      controllers.SessionCapabilityValidator
 	ShellPreviewCapabilities controllers.ShellPreviewCapabilityValidator
@@ -160,6 +161,7 @@ type API struct {
 	settings      *controllers.SettingsController
 	dev           *controllers.DevController
 	browser       *controllers.BrowserController
+	sharedBrowser *controllers.SharedBrowserProfilesController
 	system        *controllers.SystemController
 	identity      *controllers.IdentityController
 	endpoints     *controllers.EndpointsController
@@ -226,6 +228,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		settings:      &controllers.SettingsController{Svc: deps.Settings},
 		dev:           &controllers.DevController{Import: deps.DevImport},
 		browser:       &controllers.BrowserController{Svc: deps.Browser, Chrome: deps.BrowserChrome},
+		sharedBrowser: &controllers.SharedBrowserProfilesController{Source: deps.SharedBrowserProfiles},
 		system:        &controllers.SystemController{Checks: deps.SystemChecks},
 		identity:      &controllers.IdentityController{HostID: deps.HostID},
 		endpoints:     &controllers.EndpointsController{Source: deps.Endpoints},
@@ -356,6 +359,10 @@ func (a *API) Register(root chi.Router) {
 			a.settings.Register(r)
 			a.dev.Register(r)
 			a.browser.Register(r)
+			r.Group(func(r chi.Router) {
+				r.Use(remoteLinkOnly)
+				a.sharedBrowser.Register(r)
+			})
 			a.system.Register(r)
 			a.identity.Register(r)
 			a.endpoints.Register(r)

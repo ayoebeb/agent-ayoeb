@@ -13083,6 +13083,121 @@ paths:
       summary: Choose whether idle open sessions move to newly installed harness releases
       tags:
       - settings
+  /api/v1/shared-browser-profiles:
+    get:
+      operationId: listSharedBrowserProfiles
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedBrowserProfilesResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+        "504":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Gateway Timeout
+      summary: List the browser profiles this machine shares with its linked machines
+      tags:
+      - browser
+  /api/v1/shared-browser-profiles/{profileId}/export:
+    get:
+      operationId: exportSharedBrowserProfile
+      parameters:
+      - description: Browser profile identifier on this machine.
+        in: path
+        name: profileId
+        required: true
+        schema:
+          description: Browser profile identifier on this machine.
+          type: string
+      - description: Opaque cursor from the previous page's nextCursor; omit for the
+          first page.
+        in: query
+        name: cursor
+        schema:
+          description: Opaque cursor from the previous page's nextCursor; omit for
+            the first page.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedBrowserProfileExportResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+        "504":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Gateway Timeout
+      summary: Read one page of a shared browser profile's cookies and history for
+        a linked machine
+      tags:
+      - browser
   /api/v1/shell-terminals:
     get:
       operationId: listShellTerminals
@@ -21780,6 +21895,101 @@ components:
       - cloudEnabled
       - cloudControlPlaneUrl
       - trackerIntakeEnabled
+      type: object
+    SharedBrowserCookie:
+      properties:
+        domain:
+          type: string
+        expirationDate:
+          type:
+          - "null"
+          - number
+        hostOnly:
+          type: boolean
+        httpOnly:
+          type: boolean
+        name:
+          type: string
+        path:
+          type: string
+        sameSite:
+          type: string
+        secure:
+          type: boolean
+        value:
+          type: string
+      required:
+      - name
+      - value
+      - domain
+      - hostOnly
+      - path
+      - secure
+      - httpOnly
+      type: object
+    SharedBrowserHistoryEntry:
+      properties:
+        lastVisited:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+        visitCount:
+          type: integer
+      required:
+      - url
+      - lastVisited
+      - visitCount
+      type: object
+    SharedBrowserProfile:
+      properties:
+        cookieCount:
+          type: integer
+        historyCount:
+          type: integer
+        id:
+          type: string
+        name:
+          type: string
+        sourceBrowser:
+          type: string
+        updatedAt:
+          type: string
+      required:
+      - id
+      - name
+      - cookieCount
+      - historyCount
+      - updatedAt
+      type: object
+    SharedBrowserProfileExportResponse:
+      properties:
+        cookies:
+          items:
+            $ref: '#/components/schemas/SharedBrowserCookie'
+          type: array
+        history:
+          items:
+            $ref: '#/components/schemas/SharedBrowserHistoryEntry'
+          type: array
+        nextCursor:
+          type: string
+        profile:
+          $ref: '#/components/schemas/SharedBrowserProfile'
+      required:
+      - profile
+      - cookies
+      - history
+      type: object
+    SharedBrowserProfilesResponse:
+      properties:
+        profiles:
+          items:
+            $ref: '#/components/schemas/SharedBrowserProfile'
+          type: array
+      required:
+      - profiles
       type: object
     ShellTerminalEnvelope:
       properties:

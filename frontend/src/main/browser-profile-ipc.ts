@@ -12,7 +12,14 @@ import {
 	type BrowserProfileDeleteResult,
 } from "../shared/browser-profiles";
 import type { BrowserImportRequest } from "../shared/browser-profile-import";
+import type {
+	BrowserProfileCopyResult,
+	BrowserProfileSharingState,
+	OtherMachinesResult,
+} from "../shared/browser-profile-share";
+import type { BrowserProfileCopyService } from "./browser-profile-copy";
 import type { BrowserProfileImportService } from "./browser-profile-import";
+import type { BrowserProfileSharingSetting } from "./browser-profile-share";
 import { BrowserProfileStore, BrowserProfileStoreError as StoreError } from "./browser-profile-store";
 
 export type BrowserProfileMenuItem = {
@@ -46,6 +53,10 @@ export type BrowserProfileIpcOptions = {
 	store: BrowserProfileStore;
 	host: BrowserProfileIpcHost;
 	importer: BrowserProfileImportService;
+	/** "Share my browser profiles with my linked machines" on this machine. */
+	sharing?: Pick<BrowserProfileSharingSetting, "isEnabled" | "setEnabled">;
+	/** Copies profiles that this account's other machines share. */
+	copier?: Pick<BrowserProfileCopyService, "listMachines" | "copy" | "update">;
 	buildMenu: (items: BrowserProfileMenuItem[]) => BrowserProfileMenu;
 	confirmSwitch: (labels: BrowserProfileMenuInput["labels"]) => Promise<boolean>;
 	reportSwitchFailure: (message: string, labels: BrowserProfileMenuInput["labels"]) => void;
@@ -232,6 +243,45 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 		return options.importer.import(input as BrowserImportRequest, (progress) => {
 			options.shellWebContents.send("browserProfiles:import:progress", progress);
 		});
+	});
+	handle("browserProfiles:sharing:get", async (event): Promise<BrowserProfileSharingState> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.sharing) return { enabled: false };
+		return { enabled: await options.sharing.isEnabled() };
+	});
+	handle("browserProfiles:sharing:set", async (event, input: unknown): Promise<BrowserProfileSharingState> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.sharing) {
+			return { enabled: false, error: "Browser profile sharing is unavailable." };
+		}
+		if (!isRecord(input) || typeof input.enabled !== "boolean") throw invalid("Sharing setting is invalid.");
+		try {
+			return { enabled: await options.sharing.setEnabled(input.enabled) };
+		} catch {
+			return { enabled: await options.sharing.isEnabled(), error: "Could not save the sharing setting." };
+		}
+	});
+	handle("browserProfiles:machines:list", async (event): Promise<OtherMachinesResult> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.copier) return { signedIn: false, machines: [] };
+		try {
+			return await options.copier.listMachines();
+		} catch {
+			return { signedIn: true, machines: [], error: "Could not read your other machines." };
+		}
+	});
+	handle("browserProfiles:machines:copy", async (event, input: unknown): Promise<BrowserProfileCopyResult> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.copier) {
+			return { error: "Browser profile access was denied.", code: "FAILED" };
+		}
+		if (!isRecord(input)) return { error: "That browser profile is not valid.", code: "INVALID_DATA" };
+		return options.copier.copy(input.hostId, input.profileId, input.name);
+	});
+	handle("browserProfiles:machines:update", async (event, input: unknown): Promise<BrowserProfileCopyResult> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.copier) {
+			return { error: "Browser profile access was denied.", code: "FAILED" };
+		}
+		if (!isRecord(input)) return { error: "That browser profile is not valid.", code: "INVALID_DATA" };
+		const result = await options.copier.update(input.id);
+		if (result.profile) options.host.refreshProfileState?.(result.profile.id);
+		return result;
 	});
 	handle("browser:profile:get", (event, rawViewId: unknown) => {
 		const viewId = viewIdFromInput(rawViewId);

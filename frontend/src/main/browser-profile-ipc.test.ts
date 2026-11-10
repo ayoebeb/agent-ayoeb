@@ -62,12 +62,24 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 			return { sourceName: "Chrome", entries: [] };
 		}),
 	};
+	let sharingEnabled = false;
+	const sharing = {
+		isEnabled: vi.fn(async () => sharingEnabled),
+		setEnabled: vi.fn(async (enabled: boolean) => { sharingEnabled = enabled; return enabled; }),
+	};
+	const copier = {
+		listMachines: vi.fn(async () => ({ signedIn: true, machines: [] })),
+		copy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+		update: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+	};
 	const ipc = registerBrowserProfileIpc({
 		ipcMain: ipcMain as never,
 		shellWebContents: shell as never,
 		mainWindow: {},
 		store,
 		importer: importer as never,
+		sharing,
+		copier,
 		host,
 		buildMenu: (items) => {
 			menuItems = items;
@@ -77,10 +89,29 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 		reportSwitchFailure,
 	});
 	const invoke = (channel: string, sender: object, ...args: unknown[]) => handlers.get(channel)!({ sender }, ...args);
-	return { host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, shell, state: () => state, store };
+	return { copier, host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, sharing, shell, state: () => state, store };
 }
 
 describe("browser profile IPC", () => {
+	it("serves profile sharing and other machines only to the app shell", async () => {
+		const { invoke, renderer, shell, sharing, copier } = await setup();
+		expect(await invoke("browserProfiles:sharing:get", renderer)).toEqual({ enabled: false });
+		expect(await invoke("browserProfiles:sharing:set", renderer, { enabled: true })).toMatchObject({ enabled: false });
+		expect(await invoke("browserProfiles:machines:list", renderer)).toEqual({ signedIn: false, machines: [] });
+		expect(await invoke("browserProfiles:machines:copy", renderer, { hostId: "h_a", profileId: "x" })).toMatchObject({ code: "FAILED" });
+		expect(await invoke("browserProfiles:machines:update", renderer, { id: "x" })).toMatchObject({ code: "FAILED" });
+		expect(sharing.setEnabled).not.toHaveBeenCalled();
+		expect(copier.listMachines).not.toHaveBeenCalled();
+		expect(copier.copy).not.toHaveBeenCalled();
+		expect(copier.update).not.toHaveBeenCalled();
+
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: true });
+		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true });
+		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: "yes" })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+		await invoke("browserProfiles:machines:copy", shell, { hostId: "h_a", profileId: "p", name: "Brave (from A)" });
+		expect(copier.copy).toHaveBeenCalledWith("h_a", "p", "Brave (from A)");
+	});
+
 	it("rejects untrusted profile management and invalid renderer ownership", async () => {
 		const { invoke, renderer, host } = await setup();
 

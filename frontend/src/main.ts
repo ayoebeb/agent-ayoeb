@@ -212,6 +212,8 @@ import { registerAgentLoginIpc } from "./main/agent-login-ipc";
 import { registerChatImageIpc } from "./main/chat-image-ipc";
 import { pruneCloudArtifactFolders, registerCloudArtifactIpc } from "./main/cloud-artifact-ipc";
 import { BrowserProfileImportService } from "./main/browser-profile-import";
+import { BrowserProfileShareSource, BrowserProfileSharingSetting } from "./main/browser-profile-share";
+import { BrowserProfileCopyService, LinkedMachinesSignedOutError, type LinkedMachine } from "./main/browser-profile-copy";
 import {
 	registerBrowserProfileIpc,
 	type BrowserProfileIpc,
@@ -257,8 +259,8 @@ import { buildLinuxAppMenuTemplate, buildMacAppMenuTemplate, buildWindowsAppMenu
 import { ancestorRepositorySetupWarning, resolveCheckedOutBranch, scanImportFolder } from "./main/import-folder-scan";
 import { parseOpenFolderPathArg } from "./main/open-folder-arg";
 import { registerRemotesIpc, remotesFilePath } from "./main/remotes-main";
-import { sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
-import { createLocalHostIdentity } from "./main/remote-request";
+import { readRemotes, sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
+import { createLocalHostIdentity, readRemoteIdentity } from "./main/remote-request";
 import { RemoteRegistry } from "./main/remote-registry";
 import { startRemoteProxy } from "./main/remote-proxy";
 import { captureMainError, reportDaemonFailure, ExpectedIpcError, installIpcErrorCapture, setMainErrorSink } from "./main/main-error-capture";
@@ -435,6 +437,8 @@ let daemonOutput = "";
 let browserViewHost: BrowserViewHost | null = null;
 let browserProfileIpc: BrowserProfileIpc | null = null;
 let browserProfileImporter: BrowserProfileImportService | null = null;
+// Answers this daemon's __browser-profile-share-* actions for linked machines.
+let browserProfileShareSource: BrowserProfileShareSource | null = null;
 let windowComposition: WindowComposition | null = null;
 const browserCleanupPromises = new Set<Promise<void>>();
 let browserQuitCleanupPromise: Promise<void> | null = null;
@@ -889,6 +893,7 @@ async function disposeBrowserViewHost(): Promise<void> {
 	profileIpc?.dispose();
 	const profileImporter = browserProfileImporter;
 	browserProfileImporter = null;
+	browserProfileShareSource = null;
 	if (!host && !profileImporter) return;
 	const cleanup = Promise.resolve()
 		.then(async () => {
@@ -958,6 +963,13 @@ async function createWindowInternal(): Promise<void> {
 		fromPartition: (partition) => session.fromPartition(partition),
 	});
 	await profileImporter.initialize();
+	const browserProfileSharing = new BrowserProfileSharingSetting(browserProfileStateDir());
+	const profileShareSource = new BrowserProfileShareSource({
+		store: browserProfileStore,
+		history: browserHistoryStore,
+		sharing: browserProfileSharing,
+		cookies: (profileId) => session.fromPartition(browserProfilePartition(profileId)).cookies.get({}),
+	});
 	const windowOptions: Electron.BaseWindowConstructorOptions = {
 		width: 1320,
 		height: 860,
@@ -1212,12 +1224,27 @@ async function createWindowInternal(): Promise<void> {
 		onNativeViewAdded: () => windowComposition?.restackShell(),
 	});
 	browserProfileImporter = profileImporter;
+	browserProfileShareSource = profileShareSource;
+	const profileHost = browserViewHost;
+	const profileCopier = new BrowserProfileCopyService({
+		store: browserProfileStore,
+		history: browserHistoryStore,
+		linkedMachines: linkedMachinesForBrowserProfiles,
+		identity: (url, signal) => readRemoteIdentity({ url }, fetch, signal),
+		localHostId: localHostIdentity,
+		setCookie: (partition, details) => session.fromPartition(partition).cookies.set(details),
+		flushCookies: (partition) => session.fromPartition(partition).cookies.flushStore(),
+		clearProfileData: (profileId) => profileHost.clearProfileData(profileId),
+		isProfileLive: (profileId) => profileHost.isProfileLive(profileId),
+	});
 	browserProfileIpc = registerBrowserProfileIpc({
 		ipcMain,
 		shellWebContents,
 		mainWindow,
 		store: browserProfileStore,
 		importer: profileImporter,
+		sharing: browserProfileSharing,
+		copier: profileCopier,
 		host: browserViewHost,
 		buildMenu: (items: BrowserProfileMenuItem[]) => {
 			const menu = Menu.buildFromTemplate(items as Electron.MenuItemConstructorOptions[]);
@@ -1900,6 +1927,17 @@ function establishBrowserRuntimeLink(): void {
 			}
 			if (command.action === "__render-measure") {
 				return measureRender({ BrowserWindow }, command.args ?? {}, signal);
+			}
+			// The daemon sends these only for a linked machine's bearer-authenticated
+			// remote request; the share source still checks the opt-in itself.
+			if (command.action === "__browser-profile-share-list" || command.action === "__browser-profile-share-export") {
+				const shareSource = browserProfileShareSource;
+				if (!shareSource) {
+					throw Object.assign(new Error("Browser profiles are unavailable"), { code: "BROWSER_TARGET_UNAVAILABLE" });
+				}
+				return command.action === "__browser-profile-share-list"
+					? shareSource.list()
+					: shareSource.exportPage(command.args ?? {});
 			}
 			const host = browserViewHost;
 			if (!host) {
@@ -3409,6 +3447,25 @@ setPasswordCipher(() => protectedStorageAvailable() ? {
 void app.whenReady().then(() => sealSavedPasswords(remotesFilePath())).catch((error: unknown) => {
 	console.warn("[remotes] could not encrypt saved host passwords", error);
 });
+// The machine this desktop's daemon answers as; a remote that answers with it is this one.
+const localHostIdentity = createLocalHostIdentity(() => daemonStatus.state === "ready" && daemonStatus.port
+	? { port: daemonStatus.port, pid: daemonStatus.pid, generation: daemonAttachmentGeneration }
+	: null);
+
+/**
+ * The signed-in account's paired machines, as Remote hosts lists them, with
+ * the saved credential. Main-only: the credential never reaches the renderer.
+ */
+async function linkedMachinesForBrowserProfiles(): Promise<LinkedMachine[]> {
+	const account = (await getCloudSession(cloudDataDir()))?.user.id;
+	if (!account) throw new LinkedMachinesSignedOutError();
+	const local = await localHostIdentity();
+	return (await readRemotes(remotesFilePath()))
+		.filter((entry) => entry.hostId && entry.password && entry.hostId !== local
+			&& (!entry.accountUserId || entry.accountUserId === account))
+		.map((entry) => ({ hostId: entry.hostId!, name: entry.label, url: entry.url, credential: entry.password }));
+}
+
 registerRemotesIpc(ipcMain, {
 	file: remotesFilePath(),
 	registry: remoteRegistry,
@@ -3424,9 +3481,7 @@ registerRemotesIpc(ipcMain, {
 			...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
 		}, { hostTokens: true, signal });
 	},
-	localIdentity: createLocalHostIdentity(() => daemonStatus.state === "ready" && daemonStatus.port
-		? { port: daemonStatus.port, pid: daemonStatus.pid, generation: daemonAttachmentGeneration }
-		: null),
+	localIdentity: localHostIdentity,
 });
 
 ipcMain.handle("app:chooseDirectory", async (_event, input?: string | { title?: string; defaultPath?: string }) => {
