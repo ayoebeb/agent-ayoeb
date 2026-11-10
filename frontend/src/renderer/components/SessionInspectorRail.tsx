@@ -21,7 +21,12 @@ export type InspectorSizing = {
 	storageKey: string;
 };
 
-export function inspectorSizing(view: InspectorView): InspectorSizing {
+/**
+ * `widthScope` keeps a session's own rail width (its Summary, Files and
+ * Artifacts views) instead of the width shared by every other session. The
+ * Browser canvas width stays shared either way.
+ */
+export function inspectorSizing(view: InspectorView, widthScope?: string): InspectorSizing {
 	if (view === "browser") return {
 		chatMinWidth: 440,
 		defaultWidth: 900,
@@ -36,7 +41,7 @@ export function inspectorSizing(view: InspectorView): InspectorSizing {
 		minWidth: view === "files" ? 460 : 340,
 		maxPercent: 55,
 		mode: view === "files" ? "files" : "utility",
-		storageKey: "ao.inspector.widthPx",
+		storageKey: widthScope ? `ao.inspector.widthPx:${widthScope}` : "ao.inspector.widthPx",
 	};
 }
 

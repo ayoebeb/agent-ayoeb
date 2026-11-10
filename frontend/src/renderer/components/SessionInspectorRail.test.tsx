@@ -5,6 +5,15 @@ import { INSPECTOR_SPRING_MS, SessionInspectorRail, inspectorSizing } from "./Se
 
 vi.mock("motion/react", () => ({ useReducedMotion: () => false }));
 
+describe("inspectorSizing width scope", () => {
+	it("keeps a scoped session's own rail width and the shared Browser width", () => {
+		expect(inspectorSizing("files").storageKey).toBe("ao.inspector.widthPx");
+		expect(inspectorSizing("files", "orch").storageKey).toBe("ao.inspector.widthPx:orch");
+		expect(inspectorSizing("summary", "orch").storageKey).toBe("ao.inspector.widthPx:orch");
+		expect(inspectorSizing("browser", "orch").storageKey).toBe(inspectorSizing("browser").storageKey);
+	});
+});
+
 describe("SessionInspectorRail session navigation", () => {
 	const splitRef = createRef<HTMLDivElement>();
 	const rail = (sessionKey: string, isOpen: boolean) => <SessionInspectorRail

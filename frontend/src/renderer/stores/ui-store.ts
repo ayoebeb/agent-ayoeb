@@ -113,6 +113,8 @@ export type InspectorSessionState = {
 	fileDisplayModes?: Record<string, RememberedFileDisplayMode>;
 	/** The session-entry defaulting (Summary tab, baseline browser reveal) has already run once for this session's lifetime. */
 	initialized?: boolean;
+	/** Whether Files was left open is kept across restarts (orchestrators opt in at initialization). */
+	remembersFilesSidebar?: boolean;
 };
 
 export type FileDisplayMode = "diff" | "file" | "rendered";
@@ -292,9 +294,10 @@ export type UiState = {
 	 * reveal — exactly once per session's lifetime. Backed by persisted store
 	 * state (not a component-local ref) so it stays a no-op across unmount and
 	 * remount of the session view, not just across re-renders of one mounted
-	 * instance.
+	 * instance. With `remembersFilesSidebar`, a Files sidebar the user left open
+	 * (in an earlier run too) reopens instead of Summary.
 	 */
-	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean) => void;
+	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean, remembersFilesSidebar?: boolean) => void;
 	setBrowserContentRevealed: (sessionId: string, revealed: boolean) => void;
 	setBrowserUnseen: (sessionId: string, unseen: boolean) => void;
 	setFilesChangedOnly: (sessionId: string, changedOnly: boolean) => void;
@@ -349,6 +352,10 @@ const navigationGesturesStorageKey = "ao.navigationGestures";
 const renderMathStorageKey = "ao.renderMath";
 const projectAvatarsStorageKey = "ao.projectAvatars";
 const newSidebarDesignStorageKey = "ao.newSidebarDesign";
+/** "open" while a session that remembers its Files sidebar last left it open; absent otherwise. */
+export function filesSidebarStorageKey(sessionId: string): string {
+	return `ao.inspector.filesOpen:${sessionId}`;
+}
 function getLocalStorage() {
 	if (typeof window === "undefined" || !window.localStorage) return null;
 	return window.localStorage;
@@ -653,7 +660,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 				},
 			};
 		}),
-	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector) =>
+	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, remembersFilesSidebar = false) =>
 		set((state) => {
 			// Sessions without an inspector (e.g. orchestrator sessions) must not
 			// gain a store entry at all — leave inspectorSessions[sessionId]
@@ -661,13 +668,16 @@ export const useUiStore = create<UiState>((set, get) => ({
 			if (!hasInspector) return state;
 			const current = inspectorState(state.inspectorSessions, sessionId);
 			if (current.initialized) return state;
+			const reopenFiles = remembersFilesSidebar && getLocalStorage()?.getItem(filesSidebarStorageKey(sessionId)) === "open";
 			return {
 				inspectorSessions: {
 					...state.inspectorSessions,
 					[sessionId]: {
 						...current,
 						initialized: true,
-						view: "summary",
+						view: reopenFiles ? "files" : "summary",
+						...(reopenFiles ? { isOpen: true, filesChangedOnly: false } : {}),
+						...(remembersFilesSidebar ? { remembersFilesSidebar: true } : {}),
 						browserContentRevealed: current.browserContentRevealed ?? hasBrowserContent,
 					},
 				},
@@ -932,6 +942,25 @@ function syncLegacyStatusColors(state: UiState) {
 }
 syncLegacyStatusColors(useUiStore.getState());
 useUiStore.subscribe(syncLegacyStatusColors);
+
+// Sessions that remember their Files sidebar keep "open" stored only while
+// the inspector is open on Files; closing it or picking another tab clears it.
+function rememberFilesSidebars(state: UiState, previous: UiState) {
+	if (state.inspectorSessions === previous.inspectorSessions) return;
+	const storage = getLocalStorage();
+	if (!storage) return;
+	for (const [sessionId, session] of Object.entries(state.inspectorSessions)) {
+		const before = previous.inspectorSessions[sessionId];
+		if (!session.remembersFilesSidebar || (before?.remembersFilesSidebar && before.isOpen === session.isOpen && before.view === session.view)) continue;
+		try {
+			if (session.isOpen && session.view === "files") storage.setItem(filesSidebarStorageKey(sessionId), "open");
+			else storage.removeItem(filesSidebarStorageKey(sessionId));
+		} catch {
+			// Storage can be full or blocked; the sidebar then simply starts closed.
+		}
+	}
+}
+useUiStore.subscribe(rememberFilesSidebars);
 
 // Hydration synchronizes legacy renderer-only Developer Mode state into the
 // main-process updater mirror. Until this completes, the updater is fail-closed.
