@@ -239,11 +239,12 @@ function MachineRows({
 			/>
 			{machine.profiles.map((profile) => (
 				<SettingsRow
-					className="ps-10"
 					description={details(profile)}
 					icon={UserRound}
 					key={profile.id}
 					label={profile.name}
+					// Indented under its machine: a child row, not a sibling.
+					leading={<span aria-hidden="true" className="w-5" />}
 				>
 					{profile.localCopy ? (
 						<div className="flex items-center gap-1">
