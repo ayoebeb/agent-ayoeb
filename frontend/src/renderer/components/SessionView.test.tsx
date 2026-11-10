@@ -5848,15 +5848,21 @@ describe("SessionView", () => {
 		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.remembersFilesSidebar).toBeUndefined();
 	});
 
-	it("keeps an orchestrator's own rail width apart from the workers' width", () => {
+	it("opens an orchestrator's Files as a narrow explorer, apart from the workers' width", () => {
 		window.localStorage.setItem("ao.inspector.widthPx", "520");
-		window.localStorage.setItem("ao.inspector.widthPx:sess-orch", "640");
 		const { rerender } = render(<SessionView sessionId="sess-orch" />);
 		openOrchestratorFiles();
-		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("640px");
+		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("300px");
 
 		rerender(<SessionView sessionId="sess-1" />);
 		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("520px");
+	});
+
+	it("restores the Files width an orchestrator was resized to", () => {
+		window.localStorage.setItem("ao.inspector.filesWidthPx:sess-orch", "360");
+		render(<SessionView sessionId="sess-orch" />);
+		openOrchestratorFiles();
+		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("360px");
 	});
 
 	it("reopens an orchestrator's Files sidebar it left open, until it is closed", () => {
