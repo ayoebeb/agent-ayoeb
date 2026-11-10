@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { isLinuxPlatform, isMacPlatform } from "../lib/platform";
 import { cn } from "../lib/utils";
 import { NotificationCenter } from "./NotificationCenter";
+import { useSessionPaneChrome } from "./session-pane-context";
 import { sidebarOccupiesLayout, useUiStore } from "../stores/ui-store";
 
 /**
@@ -171,6 +172,9 @@ export function SessionTabsTopbar({
 	/** Native fullscreen hides the panel-owned controls outside this subtree. */
 	fullscreen?: boolean;
 }) {
+	// One pane of sessions side by side: this bar is the pane's header, so it
+	// leads with the pane's status and project and ends with its close button.
+	const paneChrome = useSessionPaneChrome();
 	return (
 		<PageTopbarFrame className={cn("items-stretch bg-sidebar", className)}>
 			<div className="session-topbar-surface flex min-w-0 flex-1" data-testid="session-workspace-topbar">
@@ -180,6 +184,7 @@ export function SessionTabsTopbar({
 					ref={clearanceRef}
 					style={{ width: regionWidth }}
 				>
+					{paneChrome?.leading}
 					{tabs}
 					{tabsTrailing ? (
 						<div className="workspace-topbar-actions shrink-0 pl-(--gap-topbar-control)" data-testid="session-tab-strip-action">
@@ -194,7 +199,12 @@ export function SessionTabsTopbar({
 						data-fullscreen={fullscreen || undefined}
 					>
 						{hideActions ? null : actions}
+						{fullscreen ? null : paneChrome?.trailing}
 						{fullscreen ? <NotificationCenter style={noDragStyle} /> : null}
+					</div>
+				) : paneChrome?.trailing ? (
+					<div className="session-topbar-actions ml-auto flex shrink-0 items-center" data-testid="session-action-region">
+						{paneChrome.trailing}
 					</div>
 				) : null}
 			</div>

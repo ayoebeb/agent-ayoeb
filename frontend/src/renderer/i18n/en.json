@@ -4301,5 +4301,22 @@
 	"chat.find.nextFailed": "Could not load the next matches.",
 	"chat.find.wrappedFirst": "Wrapped to the first match.",
 	"chat.find.wrappedLast": "Wrapped to the last match.",
-	"chat.find.notRevealed": "This match could not be revealed. Retry the search."
+	"chat.find.notRevealed": "This match could not be revealed. Retry the search.",
+	"sessionSplit.open": "Open side by side",
+	"sessionSplit.openOrchestrators": "Open orchestrators side by side",
+	"sessionSplit.openOrchestratorsShort": "Open orchestrators",
+	"sessionSplit.sessionsSelected_one": "{{count}} session selected",
+	"sessionSplit.sessionsSelected_other": "{{count}} sessions selected",
+	"sessionSplit.projectsSelected_one": "{{count}} project selected",
+	"sessionSplit.projectsSelected_other": "{{count}} projects selected",
+	"sessionSplit.clearSelection": "Clear selection",
+	"sessionSplit.tooMany": "Up to {{count}} can be shown side by side",
+	"sessionSplit.noOrchestrators": "None of these projects has an orchestrator running",
+	"sessionSplit.nothingToShow": "None of these sessions is still running",
+	"sessionSplit.pane": "Pane",
+	"sessionSplit.close": "Close pane",
+	"sessionSplit.closePane": "Close {{name}}",
+	"sessionSplit.ended": "This session has ended.",
+	"sessionSplit.missing": "This session is no longer available.",
+	"sessionSplit.noOrchestrator": "No orchestrator running"
 }

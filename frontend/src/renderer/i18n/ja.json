@@ -4320,5 +4320,22 @@
 	"chat.find.nextFailed": "次の一致箇所を読み込めませんでした。",
 	"chat.find.wrappedFirst": "最初の一致箇所に戻りました。",
 	"chat.find.wrappedLast": "最後の一致箇所に戻りました。",
-	"chat.find.notRevealed": "この一致箇所を表示できませんでした。もう一度検索してください。"
+	"chat.find.notRevealed": "この一致箇所を表示できませんでした。もう一度検索してください。",
+	"sessionSplit.open": "並べて開く",
+	"sessionSplit.openOrchestrators": "オーケストレーターを並べて開く",
+	"sessionSplit.openOrchestratorsShort": "オーケストレーターを開く",
+	"sessionSplit.sessionsSelected_one": "{{count}} 件のセッションを選択中",
+	"sessionSplit.sessionsSelected_other": "{{count}} 件のセッションを選択中",
+	"sessionSplit.projectsSelected_one": "{{count}} 件のプロジェクトを選択中",
+	"sessionSplit.projectsSelected_other": "{{count}} 件のプロジェクトを選択中",
+	"sessionSplit.clearSelection": "選択を解除",
+	"sessionSplit.tooMany": "並べて表示できるのは最大 {{count}} 件です",
+	"sessionSplit.noOrchestrators": "これらのプロジェクトで実行中のオーケストレーターはありません",
+	"sessionSplit.nothingToShow": "これらのセッションはどれも実行中ではありません",
+	"sessionSplit.pane": "ペイン",
+	"sessionSplit.close": "ペインを閉じる",
+	"sessionSplit.closePane": "{{name}} を閉じる",
+	"sessionSplit.ended": "このセッションは終了しました。",
+	"sessionSplit.missing": "このセッションは利用できなくなりました。",
+	"sessionSplit.noOrchestrator": "実行中のオーケストレーターはありません"
 }

@@ -192,6 +192,7 @@ import { agentAccountProviderFor } from "../../hooks/useAgentAccounts";
 import { ImportedAgentBlocked, McpServerBanner, ReauthBanner, ThreadStateBanner, VersionSwitchBanner } from "./ChatStatusBanners";
 import type { AgentBlock } from "../../lib/session-import";
 import { UsageLimitNotice } from "./UsageLimitNotice";
+import { useSessionPane, useSessionPaneFocusedGetter } from "../session-pane-context";
 import {
 	activeTurn,
 	activityPlan,
@@ -1021,6 +1022,11 @@ function ChatWorkspaceContent({
 	const shellActive = Boolean(shellTarget && session);
 	const splitHiddenTabKeys = useSplitHiddenTabKeys();
 	const closeFocusedSplitPane = useSplitCloseFocused();
+	// Sessions side by side: only the focused pane's composer takes the caret,
+	// and tab cycling and ⌘W act on that pane alone.
+	const sessionPane = useSessionPane();
+	const paneFocused = sessionPane ? sessionPane.focused : true;
+	const isPaneFocused = useSessionPaneFocusedGetter();
 	const auxiliaryTabs = useMemo<ChatAuxiliaryTab[]>(
 		() => [
 			...(reviewerTerminal
@@ -1589,22 +1595,23 @@ function ChatWorkspaceContent({
 	useEffect(
 		() =>
 			!hideHeader ? aoBridge.app.onCloseShellTerminalShortcut(() => {
+				if (!isPaneFocused()) return;
 				if (closeFocusedSplitPane) closeFocusedSplitPane();
 				else if (activeWorkspaceTab?.onClose) activeWorkspaceTab.onClose();
 				else if (shellTarget) onCloseShellTerminal?.(shellTarget.handleId);
 			}) : undefined,
-		[activeWorkspaceTab, closeFocusedSplitPane, hideHeader, onCloseShellTerminal, shellTarget],
+		[activeWorkspaceTab, closeFocusedSplitPane, hideHeader, isPaneFocused, onCloseShellTerminal, shellTarget],
 	);
 
 	useEffect(() => {
 		if (hideHeader) return;
-		const disposePrevious = aoBridge.app.onPreviousTabShortcut(() => !isSettingsPageOpen() && selectAdjacentTab(-1));
-		const disposeNext = aoBridge.app.onNextTabShortcut(() => !isSettingsPageOpen() && selectAdjacentTab(1));
+		const disposePrevious = aoBridge.app.onPreviousTabShortcut(() => !isSettingsPageOpen() && isPaneFocused() && selectAdjacentTab(-1));
+		const disposeNext = aoBridge.app.onNextTabShortcut(() => !isSettingsPageOpen() && isPaneFocused() && selectAdjacentTab(1));
 		return () => {
 			disposePrevious();
 			disposeNext();
 		};
-	}, [hideHeader, selectAdjacentTab]);
+	}, [hideHeader, isPaneFocused, selectAdjacentTab]);
 
 	useEffect(() => {
 		if (hideHeader) return;
@@ -2277,7 +2284,7 @@ function ChatWorkspaceContent({
 										holdAttachments={newWorkDisabled ? undefined : holdAttachments}
 										onHeldAttachmentsChange={onHeldAttachmentsChange}
 										nativeImages={queueEdit?.clientMessageId ? queueEdit.nativeImages ?? nativeImages : nativeImages}
-										autoFocus={!reviewerActive}
+										autoFocus={!reviewerActive && paneFocused}
 										autoFocusKey={draftScope.sessionId}
 										// Steering is only meaningful into a turn that is running. A queued turn
 										// has not reached the provider, so there is nothing to steer.

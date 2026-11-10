@@ -1,14 +1,18 @@
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { matchesAppShortcut, shortcutYieldsToTerminal, type AppShortcutEvent, type AppShortcutId } from "../../shared/shortcuts";
+import { SessionPaneContext } from "../components/session-pane-context";
 import { aoBridge } from "../lib/bridge";
 import { isMacPlatform } from "../lib/platform";
 import { useKeybindingsStore } from "../stores/keybindings-store";
 import { useUiStore } from "../stores/ui-store";
 
-/** Focuses the first element matching `selector` once the next render has painted. */
-export function focusAfterPaint(selector: string): void {
+/**
+ * Focuses the first element matching `selector` once the next render has
+ * painted. `root` keeps the lookup inside one pane of a split.
+ */
+export function focusAfterPaint(selector: string, root: () => ParentNode = () => document): void {
 	window.requestAnimationFrame(() => {
-		window.requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus());
+		window.requestAnimationFrame(() => root().querySelector<HTMLElement>(selector)?.focus());
 	});
 }
 
@@ -102,17 +106,19 @@ export function isSettingsPageOpen(): boolean {
  * For commands that act on the session on screen (archive, open in editor,
  * copy path, panel toggles). The session page stays mounted but hidden under
  * Settings, so these stand down there instead of acting on an invisible session.
+ * Sessions side by side each mount their own; only the focused pane listens.
  */
 export function useSessionShortcut(
 	id: AppShortcutId,
 	handler: (event: AppShortcutEvent) => void,
 	enabled = true,
 ): void {
+	const pane = useContext(SessionPaneContext);
 	useAppShortcut(
 		id,
 		(event) => {
 			if (!isSettingsPageOpen()) handler(event);
 		},
-		enabled,
+		enabled && (pane ? pane.focused : true),
 	);
 }

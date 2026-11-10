@@ -4320,5 +4320,22 @@
 	"chat.find.nextFailed": "Die nächsten Treffer konnten nicht geladen werden.",
 	"chat.find.wrappedFirst": "Zurück zum ersten Treffer.",
 	"chat.find.wrappedLast": "Weiter zum letzten Treffer.",
-	"chat.find.notRevealed": "Dieser Treffer konnte nicht angezeigt werden. Suche wiederholen."
+	"chat.find.notRevealed": "Dieser Treffer konnte nicht angezeigt werden. Suche wiederholen.",
+	"sessionSplit.open": "Nebeneinander öffnen",
+	"sessionSplit.openOrchestrators": "Orchestratoren nebeneinander öffnen",
+	"sessionSplit.openOrchestratorsShort": "Orchestratoren öffnen",
+	"sessionSplit.sessionsSelected_one": "{{count}} Sitzung ausgewählt",
+	"sessionSplit.sessionsSelected_other": "{{count}} Sitzungen ausgewählt",
+	"sessionSplit.projectsSelected_one": "{{count}} Projekt ausgewählt",
+	"sessionSplit.projectsSelected_other": "{{count}} Projekte ausgewählt",
+	"sessionSplit.clearSelection": "Auswahl aufheben",
+	"sessionSplit.tooMany": "Höchstens {{count}} lassen sich nebeneinander anzeigen",
+	"sessionSplit.noOrchestrators": "In keinem dieser Projekte läuft ein Orchestrator",
+	"sessionSplit.nothingToShow": "Keine dieser Sitzungen läuft noch",
+	"sessionSplit.pane": "Bereich",
+	"sessionSplit.close": "Bereich schließen",
+	"sessionSplit.closePane": "{{name}} schließen",
+	"sessionSplit.ended": "Diese Sitzung ist beendet.",
+	"sessionSplit.missing": "Diese Sitzung ist nicht mehr verfügbar.",
+	"sessionSplit.noOrchestrator": "Kein Orchestrator aktiv"
 }

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
+import { SessionPaneContext } from "../components/session-pane-context";
 import {
 	APP_MENU_COMMAND_IDS,
 	type AppMenuActionId,
@@ -46,10 +47,14 @@ export function useAppMenuAvailable(id: AppMenuCommandId, available: boolean): v
 	}, [id, available]);
 }
 
-/** For session commands, which stand down under Settings like useSessionShortcut. */
+/**
+ * For session commands, which stand down under Settings like useSessionShortcut,
+ * and in panes of a split other than the focused one.
+ */
 export function useSessionMenuAvailable(id: AppMenuCommandId, available: boolean): void {
 	const settingsOpen = useUiStore((state) => state.settingsModal?.scope === "global");
-	useAppMenuAvailable(id, available && !settingsOpen);
+	const pane = useContext(SessionPaneContext);
+	useAppMenuAvailable(id, available && !settingsOpen && (pane ? pane.focused : true));
 }
 
 /** Runs `handler` when a native menu item with no keyboard shortcut is chosen. */

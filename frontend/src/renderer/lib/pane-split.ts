@@ -282,7 +282,8 @@ export function containsPoint(rect: ClientRect, x: number, y: number): boolean {
 /** Split layouts are remembered for this many sessions, the most recently changed. */
 export const MAX_STORED_SPLIT_SESSIONS = 50;
 
-function parseNode(value: unknown, dropKey: (key: string) => boolean): SplitNode | null {
+/** A stored split tree, with malformed nodes and dropped leaves pruned. */
+export function parseNode(value: unknown, dropKey: (key: string) => boolean): SplitNode | null {
 	if (!value || typeof value !== "object") return null;
 	const node = value as Record<string, unknown>;
 	if (node.type === "leaf") {

@@ -149,7 +149,8 @@ import { SessionAccessTag } from "./teams/SessionAccessTag";
 import { SharedProjectPanel } from "./SharedProjectPanel";
 import { useSessionMenuAvailable } from "../hooks/useAppMenuCommand";
 import { focusAfterPaint, useSessionShortcut } from "../hooks/useAppShortcut";
-import { openComposerModelPicker, toggleComposerDictation } from "../lib/composer-shortcuts";
+import { openComposerModelPickerIn, toggleComposerDictationIn } from "../lib/composer-shortcuts";
+import { useSessionPane, useSessionPaneRoot } from "./session-pane-context";
 import { inspectorIsOpen, useResolvedTheme, useUiStore, type InspectorView } from "../stores/ui-store";
 import { useSideChatsAvailable } from "../lib/side-chats";
 import {
@@ -553,10 +554,17 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const { draftBoundaries: chatDraftBoundaries, confirmUnsafeDraftLeave } = interfaceUi;
 	const remoteHostsEnabled = useUiStore((state) => state.remoteHosts);
 	const setRemoteHosts = useUiStore((state) => state.setRemoteHosts);
+	// One pane of sessions side by side: no inspector or in-session split, and
+	// only the focused pane takes shortcuts and reports drafts at risk.
+	const pane = useSessionPane();
+	const paneRoot = useSessionPaneRoot();
+	const reportsDraftRisk = !pane || pane.focused;
 	useBlocker({
 		disabled: chatDraftBoundaries.length === 0,
 		enableBeforeUnload: chatDraftBoundaries.length > 0,
-		shouldBlockFn: async () => {
+		shouldBlockFn: async (navigation) => {
+			// Focusing another pane of the split moves the route, but this pane stays mounted.
+			if (pane?.keepsSplit((navigation?.next?.params as { sessionId?: string } | undefined)?.sessionId)) return false;
 			const decision = await confirmUnsafeDraftLeave();
 			if (decision.kind === "cancelled") {
 				if (hostId && !remoteHostsEnabled) setRemoteHosts(true);
@@ -572,11 +580,12 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		},
 	});
 	useEffect(() => {
+		if (!reportsDraftRisk) return;
 		aoBridge.app.setChatDraftRisk?.(chatDraftBoundaries, chatDraftDialogCopy(chatDraftBoundaries));
-	}, [chatDraftBoundaries, t]);
+	}, [chatDraftBoundaries, reportsDraftRisk, t]);
 	useEffect(
-		() => () => aoBridge.app.setChatDraftRisk?.([]),
-		[sessionId],
+		() => (reportsDraftRisk ? () => aoBridge.app.setChatDraftRisk?.([]) : undefined),
+		[reportsDraftRisk, sessionId],
 	);
 	const { client: cloudCpClient, ready: cloudCpReady, baseUrl: cloudCpBaseUrl, userId: cloudCpUserId } = useCloudCp();
 	// The session's own organization decides whether it can be shared (feature=share).
@@ -993,7 +1002,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const openShellTerminal = useOpenShellTerminal(hostId);
 	// Split panes are a Developer mode preview; off, no split is shown and
 	// turning it off mid-split puts every tab back in the strip.
-	const splitPanes = useSplitPanesEnabled();
+	const splitPanes = useSplitPanesEnabled() && !pane;
 	const developerMode = useUiStore((state) => state.developerMode);
 	// Tabs can be shown together: they merge into one group tab in the strip and
 	// the screen splits into one pane per member, where any pane can split
@@ -1471,7 +1480,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		);
 	}, [cloudReviewIsRunning, cloudReviewerHandleId, cloudReviewerHarness, cloudReviewerTrigger, session?.cloud, sessionId]);
 	const isOrchestrator = session ? isOrchestratorSession(session) : false;
-	const hasInspector = Boolean(session);
+	const hasInspector = Boolean(session) && !pane;
 	const sizing = useMemo(() => inspectorSizing(inspectorView), [inspectorView]);
 	const browserEntryWidthFloorRef = useRef<number | null>(null);
 
@@ -2375,15 +2384,15 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		() => {
 			if (terminalTarget.kind === "shell") {
 				selectSessionTerminal();
-				focusAfterPaint("[aria-label='Message the agent']");
+				focusAfterPaint("[aria-label='Message the agent']", paneRoot);
 				return;
 			}
 			const shell = shellTerminals[shellTerminals.length - 1];
 			if (shell) selectShellTerminal(shell.handleId);
 			else if (!isOrchestrator) addShellTerminal();
-			focusAfterPaint(".xterm-helper-textarea");
+			focusAfterPaint(".xterm-helper-textarea", paneRoot);
 		},
-		hasInspector,
+		Boolean(session),
 	);
 	useSessionShortcut(
 		"reopen-closed-tab",
@@ -2391,7 +2400,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 			const path = closedFilePathsRef.current[uiSessionId]?.pop();
 			if (path) {const request=centerFileRequestsBySession[uiSessionId]?.[path];openCenterFile(request?.path ?? path, { ...request, editing:false, mode: "file" });}
 		},
-		hasInspector,
+		Boolean(session),
 	);
 	useSessionShortcut(
 		"copy-session-path",
@@ -2403,10 +2412,10 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 					showGlobalToast(t("shortcut.sessionPathCopyFailed"), error instanceof Error ? error.message : undefined, "error"),
 			);
 		},
-		hasInspector,
+		Boolean(session),
 	);
-	useSessionShortcut("model-picker", openComposerModelPicker, hasInspector);
-	useSessionShortcut("dictate", toggleComposerDictation, hasInspector);
+	useSessionShortcut("model-picker", () => openComposerModelPickerIn(paneRoot()), Boolean(session));
+	useSessionShortcut("dictate", () => toggleComposerDictationIn(paneRoot()), Boolean(session));
 
 	const inspectorMotionReadyRef = useRef<string | null>(null);
 	const handleInspectorCloseAnimationComplete = useCallback(() => {
@@ -2494,7 +2503,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 				className="session-split relative flex min-h-0 flex-1 overflow-hidden"
 				data-testid="panel-group"
 				data-workspace-mode={sizing.mode}
-				id={SESSION_WORKSPACE_ID}
+				// Panes side by side are each a session workspace; the id names the routed one alone.
+				id={pane ? undefined : SESSION_WORKSPACE_ID}
 				ref={sessionSplitRef}
 				style={
 					{
@@ -2510,7 +2520,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 				<div
 					className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
 					data-panel=""
-					id="terminal"
+					id={pane ? undefined : "terminal"}
 				>
 					<div className="relative flex h-full min-h-0 flex-col" ref={centerColumnRef}>
 						<SessionTopbarHost
@@ -2863,7 +2873,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 					</SessionInspectorRail>
 				) : null}
 			</div>
-			<PageTopbarTrailingAction>
+			{pane ? null : <PageTopbarTrailingAction>
 				{hasInspector ? <Tooltip>
 					<TooltipTrigger asChild>
 						<Button type="button" size="icon-sm"
@@ -2892,7 +2902,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 						{isInspectorOpen ? t("shell.closeInspector") : t("shell.openInspector")}
 					</TooltipContent>
 				</Tooltip> : null}
-			</PageTopbarTrailingAction>
+			</PageTopbarTrailingAction>}
 			{interfaceUi.cloudLoader
 				? <CloudInterfaceSwitchLoader target={interfaceUi.target} />
 				: showLifecycleLoader || showCompletedLoader
