@@ -1975,3 +1975,27 @@ describe("permissions for the agent picked for the next message", () => {
 		expect(onPendingChange).toHaveBeenCalledWith({ harness: "kimi", approvalMode: "default" });
 	});
 });
+
+describe("afterPicker", () => {
+	// The composer's usage limits sit beside the model, in the group that gives
+	// way first, never among the permission and send controls on the right.
+	it("draws it right after the model picker, ahead of the approval picker", () => {
+		render(
+			<TurnSettingsBar
+				harness="claude-code"
+				models={[]}
+				settings={{ approvalMode: "default" }}
+				onChange={vi.fn()}
+				agentSwitch={{ projectId: "p", onPendingChange: vi.fn() }}
+				beforePicker={<span data-testid="before-picker" />}
+				afterPicker={<span data-testid="after-picker" />}
+			/>,
+		);
+
+		const after = screen.getByTestId("after-picker");
+		const approval = screen.getByRole("button", { name: "Approval policy for the next turn" });
+		expect(after.parentElement).toBe(screen.getByTestId("before-picker").parentElement);
+		expect(after.parentElement).not.toContainElement(approval);
+		expect(after.compareDocumentPosition(approval) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+});

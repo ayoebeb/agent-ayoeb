@@ -32,6 +32,11 @@ export function remainingPercent(usedPercent: number): number {
 	return Math.max(0, Math.min(100, 100 - usedPercent));
 }
 
+/** A limit bar's fill class: red once spent, amber at a quarter left, else null for the agent's own tone. */
+export function remainingTone(remaining: number): string | null {
+	return remaining <= 0 ? "bg-error" : remaining <= 25 ? "bg-warning" : null;
+}
+
 export function formatCountdown(resetsAt: string | null | undefined, now: Date): string | null {
 	if (!resetsAt) return null;
 	const ms = new Date(resetsAt).getTime() - now.getTime();

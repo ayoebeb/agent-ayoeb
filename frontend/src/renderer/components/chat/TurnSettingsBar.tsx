@@ -134,6 +134,7 @@ export function TurnSettingsBar({
 	autoSelectEffortOnOpen = false,
 	agentSwitch,
 	beforePicker,
+	afterPicker,
 	modelsLoading,
 	lastModel,
 	unsetModelLabel,
@@ -187,6 +188,8 @@ export function TurnSettingsBar({
 	agentSwitch?: AgentSwitchProps;
 	/** Drawn just before that picker, such as the context meter. */
 	beforePicker?: ReactNode;
+	/** Drawn right after the model controls, such as the account's usage limits. It should only take the room left in the row. */
+	afterPicker?: ReactNode;
 	/** The agent is starting again; the picker names no model until it reports its own. */
 	modelsLoading?: boolean;
 	/** The model the chat's agent last reported running, when none is saved. */
@@ -545,6 +548,7 @@ export function TurnSettingsBar({
 							onChange={applyOption}
 						/>
 					) : null}
+					{afterPicker}
 				</div>
 
 				{showRightDropdown || children || (unified && planOn) ? (

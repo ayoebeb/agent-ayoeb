@@ -3,17 +3,13 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { agentAccountName, agentAccountProviderNames, type AgentAccount, type AgentAccountLimitWindow } from "../../hooks/useAgentAccounts";
 import { agentTone } from "../../lib/agent-tone";
-import { formatCountdown, groupAccounts, limitWindowPace, PROVIDER_HARNESS, remainingPercent } from "../../lib/usage-limits";
+import { formatCountdown, groupAccounts, limitWindowPace, PROVIDER_HARNESS, remainingPercent, remainingTone } from "../../lib/usage-limits";
 import { formatRelativeTime } from "../../lib/usage-format";
 import { cn } from "../../lib/utils";
 import { useUiStore } from "../../stores/ui-store";
 import { AgentAvatar } from "../AgentAvatar";
 import { formatPlanName } from "../settings/AgentAccountsSection";
 import { Button } from "../ui/button";
-
-function remainingTone(remaining: number): string | null {
-	return remaining <= 0 ? "bg-error" : remaining <= 25 ? "bg-warning" : null;
-}
 
 export function UsageLimits({ accounts, now }: { accounts: readonly AgentAccount[]; now: Date }) {
 	const { t, i18n } = useTranslation();
