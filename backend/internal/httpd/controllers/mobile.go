@@ -70,6 +70,78 @@ func (c *MobileController) IssueAccountToken(w http.ResponseWriter, r *http.Requ
 	envelope.WriteJSON(w, http.StatusOK, result)
 }
 
+// BrowserProfileTicketRequest asks this machine's daemon to sign a ticket for
+// reading another machine's shared browser profiles.
+type BrowserProfileTicketRequest struct {
+	// SourceHostID is the machine whose profiles are read.
+	SourceHostID string `json:"sourceHostId"`
+	// Key is the one-time X25519 public key the answers are sealed to,
+	// unpadded base64url.
+	Key string `json:"key"`
+}
+
+// BrowserProfileTicketResponse is a ticket signed with this machine's host
+// key. Both fields are unpadded base64url; the ticket is sent exactly as is.
+type BrowserProfileTicketResponse struct {
+	Ticket    string `json:"ticket"`
+	Signature string `json:"signature"`
+}
+
+// RemoteHostKeyResponse is this machine's host identity with the public half
+// of its host key, which another machine of the account uses to check this
+// machine's signed browser profile tickets.
+type RemoteHostKeyResponse struct {
+	HostID string `json:"hostId"`
+	// HostKey is the Ed25519 public key, unpadded base64url.
+	HostKey string `json:"hostKey"`
+}
+
+// IssueBrowserProfileTicket signs a browser profile ticket with this
+// machine's host key. It is mounted under /api/v1/mobile, so the remote
+// listener never serves it and a web page cannot call it on loopback.
+func (c *MobileController) IssueBrowserProfileTicket(w http.ResponseWriter, r *http.Request) {
+	issuer, ok := c.Bridge.(interface {
+		IssueBrowserProfileTicket(string, string) (BrowserProfileTicketResponse, error)
+	})
+	if !ok {
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "not_implemented", "HOST_KEY_UNAVAILABLE", "browser profile tickets are unavailable", nil)
+		return
+	}
+	var body BrowserProfileTicketRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "invalid_request", "INVALID_BROWSER_PROFILE_TICKET", "invalid body", nil)
+		return
+	}
+	result, err := issuer.IssueBrowserProfileTicket(body.SourceHostID, body.Key)
+	if errors.Is(err, mobilebridge.ErrInvalidBrowserProfileTicket) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "invalid_request", "INVALID_BROWSER_PROFILE_TICKET", "browser profile ticket request is invalid", nil)
+		return
+	}
+	if err != nil {
+		envelope.WriteAPIError(w, r, http.StatusServiceUnavailable, "unavailable", "HOST_KEY_UNAVAILABLE", "this machine's host key cannot be read", nil)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	envelope.WriteJSON(w, http.StatusOK, result)
+}
+
+// HostKey returns this machine's host id and public host key. On the remote
+// listener it needs a connection credential like every other route.
+func (c *MobileController) HostKey(w http.ResponseWriter, r *http.Request) {
+	source, ok := c.Bridge.(interface{ RemoteHostKey() (RemoteHostKeyResponse, error) })
+	if !ok {
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "not_implemented", "HOST_KEY_UNAVAILABLE", "the host key is unavailable", nil)
+		return
+	}
+	result, err := source.RemoteHostKey()
+	if err != nil {
+		envelope.WriteAPIError(w, r, http.StatusServiceUnavailable, "unavailable", "HOST_KEY_UNAVAILABLE", "this machine's host key cannot be read", nil)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	envelope.WriteJSON(w, http.StatusOK, result)
+}
+
 // withWarning stamps the constant unencrypted-LAN warning onto any bridge
 // response. The warning is not bridge-specific state — it's always present —
 // so the controller guarantees it here rather than trusting every mobileBridge
@@ -919,6 +991,31 @@ func (b *BridgeService) hostPublicKey() string {
 		return ""
 	}
 	return key
+}
+
+// IssueBrowserProfileTicket signs a ticket for this machine to read
+// sourceHostID's shared browser profiles sealed to key.
+func (b *BridgeService) IssueBrowserProfileTicket(sourceHostID, key string) (BrowserProfileTicketResponse, error) {
+	if b.HostID == "" {
+		return BrowserProfileTicketResponse{}, errors.New("this machine has no host id")
+	}
+	ticket, signature, err := mobilebridge.IssueBrowserProfileTicket(b.ConfigPath, b.HostID, sourceHostID, key, time.Now())
+	if err != nil {
+		return BrowserProfileTicketResponse{}, err
+	}
+	return BrowserProfileTicketResponse{Ticket: ticket, Signature: signature}, nil
+}
+
+// RemoteHostKey returns this machine's host id and public host key.
+func (b *BridgeService) RemoteHostKey() (RemoteHostKeyResponse, error) {
+	if b.HostID == "" {
+		return RemoteHostKeyResponse{}, errors.New("this machine has no host id")
+	}
+	key, err := mobilebridge.HostPublicKey(b.ConfigPath)
+	if err != nil {
+		return RemoteHostKeyResponse{}, err
+	}
+	return RemoteHostKeyResponse{HostID: b.HostID, HostKey: key}, nil
 }
 
 // IssueAccountToken returns the existing credential for a retry by the same

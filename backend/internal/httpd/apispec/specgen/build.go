@@ -658,11 +658,11 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	// httpd/controllers: browser profiles shared with linked machines
 	"ControllersSharedBrowserProfileIDParam":        "SharedBrowserProfileIDParam",
 	"ControllersSharedBrowserProfileExportQuery":    "SharedBrowserProfileExportQuery",
-	"ControllersSharedBrowserProfile":               "SharedBrowserProfile",
-	"ControllersSharedBrowserProfilesResponse":      "SharedBrowserProfilesResponse",
-	"ControllersSharedBrowserCookie":                "SharedBrowserCookie",
-	"ControllersSharedBrowserHistoryEntry":          "SharedBrowserHistoryEntry",
-	"ControllersSharedBrowserProfileExportResponse": "SharedBrowserProfileExportResponse",
+	"ControllersSharedBrowserProfileReceiverHeaders": "SharedBrowserProfileReceiverHeaders",
+	"ControllersSealedBrowserProfilePayload":         "SealedBrowserProfilePayload",
+	"ControllersBrowserProfileTicketRequest":         "BrowserProfileTicketRequest",
+	"ControllersBrowserProfileTicketResponse":        "BrowserProfileTicketResponse",
+	"ControllersRemoteHostKeyResponse":               "RemoteHostKeyResponse",
 	// devimport report
 	"DevimportReport":   "DevImportProjectsReport",
 	"DevimportConflict": "DevImportProjectsConflict",
@@ -830,15 +830,19 @@ func sharedBrowserProfileOperations() []operation {
 	return []operation{
 		{
 			method: http.MethodGet, path: "/api/v1/shared-browser-profiles", id: "listSharedBrowserProfiles", tag: "browser",
-			summary: "List the browser profiles this machine shares with its linked machines",
-			resps:   append([]respUnit{{http.StatusOK, controllers.SharedBrowserProfilesResponse{}}}, failures...),
+			summary:    "List the browser profiles this machine shares, sealed to the linked machine whose ticket the request carries",
+			pathParams: []any{controllers.SharedBrowserProfileReceiverHeaders{}},
+			resps: append([]respUnit{
+				{http.StatusOK, controllers.SealedBrowserProfilePayload{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+			}, failures...),
 		},
 		{
 			method: http.MethodGet, path: "/api/v1/shared-browser-profiles/{profileId}/export", id: "exportSharedBrowserProfile", tag: "browser",
-			summary:    "Read one page of a shared browser profile's cookies and history for a linked machine",
-			pathParams: []any{controllers.SharedBrowserProfileIDParam{}, controllers.SharedBrowserProfileExportQuery{}},
+			summary:    "Read one page of a shared browser profile's cookies and history, sealed to the linked machine whose ticket the request carries",
+			pathParams: []any{controllers.SharedBrowserProfileIDParam{}, controllers.SharedBrowserProfileExportQuery{}, controllers.SharedBrowserProfileReceiverHeaders{}},
 			resps: append([]respUnit{
-				{http.StatusOK, controllers.SharedBrowserProfileExportResponse{}},
+				{http.StatusOK, controllers.SealedBrowserProfilePayload{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 			}, failures...),
@@ -2448,6 +2452,27 @@ func mobileOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.RemoteHostAccountTokenResponse{}},
 				{http.StatusForbidden, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/remote-host/host-key", id: "getRemoteHostKey", tag: "mobile",
+			summary: "Read this machine's host id and public host key",
+			resps: []respUnit{
+				{http.StatusOK, controllers.RemoteHostKeyResponse{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+				{http.StatusServiceUnavailable, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/mobile/browser-profile-ticket", id: "issueBrowserProfileTicket", tag: "mobile",
+			summary: "Sign a ticket with this machine's host key to read another machine's shared browser profiles",
+			reqBody: controllers.BrowserProfileTicketRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.BrowserProfileTicketResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusForbidden, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+				{http.StatusServiceUnavailable, envelope.APIError{}},
 			},
 		},
 		{

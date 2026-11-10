@@ -14,6 +14,7 @@ import {
 import type { BrowserImportRequest } from "../shared/browser-profile-import";
 import type {
 	BrowserProfileCopyResult,
+	BrowserProfileSharingConfirmLabels,
 	BrowserProfileSharingState,
 	OtherMachinesResult,
 } from "../shared/browser-profile-share";
@@ -60,6 +61,12 @@ export type BrowserProfileIpcOptions = {
 	buildMenu: (items: BrowserProfileMenuItem[]) => BrowserProfileMenu;
 	confirmSwitch: (labels: BrowserProfileMenuInput["labels"]) => Promise<boolean>;
 	reportSwitchFailure: (message: string, labels: BrowserProfileMenuInput["labels"]) => void;
+	/**
+	 * Asks the person at this machine, in a native dialog, before sharing is
+	 * turned on. Without it sharing cannot be turned on: a compromised renderer
+	 * must not be able to start sharing sign-in cookies silently.
+	 */
+	confirmSharing?: (labels: BrowserProfileSharingConfirmLabels) => Promise<boolean>;
 };
 
 export type BrowserProfileIpc = {
@@ -133,6 +140,20 @@ function labelsFromInput(value: unknown): BrowserProfileMenuInput["labels"] {
 		}
 		labels[key] = label;
 	}
+	return labels;
+}
+
+function sharingLabelsFromInput(value: unknown): BrowserProfileSharingConfirmLabels {
+	if (!isRecord(value)) throw invalid("Sharing confirmation labels are invalid.");
+	const labels = {} as BrowserProfileSharingConfirmLabels;
+	for (const key of ["title", "message", "detail", "cancel", "confirm"] as const) {
+		const label = value[key];
+		if (typeof label !== "string" || label.trim().length === 0 || label.length > 600 || /[\u0000-\u001f\u007f]/u.test(label)) {
+			throw invalid("Sharing confirmation labels are invalid.");
+		}
+		labels[key] = label;
+	}
+	if (labels.cancel === labels.confirm) throw invalid("Sharing confirmation labels are invalid.");
 	return labels;
 }
 
@@ -253,6 +274,17 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 			return { enabled: false, error: "Browser profile sharing is unavailable." };
 		}
 		if (!isRecord(input) || typeof input.enabled !== "boolean") throw invalid("Sharing setting is invalid.");
+		if (input.enabled && !(await options.sharing.isEnabled())) {
+			const labels = sharingLabelsFromInput(input.labels);
+			if (!options.confirmSharing) return { enabled: false, error: "Browser profile sharing is unavailable." };
+			let confirmed = false;
+			try {
+				confirmed = await options.confirmSharing(labels);
+			} catch {
+				confirmed = false;
+			}
+			if (!confirmed) return { enabled: await options.sharing.isEnabled(), cancelled: true };
+		}
 		try {
 			return { enabled: await options.sharing.setEnabled(input.enabled) };
 		} catch {

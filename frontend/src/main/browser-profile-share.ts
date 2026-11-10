@@ -5,15 +5,21 @@ import { BROWSER_IMPORT_MAX_COOKIES } from "../shared/browser-profile-import";
 import type { SharedBrowserProfileSummary } from "../shared/browser-profile-share";
 import { normalizeBrowserProfileId, type BrowserProfile } from "../shared/browser-profiles";
 import type { BrowserHistoryEntry, BrowserHistoryStore } from "./browser-history-store";
+import type { BrowserProfileCopyLedger } from "./browser-profile-copy-ledger";
 import { isAntiBotCookie } from "./browser-profile-import";
+import type { BrowserProfileReceiverVerifier, VerifiedReceiver } from "./browser-profile-receiver";
+import { sealContext, sealPayload, type SealedPayload } from "./browser-profile-share-crypto";
 import type { BrowserProfileStore } from "./browser-profile-store";
 
 /**
  * The machine that owns a browser profile: it answers its own daemon's
  * `__browser-profile-share-*` actions, which the daemon serves only to a
- * linked machine over the authenticated remote-host connection. Nothing is
- * shared until this machine's owner turns sharing on, and a profile that was
- * itself copied from another machine is never shared onward.
+ * request that carries the account credential on the remote listener.
+ * Nothing is shared until this machine's owner turns sharing on; every
+ * request must carry a ticket signed by another machine of the account (see
+ * browser-profile-receiver.ts), and every answer is sealed to that machine.
+ * Only this machine's own profiles are shared: a profile copied from another
+ * machine, or one whose provenance cannot be read, never is.
  */
 
 export const BROWSER_PROFILE_SHARING_FILE_NAME = "browser-profile-sharing.json";
@@ -44,7 +50,13 @@ export type SharedBrowserProfilePage = {
 /** A failure the daemon maps by code. Messages are fixed: no profile data in them. */
 export class BrowserProfileShareError extends Error {
 	constructor(
-		readonly code: "BROWSER_PROFILE_SHARING_OFF" | "BROWSER_PROFILE_NOT_FOUND" | "BROWSER_PROFILE_NOT_SHARED" | "INVALID_CURSOR" | "BROWSER_PROFILE_SHARE_FAILED",
+		readonly code:
+			| "BROWSER_PROFILE_SHARING_OFF"
+			| "BROWSER_PROFILE_NOT_FOUND"
+			| "BROWSER_PROFILE_NOT_SHARED"
+			| "BROWSER_PROFILE_RECEIVER_UNVERIFIED"
+			| "INVALID_CURSOR"
+			| "BROWSER_PROFILE_SHARE_FAILED",
 		message: string,
 	) {
 		super(message);
@@ -59,6 +71,7 @@ export class BrowserProfileShareError extends Error {
 export class BrowserProfileSharingSetting {
 	private readonly file: string;
 	private enabled = false;
+	private turnedOff = 0;
 	private loaded: Promise<void> | null = null;
 	private queue: Promise<void> = Promise.resolve();
 
@@ -85,7 +98,17 @@ export class BrowserProfileSharingSetting {
 		return this.enabled;
 	}
 
+	/**
+	 * Counts the times sharing was turned off. A read that started before the
+	 * owner turned it off must not be answered, even if it is back on by then.
+	 */
+	generation(): number {
+		return this.turnedOff;
+	}
+
 	async setEnabled(enabled: boolean): Promise<boolean> {
+		// Counted at once, before the write: reads already running stop now.
+		if (!enabled) this.turnedOff += 1;
 		const write = this.queue.then(async () => {
 			await this.load();
 			await mkdir(path.dirname(this.file), { recursive: true, mode: 0o750 });
@@ -122,13 +145,29 @@ type ElectronCookie = {
 export type BrowserProfileShareSourceOptions = {
 	store: BrowserProfileStore;
 	history: Pick<BrowserHistoryStore, "entries">;
-	sharing: Pick<BrowserProfileSharingSetting, "isEnabled">;
+	sharing: Pick<BrowserProfileSharingSetting, "isEnabled" | "generation">;
+	/** Every profile copied from another machine, kept apart from the registry. */
+	copies: Pick<BrowserProfileCopyLedger, "load">;
+	receivers: Pick<BrowserProfileReceiverVerifier, "verify">;
 	/** Every cookie in the profile's Electron partition. */
 	cookies: (profileId: string) => Promise<ElectronCookie[]>;
 	now?: () => Date;
 };
 
 const SAME_SITE = new Set(["unspecified", "no_restriction", "lax", "strict"]);
+
+/**
+ * Whether a cookie's host is a site another machine may receive. A host that
+ * names a machine rather than a site, such as localhost, an IP address, or a
+ * single label like "intranet", would mean something else there: a copied
+ * session cookie for it could sign in to the receiver's own local apps.
+ */
+export function isShareableCookieHost(domain: string): boolean {
+	const host = domain.toLowerCase().replace(/^\.+/, "").replace(/\.$/, "");
+	if (!host.includes(".") || host.includes(":") || host.startsWith("[")) return false;
+	if (host === "localhost" || host.endsWith(".localhost")) return false;
+	return !/^[0-9.]+$/.test(host);
+}
 
 function cookieKey(cookie: SharedBrowserCookie): string {
 	return `${cookie.domain}\0${cookie.path}\0${cookie.name}`;
@@ -145,18 +184,49 @@ export class BrowserProfileShareSource {
 		this.now = options.now ?? (() => new Date());
 	}
 
-	private async requireSharing(): Promise<void> {
-		if (!(await this.options.sharing.isEnabled())) {
-			throw new BrowserProfileShareError(
-				"BROWSER_PROFILE_SHARING_OFF",
-				"Browser profile sharing is turned off on this machine.",
-			);
+	/** Throws unless sharing is on; returns the setting's generation for requireSharingStill. */
+	private async requireSharing(): Promise<number> {
+		const generation = this.options.sharing.generation();
+		if (!(await this.options.sharing.isEnabled())) throw this.sharingOff();
+		return generation;
+	}
+
+	/** Re-checked just before answering: turning sharing off stops a read already running. */
+	private async requireSharingStill(generation: number): Promise<void> {
+		if (this.options.sharing.generation() !== generation || !(await this.options.sharing.isEnabled())) throw this.sharingOff();
+	}
+
+	private sharingOff(): BrowserProfileShareError {
+		return new BrowserProfileShareError("BROWSER_PROFILE_SHARING_OFF", "Browser profile sharing is turned off on this machine.");
+	}
+
+	private async verifiedReceiver(args: unknown): Promise<VerifiedReceiver> {
+		const record = typeof args === "object" && args !== null ? args as Record<string, unknown> : {};
+		try {
+			return await this.options.receivers.verify(record.ticket, record.signature);
+		} catch {
+			throw new BrowserProfileShareError("BROWSER_PROFILE_RECEIVER_UNVERIFIED", "The machine asking could not be verified.");
 		}
 	}
 
-	/** Profiles this machine may share: every profile not copied from another machine. */
-	private sharedProfiles(): BrowserProfile[] {
-		return this.options.store.profiles.filter((profile) => profile.source?.kind !== "copy");
+	/**
+	 * Whether this machine may share a profile: only its own, with a positive
+	 * record of where it came from (made here, or imported here) and not in
+	 * the copy ledger. A copy, a provenance this build cannot read, and a copy
+	 * an older build stripped of its provenance are all withheld.
+	 */
+	private isOwnProfile(profile: BrowserProfile, copies: ReadonlySet<string>): boolean {
+		if (copies.has(profile.id)) return false;
+		return profile.source === undefined || profile.source.kind === "import";
+	}
+
+	private async copiedIds(): Promise<ReadonlySet<string>> {
+		try {
+			return (await this.options.copies.load()).ids;
+		} catch {
+			// Without the ledger a stripped copy cannot be told apart: share nothing.
+			throw new BrowserProfileShareError("BROWSER_PROFILE_SHARE_FAILED", "Browser profiles could not be read.");
+		}
 	}
 
 	/**
@@ -170,6 +240,7 @@ export class BrowserProfileShareSource {
 		for (const cookie of await this.options.cookies(profileId)) {
 			if (typeof cookie.name !== "string" || !cookie.name || typeof cookie.value !== "string") continue;
 			if (typeof cookie.domain !== "string" || !cookie.domain || isAntiBotCookie(cookie.name)) continue;
+			if (!isShareableCookieHost(cookie.domain)) continue;
 			const expirationDate = cookie.session === true
 				? undefined
 				: typeof cookie.expirationDate === "number" && Number.isFinite(cookie.expirationDate)
@@ -213,19 +284,43 @@ export class BrowserProfileShareSource {
 		};
 	}
 
-	async list(): Promise<{ profiles: SharedBrowserProfileSummary[] }> {
-		await this.requireSharing();
+	/** The profiles this machine shares, sealed to the verified receiver. */
+	async list(args: unknown): Promise<SealedPayload> {
+		const generation = await this.requireSharing();
+		const receiver = await this.verifiedReceiver(args);
+		const profiles = await this.listProfiles();
+		await this.requireSharingStill(generation);
+		return sealPayload({ profiles }, receiver.key, sealContext({ ...receiver, action: "list" }));
+	}
+
+	/** One page of a profile, sealed to the verified receiver; see exportPlainPage. */
+	async exportPage(args: unknown): Promise<SealedPayload> {
+		const generation = await this.requireSharing();
+		const receiver = await this.verifiedReceiver(args);
+		const record = typeof args === "object" && args !== null ? args as Record<string, unknown> : {};
+		const page = await this.exportPlainPage(record.profileId, record.cursor);
+		await this.requireSharingStill(generation);
+		return sealPayload(page, receiver.key, sealContext({
+			...receiver,
+			action: "export",
+			profileId: page.profile.id,
+			cursor: typeof record.cursor === "string" ? record.cursor : "",
+		}));
+	}
+
+	private async listProfiles(): Promise<SharedBrowserProfileSummary[]> {
 		await this.options.store.load();
+		const copies = await this.copiedIds();
 		try {
 			const profiles: SharedBrowserProfileSummary[] = [];
-			for (const profile of this.sharedProfiles()) {
+			for (const profile of this.options.store.profiles.filter((candidate) => this.isOwnProfile(candidate, copies))) {
 				const [cookies, history] = await Promise.all([
 					this.shareableCookies(profile.id),
 					this.options.history.entries(profile.id),
 				]);
 				profiles.push(this.summary(profile, cookies.length, history));
 			}
-			return { profiles };
+			return profiles;
 		} catch {
 			throw new BrowserProfileShareError("BROWSER_PROFILE_SHARE_FAILED", "Browser profiles could not be read.");
 		}
@@ -235,18 +330,16 @@ export class BrowserProfileShareSource {
 	 * One page of a profile's cookies, then its history, up to the page budget.
 	 * The cursor is "<cookie offset>:<history offset>".
 	 */
-	async exportPage(args: unknown): Promise<SharedBrowserProfilePage> {
-		await this.requireSharing();
-		const record = typeof args === "object" && args !== null ? args as Record<string, unknown> : {};
-		const profileId = normalizeBrowserProfileId(record.profileId);
+	private async exportPlainPage(rawProfileId: unknown, rawCursorValue: unknown): Promise<SharedBrowserProfilePage> {
+		const profileId = normalizeBrowserProfileId(rawProfileId);
 		if (!profileId) throw new BrowserProfileShareError("BROWSER_PROFILE_NOT_FOUND", "Browser profile was not found.");
-		const rawCursor = record.cursor === undefined ? "0:0" : record.cursor;
+		const rawCursor = rawCursorValue === undefined ? "0:0" : rawCursorValue;
 		const cursor = typeof rawCursor === "string" ? CURSOR_PATTERN.exec(rawCursor) : null;
 		if (!cursor) throw new BrowserProfileShareError("INVALID_CURSOR", "Export cursor is invalid.");
 		await this.options.store.load();
 		const profile = this.options.store.getProfile(profileId);
 		if (!profile) throw new BrowserProfileShareError("BROWSER_PROFILE_NOT_FOUND", "Browser profile was not found.");
-		if (profile.source?.kind === "copy") {
+		if (!this.isOwnProfile(profile, await this.copiedIds())) {
 			throw new BrowserProfileShareError("BROWSER_PROFILE_NOT_SHARED", "Profiles copied from another machine are not shared.");
 		}
 		let cookies: SharedBrowserCookie[];

@@ -312,7 +312,9 @@ describe("BrowserProfileStore profile sources", () => {
 		expect(updated.source).toMatchObject({ copiedAt: "2026-11-11T08:00:00.000Z" });
 	});
 
-	it("rejects an invalid source on create and drops an unreadable stored one without losing the profile", async () => {
+	// Dropping an unreadable source would make a damaged copy look like a
+	// local profile, and a local profile is shared: it is kept as "unknown".
+	it("rejects an invalid source on create and keeps an unreadable stored one as unknown without losing the profile", async () => {
 		const stateDir = await makeStateDir();
 		const store = new BrowserProfileStore({ stateDir });
 		await expect(store.createProfile("Bad", { source: { kind: "copy", hostId: "h/../x", machineName: "L", remoteProfileId: "nope", copiedAt: "x" } as never }))
@@ -323,6 +325,9 @@ describe("BrowserProfileStore profile sources", () => {
 		const reloaded = new BrowserProfileStore({ stateDir });
 		const state = await reloaded.load();
 		expect(state.error).toBeUndefined();
-		expect(state.profiles[0]).toEqual(expect.not.objectContaining({ source: expect.anything() }));
+		expect(state.profiles[0]?.source).toEqual({ kind: "unknown" });
+		// The marker survives the next write and reload.
+		await reloaded.renameProfile(state.profiles[0]!.id, "Renamed");
+		expect((await new BrowserProfileStore({ stateDir }).load()).profiles[0]?.source).toEqual({ kind: "unknown" });
 	});
 });

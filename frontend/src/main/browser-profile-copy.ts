@@ -24,28 +24,27 @@ import {
 	type BrowserProfileSource,
 } from "../shared/browser-profiles";
 import { normalizeBrowserHistoryEntry, type BrowserHistoryEntry, type BrowserHistoryStore } from "./browser-history-store";
+import type { BrowserProfileCopyLedger, BrowserProfileCopySource } from "./browser-profile-copy-ledger";
+import { LinkedMachinesSignedOutError, type LinkedMachine } from "./browser-profile-directory";
 import { isAntiBotCookie } from "./browser-profile-import";
+import { secureOrigin } from "./browser-profile-receiver";
+import { isShareableCookieHost } from "./browser-profile-share";
+import { createOneTimeKey, openPayload, sealContext, type OneTimeKey } from "./browser-profile-share-crypto";
 import { BrowserProfileStoreError, type BrowserProfileStore } from "./browser-profile-store";
 
+export { LinkedMachinesSignedOutError, type LinkedMachine };
+
 /**
- * The receiving machine: lists the browser profiles its linked machines share
- * and copies one into a local AO profile on an explicit click. Requests go
- * straight from this main process to the other machine's authenticated
- * remote-host listener with the saved credential; no cloud or relay server
- * sees the data, and the renderer never receives a cookie value. Everything
- * received is validated and bounded before anything is written.
+ * The receiving machine: lists the browser profiles its account's other
+ * machines share and copies one into a local AO profile on an explicit click.
+ * Requests go straight from this main process to the other machine's remote
+ * listener at the https address AO Cloud lists for it, with the account
+ * credential and a ticket this machine's daemon signs with its host key; the
+ * other machine seals each answer to a one-time key only this process holds.
+ * No cloud or relay server sees the data, and the renderer never receives a
+ * cookie value. Everything received is validated and bounded before anything
+ * is written.
  */
-
-/** A paired machine of the signed-in account, as main reads it from remotes.json. */
-export type LinkedMachine = { hostId: string; name: string; url: string; credential: string };
-
-/** Linked machines belong to an AO account; signed out there are none to read. */
-export class LinkedMachinesSignedOutError extends Error {
-	constructor() {
-		super("Sign in to Orchestrator Cloud to see your other machines.");
-		this.name = "LinkedMachinesSignedOutError";
-	}
-}
 
 const HOST_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
 const CURSOR_PATTERN = /^[0-9]{1,6}:[0-9]{1,6}$/;
@@ -67,11 +66,15 @@ type FetchImpl = typeof fetch;
 export type BrowserProfileCopyOptions = {
 	store: BrowserProfileStore;
 	history: Pick<BrowserHistoryStore, "clear" | "mergeImportedEntries">;
-	/** The signed-in account's paired machines, excluding this one. */
+	/** The signed-in account's other machines, from its AO Cloud directory. */
 	linkedMachines: () => Promise<LinkedMachine[]>;
 	/** The unauthenticated identity probe: the only request made before the credential is sent. */
 	identity: (url: string, signal: AbortSignal) => Promise<string>;
 	localHostId: () => Promise<string | null>;
+	/** This machine's daemon signs a ticket for reading sourceHostId's profiles sealed to key. */
+	issueTicket: (sourceHostId: string, key: string) => Promise<{ ticket: string; signature: string }>;
+	/** Every profile copied here, kept apart from the registry. */
+	ledger: Pick<BrowserProfileCopyLedger, "load" | "record" | "remove">;
 	setCookie: (partition: string, details: CookiesSetDetails) => Promise<void>;
 	flushCookies?: (partition: string) => Promise<void>;
 	/** Clears a profile's whole Electron storage and cache. */
@@ -90,6 +93,8 @@ class CopyError extends Error {
 
 const STATE_ERRORS: Record<Exclude<OtherMachineState, "online">, { code: BrowserProfileCopyErrorCode; message: string }> = {
 	offline: { code: "OFFLINE", message: "The other machine is offline." },
+	insecure: { code: "INSECURE", message: "The other machine has no secure address, so its profiles cannot be copied." },
+	unverified: { code: "UNVERIFIED", message: "The other machine could not confirm this machine." },
 	"sharing-off": { code: "SHARING_OFF", message: "Browser profile sharing is turned off on the other machine." },
 	unauthorized: { code: "UNAUTHORIZED", message: "Pair the other machine again in Remote hosts." },
 	outdated: { code: "OUTDATED", message: "Update Orchestrator on the other machine to copy its browser profiles." },
@@ -105,17 +110,20 @@ function boundedCount(value: unknown, max: number): number | null {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max ? value : null;
 }
 
+/**
+ * The other machine's https origin. Cookies and history never travel over
+ * plain http, even sealed: the credential would, and an http address cannot
+ * prove which machine answers.
+ */
 function remoteBase(url: string): string {
-	const base = (url.includes("://") ? url : `http://${url}`).replace(/\/+$/, "");
-	const parsed = new URL(base);
-	if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) {
-		throw new CopyError("UNAUTHORIZED", "The saved address for the other machine is not valid.");
-	}
-	return base;
+	const origin = secureOrigin(url);
+	if (!origin) throw new CopyError("INSECURE", STATE_ERRORS.insecure.message);
+	return origin;
 }
 
 function stateForResponse(status: number, code: string | undefined): OtherMachineState {
-	if (status === 401 || status === 421) return "unauthorized";
+	if (status === 403 && code === "RECEIVER_NOT_VERIFIED") return "unverified";
+	if (status === 401 || status === 421 || (status === 403 && code === "REMOTE_LINK_REQUIRED")) return "unauthorized";
 	if (status === 403 && code === "BROWSER_PROFILE_SHARING_OFF") return "sharing-off";
 	if (status === 501 || (status === 404 && code === "ROUTE_NOT_FOUND")) return "outdated";
 	if (status === 503 && code === "DESKTOP_UNAVAILABLE") return "desktop-closed";
@@ -185,6 +193,9 @@ export function receivedCookieDetails(value: unknown, nowSeconds: number): Cooki
 	if (expirationDate !== undefined && expirationDate <= nowSeconds) return { skip: "expired" };
 	const normalizedDomain = domain.toLowerCase();
 	const hostname = normalizedDomain.replace(/^\.+/, "");
+	// A cookie for localhost, an IP address, or a single-label host would
+	// apply to this machine's own local apps, not the site it came from.
+	if (!isShareableCookieHost(hostname)) return { skip: "invalid" };
 	let url: string;
 	try {
 		const parsed = new URL(`${secure ? "https" : "http"}://${hostname}`);
@@ -253,32 +264,81 @@ export class BrowserProfileCopyService {
 		return result;
 	}
 
-	/** Confirms the address still answers as the paired machine before the credential is sent. */
-	private async verifyIdentity(machine: LinkedMachine): Promise<void> {
+	/**
+	 * Confirms the address still answers as the listed machine before the
+	 * credential is sent, and returns this machine's own host id.
+	 */
+	private async verifyIdentity(machine: LinkedMachine): Promise<string> {
+		const base = remoteBase(machine.url);
+		const local = await this.options.localHostId();
+		if (!local) throw new CopyError("FAILED", "This machine's Orchestrator is not ready. Try again in a moment.");
 		let actual: string;
 		try {
-			actual = await this.options.identity(remoteBase(machine.url), AbortSignal.timeout(IDENTITY_TIMEOUT_MS));
+			actual = await this.options.identity(base, AbortSignal.timeout(IDENTITY_TIMEOUT_MS));
 		} catch (error) {
 			if (error instanceof CopyError) throw error;
 			throw new CopyError("OFFLINE", STATE_ERRORS.offline.message);
 		}
-		const local = await this.options.localHostId();
-		if (actual !== machine.hostId || (local && actual === local)) {
+		if (actual !== machine.hostId || actual === local) {
 			throw new CopyError("UNAUTHORIZED", STATE_ERRORS.unauthorized.message);
+		}
+		return local;
+	}
+
+	/** Copies here, by local profile id: the registry's provenance, else the ledger's. */
+	private async copySources(): Promise<Map<string, BrowserProfileCopySource>> {
+		await this.options.store.load();
+		let ledger: Map<string, BrowserProfileCopySource>;
+		try {
+			ledger = new Map((await this.options.ledger.load()).sources);
+		} catch {
+			ledger = new Map();
+		}
+		const sources = new Map<string, BrowserProfileCopySource>();
+		for (const profile of this.options.store.profiles) {
+			const source = profile.source?.kind === "copy" ? profile.source : ledger.get(profile.id);
+			if (source) sources.set(profile.id, source);
+		}
+		return sources;
+	}
+
+	/** A ticket signed by this machine's own daemon; one per request, all naming the operation's key. */
+	private async ticket(machine: LinkedMachine, key: OneTimeKey): Promise<{ ticket: string; signature: string }> {
+		try {
+			const signed = await this.options.issueTicket(machine.hostId, key.publicKey);
+			if (typeof signed?.ticket !== "string" || typeof signed.signature !== "string") throw new Error("no ticket");
+			return signed;
+		} catch {
+			throw new CopyError("FAILED", "This machine could not sign its request. Restart Orchestrator, then try again.");
 		}
 	}
 
-	private async request(machine: LinkedMachine, path: string, timeoutMs: number, maxBytes: number): Promise<unknown> {
-		const url = new URL(`${remoteBase(machine.url)}${path}`);
+	/**
+	 * One request to the other machine, answered sealed to key. The address is
+	 * checked again before each request, so a credential never follows an
+	 * address that another machine took over between pages.
+	 */
+	private async request(
+		machine: LinkedMachine,
+		key: OneTimeKey,
+		request: { path: string; action: "list" | "export"; profileId?: string; cursor?: string },
+		timeoutMs: number,
+		maxBytes: number,
+	): Promise<unknown> {
+		const base = remoteBase(machine.url);
+		const local = await this.verifyIdentity(machine);
+		const signed = await this.ticket(machine, key);
 		let response: Response;
 		try {
-			response = await this.fetchImpl(url.href, {
+			response = await this.fetchImpl(`${base}${request.path}`, {
 				method: "GET",
 				redirect: "error",
 				headers: {
 					Accept: "application/json",
 					Authorization: `Bearer ${machine.credential}`,
 					"X-AO-Expected-Host-ID": machine.hostId,
+					"X-AO-Receiver-Ticket": signed.ticket,
+					"X-AO-Receiver-Signature": signed.signature,
 				},
 				signal: AbortSignal.timeout(timeoutMs),
 			});
@@ -299,8 +359,17 @@ export class BrowserProfileCopyService {
 			body = undefined;
 		}
 		if (response.ok) {
-			if (body === undefined) throw new CopyError("INVALID_DATA", "The other machine sent data this machine cannot read.");
-			return body;
+			try {
+				return openPayload(body, key, sealContext({
+					sourceHostId: machine.hostId,
+					receiverHostId: local,
+					action: request.action,
+					profileId: request.profileId,
+					cursor: request.cursor,
+				}));
+			} catch {
+				throw new CopyError("INVALID_DATA", "The other machine sent data this machine cannot read.");
+			}
 		}
 		const code = isRecord(body) && typeof body.code === "string" ? body.code : undefined;
 		if (response.status === 404 && code === "SHARED_BROWSER_PROFILE_NOT_FOUND") {
@@ -325,20 +394,23 @@ export class BrowserProfileCopyService {
 			if (error instanceof LinkedMachinesSignedOutError) return { signedIn: false, machines: [] };
 			return { signedIn: true, machines: [], error: "Could not read your linked machines." };
 		}
-		await this.options.store.load();
-		const copies = this.options.store.profiles.flatMap((profile) =>
-			profile.source?.kind === "copy" ? [{ profile, source: profile.source }] : []);
+		const copies = [...(await this.copySources()).entries()];
 		const listed = await Promise.all(machines.map(async (machine): Promise<OtherMachine> => {
 			const name = normalizeBrowserProfileLabel(machine.name, BROWSER_PROFILE_MACHINE_NAME_MAX_LENGTH) ?? machine.hostId;
 			try {
-				await this.verifyIdentity(machine);
-				const body = await this.request(machine, "/api/v1/shared-browser-profiles", LIST_TIMEOUT_MS, MAX_LIST_BYTES);
+				const body = await this.request(
+					machine,
+					createOneTimeKey(),
+					{ path: "/api/v1/shared-browser-profiles", action: "list" },
+					LIST_TIMEOUT_MS,
+					MAX_LIST_BYTES,
+				);
 				const raw = isRecord(body) && Array.isArray(body.profiles) ? body.profiles.slice(0, BROWSER_PROFILE_MAX_COUNT) : [];
 				const profiles = raw.flatMap((entry) => {
 					const summary = parseSharedProfileSummary(entry);
 					if (!summary) return [];
-					const copy = copies.find(({ source }) => source.hostId === machine.hostId && source.remoteProfileId === summary.id);
-					return [{ ...summary, ...(copy ? { localCopy: { profileId: copy.profile.id, copiedAt: copy.source.copiedAt } } : {}) }];
+					const copy = copies.find(([, source]) => source.hostId === machine.hostId && source.remoteProfileId === summary.id);
+					return [{ ...summary, ...(copy ? { localCopy: { profileId: copy[0], copiedAt: copy[1].copiedAt } } : {}) }];
 				});
 				return { hostId: machine.hostId, name, state: "online", profiles };
 			} catch (error) {
@@ -362,7 +434,8 @@ export class BrowserProfileCopyService {
 
 	/** Reads every page, validating and bounding each, before anything is written. */
 	private async receive(machine: LinkedMachine, remoteProfileId: string): Promise<ReceivedProfile> {
-		await this.verifyIdentity(machine);
+		// One key for the whole copy; its private half never leaves this process.
+		const key = createOneTimeKey();
 		const nowSeconds = this.now().getTime() / 1_000;
 		const cookies = new Map<string, CookiesSetDetails>();
 		const history: BrowserHistoryEntry[] = [];
@@ -378,7 +451,13 @@ export class BrowserProfileCopyService {
 			const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
 			const body = await this.request(
 				machine,
-				`/api/v1/shared-browser-profiles/${encodeURIComponent(remoteProfileId)}/export${query}`,
+				key,
+				{
+					path: `/api/v1/shared-browser-profiles/${encodeURIComponent(remoteProfileId)}/export${query}`,
+					action: "export",
+					profileId: remoteProfileId,
+					cursor: cursor ?? "",
+				},
 				PAGE_TIMEOUT_MS,
 				MAX_PAGE_BYTES,
 			);
@@ -461,9 +540,9 @@ export class BrowserProfileCopyService {
 			let created: BrowserProfile | null = null;
 			try {
 				const machine = await this.findMachine(hostId);
-				await this.options.store.load();
+				const sources = await this.copySources();
 				const profiles = this.options.store.profiles;
-				if (profiles.some((profile) => profile.source?.kind === "copy" && profile.source.hostId === hostId && profile.source.remoteProfileId === remoteId)) {
+				if ([...sources.values()].some((source) => source.hostId === hostId && source.remoteProfileId === remoteId)) {
 					throw new CopyError("ALREADY_COPIED", "This profile is already on this machine. Update it instead.");
 				}
 				if (profiles.length >= BROWSER_PROFILE_MAX_COUNT) {
@@ -487,6 +566,8 @@ export class BrowserProfileCopyService {
 				);
 				const profile = await this.options.store.createProfile(name, { claimDefault: false, source });
 				created = profile;
+				// Recorded before any cookie is written, so the copy is never shared on.
+				await this.options.ledger.record(profile.id, source, this.options.store.profiles.map((candidate) => candidate.id));
 				const outcome = await this.options.store.runProfileOperation(
 					profile.id,
 					() => this.options.isProfileLive(profile.id),
@@ -512,10 +593,9 @@ export class BrowserProfileCopyService {
 			const profileId = normalizeBrowserProfileId(localProfileId);
 			if (!profileId) return { error: "That browser profile is not valid.", code: "INVALID_DATA" };
 			try {
-				await this.options.store.load();
+				const source = (await this.copySources()).get(profileId);
 				const profile = this.options.store.getProfile(profileId);
-				const source = profile?.source;
-				if (!profile || source?.kind !== "copy") {
+				if (!profile || !source) {
 					throw new CopyError("NOT_SHARED", "Only a profile copied from another machine can be updated.");
 				}
 				const machine = await this.findMachine(source.hostId);
@@ -530,11 +610,14 @@ export class BrowserProfileCopyService {
 						return this.writeContents(profileId, data);
 					},
 				);
-				const updated = await this.options.store.setProfileSource(profileId, {
+				const refreshed: BrowserProfileCopySource = {
 					...source,
 					...(data.summary.sourceBrowser ? { browser: data.summary.sourceBrowser } : {}),
 					copiedAt: this.now().toISOString(),
-				});
+				};
+				// Also restores provenance an older build stripped from the registry.
+				const updated = await this.options.store.setProfileSource(profileId, refreshed);
+				await this.options.ledger.record(profileId, refreshed, this.options.store.profiles.map((candidate) => candidate.id)).catch(() => undefined);
 				return {
 					profile: updated,
 					importedCookies: outcome.imported,
@@ -550,6 +633,8 @@ export class BrowserProfileCopyService {
 	/** Removes a copy that did not finish; best effort, like a failed import's cleanup. */
 	private async discard(profileId: string): Promise<void> {
 		await Promise.allSettled([this.options.clearProfileData(profileId), this.options.history.clear(profileId)]);
-		await this.options.store.deleteProfile(profileId).catch(() => undefined);
+		// The ledger entry goes only once the profile is gone: until then it withholds it.
+		const deleted = await this.options.store.deleteProfile(profileId).then(() => true, () => false);
+		if (deleted) await this.options.ledger.remove(profileId).catch(() => undefined);
 	}
 }

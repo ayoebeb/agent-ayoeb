@@ -101,9 +101,10 @@ function parseRegistry(raw: unknown): BrowserProfileRegistry {
 		if (profileIds.has(id) || profileNames.has(normalizedName)) {
 			throw invalidRegistry("The browser profile registry contains duplicate profile IDs or names.");
 		}
-		// Provenance is display and update metadata, never a reason to lose the
-		// profile: a record this build cannot read is dropped, not fatal.
-		const source = value.source === undefined ? null : normalizeBrowserProfileSource(value.source);
+		// Provenance is never a reason to lose the profile, but a record this
+		// build cannot read is kept as "unknown" rather than dropped: without
+		// it a copied profile would look local and be shared onward.
+		const source = value.source === undefined ? null : normalizeBrowserProfileSource(value.source) ?? { kind: "unknown" as const };
 		profileIds.add(id);
 		profileNames.add(normalizedName);
 		profiles.push({ id, name, createdAt, updatedAt, ...(source ? { source } : {}) });

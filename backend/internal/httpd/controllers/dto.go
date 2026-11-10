@@ -2798,54 +2798,27 @@ type SharedBrowserProfileExportQuery struct {
 	Cursor string `query:"cursor,omitempty" description:"Opaque cursor from the previous page's nextCursor; omit for the first page."`
 }
 
-// SharedBrowserProfile describes one browser profile this machine shares with
-// the machines linked to it. It carries counts only, never cookie values.
-type SharedBrowserProfile struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	// SourceBrowser is the browser the profile was imported from, when known.
-	SourceBrowser string `json:"sourceBrowser,omitempty"`
-	CookieCount   int    `json:"cookieCount"`
-	HistoryCount  int    `json:"historyCount"`
-	UpdatedAt     string `json:"updatedAt"`
+// SharedBrowserProfileReceiverHeaders identify the machine that reads this
+// machine's shared browser profiles. Its own daemon signs the ticket with its
+// host key; this machine's desktop checks the signature and seals the answer
+// to the one-time key the ticket names.
+type SharedBrowserProfileReceiverHeaders struct {
+	Ticket    string `header:"X-AO-Receiver-Ticket" description:"Signed receiver ticket, unpadded base64url, from the receiving machine's POST /api/v1/mobile/browser-profile-ticket."`
+	Signature string `header:"X-AO-Receiver-Signature" description:"The receiving machine's Ed25519 host key signature over the ticket, unpadded base64url."`
 }
 
-// SharedBrowserProfilesResponse is the body of GET /api/v1/shared-browser-profiles.
-type SharedBrowserProfilesResponse struct {
-	Profiles []SharedBrowserProfile `json:"profiles"`
-}
-
-// SharedBrowserCookie is one cookie of a shared profile, in the desktop
-// browser's own form. Only a linked machine copying the profile receives it.
-type SharedBrowserCookie struct {
-	Name     string `json:"name"`
-	Value    string `json:"value"`
-	Domain   string `json:"domain"`
-	HostOnly bool   `json:"hostOnly"`
-	Path     string `json:"path"`
-	Secure   bool   `json:"secure"`
-	HTTPOnly bool   `json:"httpOnly"`
-	SameSite string `json:"sameSite,omitempty"`
-	// ExpirationDate is seconds since the epoch; absent for a session cookie.
-	ExpirationDate *float64 `json:"expirationDate,omitempty"`
-}
-
-// SharedBrowserHistoryEntry is one visited page of a shared profile.
-type SharedBrowserHistoryEntry struct {
-	URL         string `json:"url"`
-	Title       string `json:"title,omitempty"`
-	LastVisited string `json:"lastVisited"`
-	VisitCount  int    `json:"visitCount"`
-}
-
-// SharedBrowserProfileExportResponse is one page of
-// GET /api/v1/shared-browser-profiles/{profileId}/export. A page fits the
-// desktop bridge's frame limit; NextCursor is empty on the last page.
-type SharedBrowserProfileExportResponse struct {
-	Profile    SharedBrowserProfile        `json:"profile"`
-	Cookies    []SharedBrowserCookie       `json:"cookies"`
-	History    []SharedBrowserHistoryEntry `json:"history"`
-	NextCursor string                      `json:"nextCursor,omitempty"`
+// SealedBrowserProfilePayload is an answer only the receiving machine can
+// read: JSON sealed with AES-256-GCM under a key agreed by X25519 between a
+// one-time key of this machine's desktop and the one-time key in the
+// receiver's ticket. This daemon relays it without being able to read it.
+type SealedBrowserProfilePayload struct {
+	Version int `json:"version"`
+	// Key is the sender's one-time X25519 public key, unpadded base64url.
+	Key string `json:"key"`
+	// IV is the 12-byte AES-GCM nonce, unpadded base64url.
+	IV string `json:"iv"`
+	// Data is the ciphertext followed by the 16-byte tag, unpadded base64url.
+	Data string `json:"data"`
 }
 
 // MobileStatusResponse is the body of the Connect Mobile status/enable/disable/

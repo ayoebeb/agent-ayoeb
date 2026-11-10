@@ -3919,6 +3919,50 @@ paths:
       summary: Allow or deny paired-device access to the desktop browser
       tags:
       - mobile
+  /api/v1/mobile/browser-profile-ticket:
+    post:
+      operationId: issueBrowserProfileTicket
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserProfileTicketRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserProfileTicketResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Sign a ticket with this machine's host key to read another machine's
+        shared browser profiles
+      tags:
+      - mobile
   /api/v1/mobile/devices:
     get:
       operationId: listMobileDevices
@@ -5477,6 +5521,31 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Forbidden
       summary: Issue a host-scoped account credential using the pairing password
+      tags:
+      - mobile
+  /api/v1/remote-host/host-key:
+    get:
+      operationId: getRemoteHostKey
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteHostKeyResponse'
+          description: OK
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Read this machine's host id and public host key
       tags:
       - mobile
   /api/v1/reports:
@@ -13086,13 +13155,36 @@ paths:
   /api/v1/shared-browser-profiles:
     get:
       operationId: listSharedBrowserProfiles
+      parameters:
+      - description: Signed receiver ticket, unpadded base64url, from the receiving
+          machine's POST /api/v1/mobile/browser-profile-ticket.
+        in: header
+        name: X-AO-Receiver-Ticket
+        schema:
+          description: Signed receiver ticket, unpadded base64url, from the receiving
+            machine's POST /api/v1/mobile/browser-profile-ticket.
+          type: string
+      - description: The receiving machine's Ed25519 host key signature over the ticket,
+          unpadded base64url.
+        in: header
+        name: X-AO-Receiver-Signature
+        schema:
+          description: The receiving machine's Ed25519 host key signature over the
+            ticket, unpadded base64url.
+          type: string
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SharedBrowserProfilesResponse'
+                $ref: '#/components/schemas/SealedBrowserProfilePayload'
           description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
         "403":
           content:
             application/json:
@@ -13123,7 +13215,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Gateway Timeout
-      summary: List the browser profiles this machine shares with its linked machines
+      summary: List the browser profiles this machine shares, sealed to the linked
+        machine whose ticket the request carries
       tags:
       - browser
   /api/v1/shared-browser-profiles/{profileId}/export:
@@ -13145,12 +13238,28 @@ paths:
           description: Opaque cursor from the previous page's nextCursor; omit for
             the first page.
           type: string
+      - description: Signed receiver ticket, unpadded base64url, from the receiving
+          machine's POST /api/v1/mobile/browser-profile-ticket.
+        in: header
+        name: X-AO-Receiver-Ticket
+        schema:
+          description: Signed receiver ticket, unpadded base64url, from the receiving
+            machine's POST /api/v1/mobile/browser-profile-ticket.
+          type: string
+      - description: The receiving machine's Ed25519 host key signature over the ticket,
+          unpadded base64url.
+        in: header
+        name: X-AO-Receiver-Signature
+        schema:
+          description: The receiving machine's Ed25519 host key signature over the
+            ticket, unpadded base64url.
+          type: string
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SharedBrowserProfileExportResponse'
+                $ref: '#/components/schemas/SealedBrowserProfilePayload'
           description: OK
         "400":
           content:
@@ -13194,8 +13303,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Gateway Timeout
-      summary: Read one page of a shared browser profile's cookies and history for
-        a linked machine
+      summary: Read one page of a shared browser profile's cookies and history, sealed
+        to the linked machine whose ticket the request carries
       tags:
       - browser
   /api/v1/shell-terminals:
@@ -15546,6 +15655,26 @@ components:
       - sessionId
       - action
       - result
+      type: object
+    BrowserProfileTicketRequest:
+      properties:
+        key:
+          type: string
+        sourceHostId:
+          type: string
+      required:
+      - sourceHostId
+      - key
+      type: object
+    BrowserProfileTicketResponse:
+      properties:
+        signature:
+          type: string
+        ticket:
+          type: string
+      required:
+      - ticket
+      - signature
       type: object
     BrowserStatusResponse:
       properties:
@@ -20171,6 +20300,16 @@ components:
       required:
       - servers
       type: object
+    RemoteHostKeyResponse:
+      properties:
+        hostId:
+          type: string
+        hostKey:
+          type: string
+      required:
+      - hostId
+      - hostKey
+      type: object
     RemoveProjectResult:
       properties:
         projectId:
@@ -20644,6 +20783,22 @@ components:
       required:
       - path
       - name
+      type: object
+    SealedBrowserProfilePayload:
+      properties:
+        data:
+          type: string
+        iv:
+          type: string
+        key:
+          type: string
+        version:
+          type: integer
+      required:
+      - version
+      - key
+      - iv
+      - data
       type: object
     SendConversationMessageRequest:
       properties:
@@ -21895,101 +22050,6 @@ components:
       - cloudEnabled
       - cloudControlPlaneUrl
       - trackerIntakeEnabled
-      type: object
-    SharedBrowserCookie:
-      properties:
-        domain:
-          type: string
-        expirationDate:
-          type:
-          - "null"
-          - number
-        hostOnly:
-          type: boolean
-        httpOnly:
-          type: boolean
-        name:
-          type: string
-        path:
-          type: string
-        sameSite:
-          type: string
-        secure:
-          type: boolean
-        value:
-          type: string
-      required:
-      - name
-      - value
-      - domain
-      - hostOnly
-      - path
-      - secure
-      - httpOnly
-      type: object
-    SharedBrowserHistoryEntry:
-      properties:
-        lastVisited:
-          type: string
-        title:
-          type: string
-        url:
-          type: string
-        visitCount:
-          type: integer
-      required:
-      - url
-      - lastVisited
-      - visitCount
-      type: object
-    SharedBrowserProfile:
-      properties:
-        cookieCount:
-          type: integer
-        historyCount:
-          type: integer
-        id:
-          type: string
-        name:
-          type: string
-        sourceBrowser:
-          type: string
-        updatedAt:
-          type: string
-      required:
-      - id
-      - name
-      - cookieCount
-      - historyCount
-      - updatedAt
-      type: object
-    SharedBrowserProfileExportResponse:
-      properties:
-        cookies:
-          items:
-            $ref: '#/components/schemas/SharedBrowserCookie'
-          type: array
-        history:
-          items:
-            $ref: '#/components/schemas/SharedBrowserHistoryEntry'
-          type: array
-        nextCursor:
-          type: string
-        profile:
-          $ref: '#/components/schemas/SharedBrowserProfile'
-      required:
-      - profile
-      - cookies
-      - history
-      type: object
-    SharedBrowserProfilesResponse:
-      properties:
-        profiles:
-          items:
-            $ref: '#/components/schemas/SharedBrowserProfile'
-          type: array
-      required:
-      - profiles
       type: object
     ShellTerminalEnvelope:
       properties:

@@ -28,6 +28,8 @@ type PendingCopy = {
 
 const STATE_KEYS: Record<Exclude<OtherMachine["state"], "online">, MessageKey> = {
 	offline: "settings.browserProfiles.machines.state.offline",
+	insecure: "settings.browserProfiles.machines.state.insecure",
+	unverified: "settings.browserProfiles.machines.state.unverified",
 	"sharing-off": "settings.browserProfiles.machines.state.sharingOff",
 	unauthorized: "settings.browserProfiles.machines.state.unauthorized",
 	outdated: "settings.browserProfiles.machines.state.outdated",
@@ -38,6 +40,8 @@ const STATE_KEYS: Record<Exclude<OtherMachine["state"], "online">, MessageKey> =
 const ERROR_KEYS: Record<BrowserProfileCopyErrorCode, MessageKey> = {
 	NOT_LINKED: "settings.browserProfiles.machines.error.notLinked",
 	OFFLINE: "settings.browserProfiles.machines.state.offline",
+	INSECURE: "settings.browserProfiles.machines.state.insecure",
+	UNVERIFIED: "settings.browserProfiles.machines.state.unverified",
 	SHARING_OFF: "settings.browserProfiles.machines.state.sharingOff",
 	UNAUTHORIZED: "settings.browserProfiles.machines.state.unauthorized",
 	OUTDATED: "settings.browserProfiles.machines.state.outdated",

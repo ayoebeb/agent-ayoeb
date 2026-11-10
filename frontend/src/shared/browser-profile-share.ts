@@ -2,8 +2,8 @@ import type { BrowserProfile, BrowserProfileId } from "./browser-profiles";
 
 /**
  * Browser profiles shared between machines linked to the same AO account.
- * Cookie values exist only in the two main processes and the authenticated
- * remote-host connection between them: nothing here that the renderer
+ * Cookie values exist only in the two main processes; between them they
+ * travel sealed to the receiving machine. Nothing here that the renderer
  * receives carries a cookie value.
  */
 
@@ -21,6 +21,10 @@ export type SharedBrowserProfileSummary = {
 export type OtherMachineState =
 	| "online"
 	| "offline"
+	/** Listed without an https address: nothing is copied over plain http. */
+	| "insecure"
+	/** It could not confirm this machine: not on its account listing, or no secure address here. */
+	| "unverified"
 	| "sharing-off"
 	| "unauthorized"
 	| "outdated"
@@ -49,6 +53,8 @@ export type OtherMachinesResult = {
 export type BrowserProfileCopyErrorCode =
 	| "NOT_LINKED"
 	| "OFFLINE"
+	| "INSECURE"
+	| "UNVERIFIED"
 	| "SHARING_OFF"
 	| "UNAUTHORIZED"
 	| "OUTDATED"
@@ -70,4 +76,20 @@ export type BrowserProfileCopyResult =
 	}
 	| { error: string; code: BrowserProfileCopyErrorCode; profile?: undefined };
 
-export type BrowserProfileSharingState = { enabled: boolean; error?: string };
+export type BrowserProfileSharingState = {
+	enabled: boolean;
+	error?: string;
+	/** The person at this machine declined the confirmation; nothing changed. */
+	cancelled?: boolean;
+};
+
+/** The native confirmation main shows before sharing is turned on, in the renderer's language. */
+export type BrowserProfileSharingConfirmLabels = {
+	title: string;
+	message: string;
+	detail: string;
+	cancel: string;
+	confirm: string;
+};
+
+export type BrowserProfileSharingInput = { enabled: boolean; labels?: BrowserProfileSharingConfirmLabels };

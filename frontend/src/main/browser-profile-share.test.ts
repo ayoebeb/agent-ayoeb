@@ -3,18 +3,25 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BROWSER_IMPORT_MAX_COOKIES } from "../shared/browser-profile-import";
+import type { SharedBrowserProfileSummary } from "../shared/browser-profile-share";
 import { BrowserHistoryStore } from "./browser-history-store";
+import { BROWSER_PROFILE_COPIES_FILE_NAME, BrowserProfileCopyLedger } from "./browser-profile-copy-ledger";
+import { BrowserProfileReceiverUnverifiedError, type VerifiedReceiver } from "./browser-profile-receiver";
 import {
 	BROWSER_PROFILE_SHARE_PAGE_BYTES,
 	BROWSER_PROFILE_SHARING_FILE_NAME,
 	BrowserProfileShareSource,
 	BrowserProfileSharingSetting,
+	isShareableCookieHost,
 	type SharedBrowserCookie,
+	type SharedBrowserProfilePage,
 } from "./browser-profile-share";
+import { createOneTimeKey, openPayload, sealContext, type SealedPayload } from "./browser-profile-share-crypto";
 import { BrowserProfileStore } from "./browser-profile-store";
 
 const NOW = new Date("2026-11-10T12:00:00.000Z");
 const FUTURE = NOW.getTime() / 1_000 + 86_400;
+const REMOTE_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const tempDirectories: string[] = [];
 
 async function stateDir(): Promise<string> {
@@ -29,24 +36,51 @@ afterEach(async () => {
 
 type Cookie = Record<string, unknown>;
 
-async function setup(cookiesByProfile: Record<string, Cookie[]> = {}, sharing = true) {
-	const dir = await stateDir();
+/** The receiving machine's one-time key, and a verifier that accepts only its ticket. */
+function receiverFixture() {
+	const key = createOneTimeKey();
+	const verified: VerifiedReceiver = { sourceHostId: "h_source", receiverHostId: "h_receiver", key: key.publicKey };
+	const verifications: unknown[] = [];
+	const receivers = {
+		verify: async (ticket: unknown, signature: unknown) => {
+			verifications.push(ticket);
+			if (ticket !== "good-ticket" || signature !== "good-signature") throw new BrowserProfileReceiverUnverifiedError();
+			return verified;
+		},
+	};
+	const openList = (payload: SealedPayload) =>
+		(openPayload(payload, key, sealContext({ ...verified, action: "list" })) as { profiles: SharedBrowserProfileSummary[] }).profiles;
+	const openPage = (payload: SealedPayload, profileId: string, cursor = "") =>
+		openPayload(payload, key, sealContext({ ...verified, action: "export", profileId, cursor })) as SharedBrowserProfilePage;
+	return { key, verified, receivers, verifications, openList, openPage };
+}
+
+const TICKET = { ticket: "good-ticket", signature: "good-signature" };
+
+async function setup(options: { cookies?: (profileId: string) => Cookie[]; sharing?: boolean; dir?: string } = {}) {
+	const dir = options.dir ?? await stateDir();
 	const store = new BrowserProfileStore({ stateDir: dir, now: () => NOW });
 	const history = new BrowserHistoryStore({ stateDir: dir, now: () => NOW });
 	const setting = new BrowserProfileSharingSetting(dir);
-	if (sharing) await setting.setEnabled(true);
+	if (options.sharing !== false) await setting.setEnabled(true);
+	const copies = new BrowserProfileCopyLedger(dir);
+	const receiver = receiverFixture();
 	const reads: string[] = [];
+	const hooks: { onRead?: () => Promise<void> } = {};
 	const source = new BrowserProfileShareSource({
 		store,
 		history,
 		sharing: setting,
+		copies,
+		receivers: receiver.receivers,
 		cookies: async (profileId) => {
 			reads.push(profileId);
-			return (cookiesByProfile[profileId] ?? []) as never;
+			await hooks.onRead?.();
+			return (options.cookies?.(profileId) ?? []) as never;
 		},
 		now: () => NOW,
 	});
-	return { dir, store, history, setting, source, reads };
+	return { dir, store, history, setting, copies, source, reads, receiver, hooks };
 }
 
 function cookie(name: string, overrides: Record<string, unknown> = {}): Cookie {
@@ -65,6 +99,15 @@ function cookie(name: string, overrides: Record<string, unknown> = {}): Cookie {
 	} as Cookie;
 }
 
+const COPY_SOURCE = {
+	kind: "copy" as const,
+	browser: "Google Chrome",
+	hostId: "h_laptop",
+	machineName: "Laptop",
+	remoteProfileId: REMOTE_ID,
+	copiedAt: NOW.toISOString(),
+};
+
 describe("BrowserProfileSharingSetting", () => {
 	it("is off by default and when the file is unreadable", async () => {
 		const dir = await stateDir();
@@ -75,112 +118,194 @@ describe("BrowserProfileSharingSetting", () => {
 		expect(await new BrowserProfileSharingSetting(dir).isEnabled()).toBe(false);
 	});
 
-	it("persists the owner's choice", async () => {
+	it("persists the owner's choice and counts every time it is turned off", async () => {
 		const dir = await stateDir();
-		await new BrowserProfileSharingSetting(dir).setEnabled(true);
+		const setting = new BrowserProfileSharingSetting(dir);
+		await setting.setEnabled(true);
 		expect(await new BrowserProfileSharingSetting(dir).isEnabled()).toBe(true);
 		expect(JSON.parse(await readFile(path.join(dir, BROWSER_PROFILE_SHARING_FILE_NAME), "utf8"))).toEqual({
 			version: 1,
 			shareWithLinkedMachines: true,
 		});
-		await new BrowserProfileSharingSetting(dir).setEnabled(false);
+		const before = setting.generation();
+		await setting.setEnabled(false);
+		expect(setting.generation()).toBe(before + 1);
 		expect(await new BrowserProfileSharingSetting(dir).isEnabled()).toBe(false);
 	});
 });
 
+describe("isShareableCookieHost", () => {
+	it("refuses hosts that name a machine rather than a site", () => {
+		for (const host of ["localhost", ".localhost", "app.localhost", "127.0.0.1", "192.168.1.1", "10.0.0.8", "[::1]", "::1", "intranet", ".intranet", "router."]) {
+			expect(isShareableCookieHost(host), host).toBe(false);
+		}
+		for (const host of ["example.test", ".example.com", "mail.google.com", "sub.domain.co.uk"]) {
+			expect(isShareableCookieHost(host), host).toBe(true);
+		}
+	});
+});
+
 describe("BrowserProfileShareSource", () => {
-	it("refuses to list or export while sharing is off, without reading any profile", async () => {
-		const { store, source, reads } = await setup({}, false);
+	it("refuses to list or export while sharing is off, without checking the receiver or reading any profile", async () => {
+		const { store, source, reads, receiver } = await setup({ sharing: false });
 		const profile = await store.createProfile("Brave");
-		await expect(source.list()).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARING_OFF" });
-		await expect(source.exportPage({ profileId: profile.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARING_OFF" });
+		await expect(source.list(TICKET)).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARING_OFF" });
+		await expect(source.exportPage({ ...TICKET, profileId: profile.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARING_OFF" });
+		expect(reads).toEqual([]);
+		expect(receiver.verifications).toEqual([]);
+	});
+
+	// A local process, a phone, or anything holding only a connection
+	// credential has no ticket the receiver's host key signed.
+	it("refuses a receiver it cannot verify, without reading any profile", async () => {
+		const { store, source, reads } = await setup({ cookies: () => [cookie("sid")] });
+		const profile = await store.createProfile("Brave");
+		for (const args of [{}, { ticket: "forged", signature: "good-signature" }, { ticket: "good-ticket" }]) {
+			await expect(source.list(args)).rejects.toMatchObject({ code: "BROWSER_PROFILE_RECEIVER_UNVERIFIED" });
+			await expect(source.exportPage({ ...args, profileId: profile.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_RECEIVER_UNVERIFIED" });
+		}
 		expect(reads).toEqual([]);
 	});
 
-	it("lists only profiles that were not copied from another machine", async () => {
-		const { store, history } = await setup();
-		const brave = await store.createProfile("Brave", { source: { kind: "import", browser: "Brave" } });
-		await store.createProfile("Chrome (from Laptop)", {
-			source: {
-				kind: "copy",
-				browser: "Google Chrome",
-				hostId: "h_laptop",
-				machineName: "Laptop",
-				remoteProfileId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-				copiedAt: NOW.toISOString(),
-			},
-		});
-		await history.mergeImportedEntries(brave.id, [
-			{ url: "https://example.test/a", lastVisited: "2026-11-10T12:30:00.000Z", visitCount: 1 },
-			{ url: "https://example.test/b", lastVisited: "2026-11-09T11:00:00.000Z", visitCount: 3 },
-		]);
-		const listed = await new BrowserProfileShareSource({
-			store,
-			history,
-			sharing: { isEnabled: async () => true },
-			cookies: async () => [
+	it("seals every answer so only the receiver's one-time key opens it, for that request only", async () => {
+		const { store, source, receiver } = await setup({ cookies: () => [cookie("sid")] });
+		const profile = await store.createProfile("Brave");
+		const page = await source.exportPage({ ...TICKET, profileId: profile.id });
+		expect(JSON.stringify(page)).not.toContain("dummy-sid");
+		expect(Object.keys(page).sort()).toEqual(["data", "iv", "key", "version"]);
+		expect(receiver.openPage(page, profile.id).cookies.map((entry) => entry.value)).toEqual(["dummy-sid"]);
+		expect(() => openPayload(page, createOneTimeKey(), sealContext({ ...receiver.verified, action: "export", profileId: profile.id, cursor: "" })))
+			.toThrow();
+		// Bound to the request: the same page does not open as a list, or as another page.
+		expect(() => receiver.openList(page)).toThrow();
+		expect(() => receiver.openPage(page, profile.id, "1:0")).toThrow();
+	});
+
+	it("lists only this machine's own profiles", async () => {
+		const { store, history, source, receiver, copies } = await setup({
+			cookies: () => [
 				cookie("sid"),
 				cookie("expired", { expirationDate: NOW.getTime() / 1_000 - 1 }),
 				cookie("cf_clearance"),
 				cookie("session-login", { session: true, expirationDate: undefined }),
-			] as never,
-			now: () => NOW,
-		}).list();
-		expect(listed.profiles).toEqual([{
+				cookie("dev-session", { domain: "localhost" }),
+				cookie("router", { domain: "192.168.1.1" }),
+				cookie("wiki", { domain: ".intranet", hostOnly: false }),
+			],
+		});
+		const brave = await store.createProfile("Brave", { source: { kind: "import", browser: "Brave" } });
+		const work = await store.createProfile("Work");
+		const copied = await store.createProfile("Chrome (from Laptop)", { source: COPY_SOURCE });
+		await copies.record(copied.id, COPY_SOURCE, store.profiles.map((profile) => profile.id));
+		await history.mergeImportedEntries(brave.id, [
+			{ url: "https://example.test/a", lastVisited: "2026-11-10T12:30:00.000Z", visitCount: 1 },
+			{ url: "https://example.test/b", lastVisited: "2026-11-09T11:00:00.000Z", visitCount: 3 },
+		]);
+		const listed = receiver.openList(await source.list(TICKET));
+		expect(listed.map((profile) => profile.id).sort()).toEqual([brave.id, work.id].sort());
+		expect(listed.find((profile) => profile.id === brave.id)).toEqual({
 			id: brave.id,
 			name: "Brave",
 			sourceBrowser: "Brave",
+			// sid and the session sign-in; expired, anti-bot and machine-host cookies are left out.
 			cookieCount: 2,
 			historyCount: 2,
 			// The newest visit is later than the record itself.
 			updatedAt: "2026-11-10T12:30:00.000Z",
-		}]);
+		});
+	});
+
+	// Probe P2 of the security review: an older build rewrites the registry
+	// without the provenance it does not know. The copy must stay withheld.
+	it("withholds a copy whose provenance an older build stripped from the registry", async () => {
+		const dir = await stateDir();
+		const first = await setup({ dir, cookies: () => [cookie("sid")] });
+		const copied = await first.store.createProfile("Chrome (from Laptop)", { source: COPY_SOURCE });
+		await first.copies.record(copied.id, COPY_SOURCE, first.store.profiles.map((profile) => profile.id));
+		const registryPath = path.join(dir, "browser-profiles.json");
+		const registry = JSON.parse(await readFile(registryPath, "utf8")) as { profiles: Record<string, unknown>[] };
+		registry.profiles = registry.profiles.map(({ source: _source, ...rest }) => rest);
+		await writeFile(registryPath, JSON.stringify(registry));
+
+		const reloaded = await setup({ dir, cookies: () => [cookie("sid")] });
+		await reloaded.store.load();
+		expect(reloaded.store.getProfile(copied.id)?.source).toBeUndefined();
+		expect(reloaded.receiver.openList(await reloaded.source.list(TICKET))).toEqual([]);
+		await expect(reloaded.source.exportPage({ ...TICKET, profileId: copied.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_SHARED" });
+	});
+
+	it("withholds a profile whose provenance this build cannot read", async () => {
+		const dir = await stateDir();
+		const first = await setup({ dir });
+		const profile = await first.store.createProfile("Mystery");
+		const registryPath = path.join(dir, "browser-profiles.json");
+		const registry = JSON.parse(await readFile(registryPath, "utf8")) as { profiles: Record<string, unknown>[] };
+		registry.profiles[0]!.source = { kind: "synced-from-the-future", hostId: 7 };
+		await writeFile(registryPath, JSON.stringify(registry));
+
+		const reloaded = await setup({ dir });
+		await reloaded.store.load();
+		expect(reloaded.store.getProfile(profile.id)?.source).toEqual({ kind: "unknown" });
+		expect(reloaded.receiver.openList(await reloaded.source.list(TICKET))).toEqual([]);
+		await expect(reloaded.source.exportPage({ ...TICKET, profileId: profile.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_SHARED" });
+	});
+
+	it("shares nothing while the copy ledger cannot be read", async () => {
+		const { dir, store, source } = await setup();
+		const profile = await store.createProfile("Work");
+		await writeFile(path.join(dir, BROWSER_PROFILE_COPIES_FILE_NAME), "{ damaged");
+		await expect(source.list(TICKET)).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARE_FAILED" });
+		await expect(source.exportPage({ ...TICKET, profileId: profile.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARE_FAILED" });
+	});
+
+	// Probe P3 of the security review: the owner turns sharing off while a
+	// page is being read. That page must not be answered either.
+	it("does not answer a read that was running when sharing was turned off", async () => {
+		const { store, source, setting, hooks } = await setup({ cookies: () => [cookie("sid")] });
+		const profile = await store.createProfile("Brave");
+		hooks.onRead = async () => {
+			hooks.onRead = undefined;
+			await setting.setEnabled(false);
+			await setting.setEnabled(true);
+		};
+		await expect(source.exportPage({ ...TICKET, profileId: profile.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARING_OFF" });
+		hooks.onRead = async () => {
+			hooks.onRead = undefined;
+			await setting.setEnabled(false);
+		};
+		await expect(source.list(TICKET)).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARING_OFF" });
 	});
 
 	it("never exports a copied profile and validates the request", async () => {
 		const { store, source } = await setup();
-		const copied = await store.createProfile("Chrome (from Laptop)", {
-			source: {
-				kind: "copy",
-				hostId: "h_laptop",
-				machineName: "Laptop",
-				remoteProfileId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-				copiedAt: NOW.toISOString(),
-			},
-		});
+		const copied = await store.createProfile("Chrome (from Laptop)", { source: COPY_SOURCE });
 		const own = await store.createProfile("Work");
-		await expect(source.exportPage({ profileId: copied.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_SHARED" });
-		await expect(source.exportPage({ profileId: "0f8fad5b-d9cb-469f-a165-70867728950e" })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_FOUND" });
-		await expect(source.exportPage({ profileId: "../etc" })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_FOUND" });
-		await expect(source.exportPage({ profileId: own.id, cursor: "../../x" })).rejects.toMatchObject({ code: "INVALID_CURSOR" });
-		await expect(source.exportPage({ profileId: own.id, cursor: "5:0" })).rejects.toMatchObject({ code: "INVALID_CURSOR" });
+		await expect(source.exportPage({ ...TICKET, profileId: copied.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_SHARED" });
+		await expect(source.exportPage({ ...TICKET, profileId: "0f8fad5b-d9cb-469f-a165-70867728950e" })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_FOUND" });
+		await expect(source.exportPage({ ...TICKET, profileId: "../etc" })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_FOUND" });
+		await expect(source.exportPage({ ...TICKET, profileId: own.id, cursor: "../../x" })).rejects.toMatchObject({ code: "INVALID_CURSOR" });
+		await expect(source.exportPage({ ...TICKET, profileId: own.id, cursor: "5:0" })).rejects.toMatchObject({ code: "INVALID_CURSOR" });
 	});
 
 	it("pages a large profile under the bridge budget and covers every cookie and visit once", async () => {
 		const big = "v".repeat(3_900);
-		const dir = await stateDir();
-		const store = new BrowserProfileStore({ stateDir: dir, now: () => NOW });
-		const history = new BrowserHistoryStore({ stateDir: dir, now: () => NOW });
+		const all = Array.from({ length: 1_500 }, (_, index) => cookie(`c${index.toString().padStart(4, "0")}`, { value: big }));
+		const { store, history, source, receiver } = await setup({ cookies: () => all });
 		const profile = await store.createProfile("Brave");
 		await history.mergeImportedEntries(profile.id, Array.from({ length: 50 }, (_, index) => ({
 			url: `https://example.test/page-${index}`,
 			lastVisited: NOW.toISOString(),
 			visitCount: 1,
 		})));
-		const all = Array.from({ length: 1_500 }, (_, index) => cookie(`c${index.toString().padStart(4, "0")}`, { value: big }));
-		const source = new BrowserProfileShareSource({
-			store,
-			history,
-			sharing: { isEnabled: async () => true },
-			cookies: async () => all as never,
-			now: () => NOW,
-		});
 		const cookies: SharedBrowserCookie[] = [];
 		const visits: string[] = [];
 		let cursor: string | undefined;
 		let pages = 0;
 		do {
-			const page = await source.exportPage({ profileId: profile.id, ...(cursor ? { cursor } : {}) });
+			const sealed = await source.exportPage({ ...TICKET, profileId: profile.id, ...(cursor ? { cursor } : {}) });
+			// Sealed, a page still fits the desktop bridge frame.
+			expect(Buffer.byteLength(JSON.stringify(sealed))).toBeLessThanOrEqual(Math.ceil(BROWSER_PROFILE_SHARE_PAGE_BYTES * 4 / 3) + 256);
+			const page = receiver.openPage(sealed, profile.id, cursor ?? "");
 			pages += 1;
 			expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(BROWSER_PROFILE_SHARE_PAGE_BYTES);
 			expect(page.profile.cookieCount).toBe(1_500);
@@ -196,18 +321,10 @@ describe("BrowserProfileShareSource", () => {
 
 	it("caps a profile at the cookie import limit", async () => {
 		const many = Array.from({ length: BROWSER_IMPORT_MAX_COOKIES + 5 }, (_, index) => cookie(`c${index}`));
-		const dir = await stateDir();
-		const store = new BrowserProfileStore({ stateDir: dir, now: () => NOW });
+		const { store, source, receiver } = await setup({ cookies: () => many });
 		const profile = await store.createProfile("Brave");
-		const source = new BrowserProfileShareSource({
-			store,
-			history: new BrowserHistoryStore({ stateDir: dir }),
-			sharing: { isEnabled: async () => true },
-			cookies: async () => many as never,
-			now: () => NOW,
-		});
-		expect((await source.list()).profiles[0]?.cookieCount).toBe(BROWSER_IMPORT_MAX_COOKIES);
-		const first = await source.exportPage({ profileId: profile.id });
+		expect(receiver.openList(await source.list(TICKET))[0]?.cookieCount).toBe(BROWSER_IMPORT_MAX_COOKIES);
+		const first = receiver.openPage(await source.exportPage({ ...TICKET, profileId: profile.id }), profile.id);
 		expect(first.profile.cookieCount).toBe(BROWSER_IMPORT_MAX_COOKIES);
 	});
 });

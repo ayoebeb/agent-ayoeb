@@ -32,18 +32,32 @@ var (
 	ErrSharedBrowserProfilesUnavailable = errors.New("the Orchestrator desktop app is not running on this machine")
 	// ErrSharedBrowserProfileBadCursor rejects a cursor the desktop did not issue.
 	ErrSharedBrowserProfileBadCursor = errors.New("shared browser profile cursor is invalid")
+	// ErrSharedBrowserProfileReceiverUnverified means the desktop could not
+	// confirm the receiving machine: its ticket's signature did not check out
+	// against the host key it serves at its https address, or the account no
+	// longer lists it.
+	ErrSharedBrowserProfileReceiverUnverified = errors.New("the receiving machine could not be verified")
 )
 
+// SharedBrowserProfileReceiver is the receiving machine's signed ticket, as
+// it arrived. The desktop checks it; the daemon only bounds its shape.
+type SharedBrowserProfileReceiver struct {
+	Ticket    string
+	Signature string
+}
+
 // SharedBrowserProfileSource reads this machine's shared browser profiles from
-// its desktop app, which owns the cookie partitions and history.
+// its desktop app, which owns the cookie partitions and history, and returns
+// them sealed to the receiver its ticket names.
 type SharedBrowserProfileSource interface {
-	ListSharedBrowserProfiles(ctx context.Context) (SharedBrowserProfilesResponse, error)
-	ExportSharedBrowserProfile(ctx context.Context, profileID, cursor string) (SharedBrowserProfileExportResponse, error)
+	ListSharedBrowserProfiles(ctx context.Context, receiver SharedBrowserProfileReceiver) (SealedBrowserProfilePayload, error)
+	ExportSharedBrowserProfile(ctx context.Context, receiver SharedBrowserProfileReceiver, profileID, cursor string) (SealedBrowserProfilePayload, error)
 }
 
 // SharedBrowserProfilesController serves this machine's browser profiles to
 // the machines linked to it. The router mounts it behind remoteLinkOnly, so
-// only a bearer-authenticated request on the remote listener reaches it.
+// only a request on the remote listener that presents the account credential
+// reaches it, and each request must also carry a receiver ticket.
 type SharedBrowserProfilesController struct {
 	Source SharedBrowserProfileSource
 }
@@ -57,20 +71,39 @@ func (c *SharedBrowserProfilesController) Register(r chi.Router) {
 var (
 	sharedBrowserProfileIDPattern     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
 	sharedBrowserProfileCursorPattern = regexp.MustCompile(`^\d{1,6}:\d{1,6}$`)
+	// A ticket is base64url JSON of a few hundred bytes; a signature is 64
+	// bytes. The desktop parses and checks both.
+	sharedBrowserProfileTicketPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	sharedBrowserProfileSignaturePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{86}$`)
 )
+
+func sharedBrowserProfileReceiver(w http.ResponseWriter, r *http.Request) (SharedBrowserProfileReceiver, bool) {
+	receiver := SharedBrowserProfileReceiver{
+		Ticket:    r.Header.Get("X-AO-Receiver-Ticket"),
+		Signature: r.Header.Get("X-AO-Receiver-Signature"),
+	}
+	if len(receiver.Ticket) < 16 || len(receiver.Ticket) > 2048 ||
+		!sharedBrowserProfileTicketPattern.MatchString(receiver.Ticket) || !sharedBrowserProfileSignaturePattern.MatchString(receiver.Signature) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", "RECEIVER_TICKET_REQUIRED",
+			"A signed receiver ticket is required to read shared browser profiles.", nil)
+		return SharedBrowserProfileReceiver{}, false
+	}
+	return receiver, true
+}
 
 func (c *SharedBrowserProfilesController) list(w http.ResponseWriter, r *http.Request) {
 	if c.Source == nil {
 		apispec.NotImplemented(w, r, http.MethodGet, sharedBrowserProfilesPath)
 		return
 	}
-	result, err := c.Source.ListSharedBrowserProfiles(r.Context())
+	receiver, ok := sharedBrowserProfileReceiver(w, r)
+	if !ok {
+		return
+	}
+	result, err := c.Source.ListSharedBrowserProfiles(r.Context(), receiver)
 	if err != nil {
 		writeSharedBrowserProfileError(w, r, err)
 		return
-	}
-	if result.Profiles == nil {
-		result.Profiles = []SharedBrowserProfile{}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	envelope.WriteJSON(w, http.StatusOK, result)
@@ -91,18 +124,16 @@ func (c *SharedBrowserProfilesController) export(w http.ResponseWriter, r *http.
 		writeSharedBrowserProfileError(w, r, ErrSharedBrowserProfileBadCursor)
 		return
 	}
-	result, err := c.Source.ExportSharedBrowserProfile(r.Context(), strings.ToLower(profileID), cursor)
+	receiver, ok := sharedBrowserProfileReceiver(w, r)
+	if !ok {
+		return
+	}
+	result, err := c.Source.ExportSharedBrowserProfile(r.Context(), receiver, strings.ToLower(profileID), cursor)
 	if err != nil {
 		writeSharedBrowserProfileError(w, r, err)
 		return
 	}
-	if result.Cookies == nil {
-		result.Cookies = []SharedBrowserCookie{}
-	}
-	if result.History == nil {
-		result.History = []SharedBrowserHistoryEntry{}
-	}
-	// Cookie values must not linger in any cache between the two machines.
+	// Even sealed, the page must not linger in any cache between the machines.
 	w.Header().Set("Cache-Control", "no-store")
 	envelope.WriteJSON(w, http.StatusOK, result)
 }
@@ -115,6 +146,9 @@ func writeSharedBrowserProfileError(w http.ResponseWriter, r *http.Request, err 
 	case errors.Is(err, ErrSharedBrowserProfileNotFound):
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SHARED_BROWSER_PROFILE_NOT_FOUND",
 			"This browser profile is not shared by this machine.", nil)
+	case errors.Is(err, ErrSharedBrowserProfileReceiverUnverified):
+		envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "RECEIVER_NOT_VERIFIED",
+			"This machine could not verify the machine asking. Both must be signed in to the same Orchestrator account, online, and reachable at a secure address.", nil)
 	case errors.Is(err, ErrSharedBrowserProfileBadCursor):
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", "INVALID_CURSOR", "export cursor is invalid", nil)
 	case errors.Is(err, ErrSharedBrowserProfilesUnavailable):

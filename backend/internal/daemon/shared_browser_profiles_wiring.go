@@ -26,14 +26,17 @@ const (
 	sharedBrowserProfileListTimeout   = 20 * time.Second
 	sharedBrowserProfileExportTimeout = 60 * time.Second
 
-	// Bounds on what the desktop may hand back. The receiving machine validates
-	// every field again before it writes anything.
-	sharedBrowserProfileMaxProfiles       = 32
-	sharedBrowserProfileMaxCookiesPerPage = 20_000
-	sharedBrowserProfileMaxHistoryPerPage = 5_000
+	// A sealed page is a 3 MiB page in base64url plus its tag, well under the
+	// desktop bridge frame. The receiving machine opens it and validates every
+	// field before it writes anything.
+	sharedBrowserProfileMaxSealedBytes = 6 << 20
 )
 
-var sharedBrowserProfileNextCursor = regexp.MustCompile(`^\d{1,6}:\d{1,6}$`)
+var (
+	sharedBrowserProfileSealedKey  = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+	sharedBrowserProfileSealedIV   = regexp.MustCompile(`^[A-Za-z0-9_-]{16}$`)
+	sharedBrowserProfileSealedData = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+)
 
 // errSharedBrowserProfileDesktopFailed carries no desktop text: the desktop's
 // message could in principle describe the data it was reading.
@@ -58,41 +61,43 @@ func newSharedBrowserProfilesViaDesktop(broker sharedBrowserProfileBroker, log *
 	return sharedBrowserProfilesViaDesktop{broker: broker, log: log}
 }
 
-func (s sharedBrowserProfilesViaDesktop) ListSharedBrowserProfiles(ctx context.Context) (controllers.SharedBrowserProfilesResponse, error) {
+func (s sharedBrowserProfilesViaDesktop) ListSharedBrowserProfiles(ctx context.Context, receiver controllers.SharedBrowserProfileReceiver) (controllers.SealedBrowserProfilePayload, error) {
 	ctx, cancel := context.WithTimeout(ctx, sharedBrowserProfileListTimeout)
 	defer cancel()
-	result, err := s.broker.Execute(ctx, sharedBrowserProfileChain, sharedBrowserProfileListAction, nil)
-	if err != nil {
-		return controllers.SharedBrowserProfilesResponse{}, s.desktopError(err)
-	}
-	var out controllers.SharedBrowserProfilesResponse
-	if err := decodeDesktopValue(result.Value, &out); err != nil || len(out.Profiles) > sharedBrowserProfileMaxProfiles {
-		s.log.Warn("shared browser profiles: desktop returned a malformed list")
-		return controllers.SharedBrowserProfilesResponse{}, errSharedBrowserProfileDesktopFailed
-	}
-	return out, nil
+	return s.sealed(ctx, sharedBrowserProfileListAction, receiverArgs(receiver))
 }
 
-func (s sharedBrowserProfilesViaDesktop) ExportSharedBrowserProfile(ctx context.Context, profileID, cursor string) (controllers.SharedBrowserProfileExportResponse, error) {
+func (s sharedBrowserProfilesViaDesktop) ExportSharedBrowserProfile(ctx context.Context, receiver controllers.SharedBrowserProfileReceiver, profileID, cursor string) (controllers.SealedBrowserProfilePayload, error) {
 	ctx, cancel := context.WithTimeout(ctx, sharedBrowserProfileExportTimeout)
 	defer cancel()
-	args := map[string]interface{}{"profileId": profileID}
+	args := receiverArgs(receiver)
+	args["profileId"] = profileID
 	if cursor != "" {
 		args["cursor"] = cursor
 	}
-	result, err := s.broker.Execute(ctx, sharedBrowserProfileChain, sharedBrowserProfileExportAction, args)
+	return s.sealed(ctx, sharedBrowserProfileExportAction, args)
+}
+
+func receiverArgs(receiver controllers.SharedBrowserProfileReceiver) map[string]interface{} {
+	return map[string]interface{}{"ticket": receiver.Ticket, "signature": receiver.Signature}
+}
+
+// sealed runs one action and passes on only a well-formed sealed payload. The
+// daemon cannot read it: the desktop sealed it to the receiver's ticket key.
+func (s sharedBrowserProfilesViaDesktop) sealed(ctx context.Context, action string, args map[string]interface{}) (controllers.SealedBrowserProfilePayload, error) {
+	result, err := s.broker.Execute(ctx, sharedBrowserProfileChain, action, args)
 	if err != nil {
-		return controllers.SharedBrowserProfileExportResponse{}, s.desktopError(err)
+		return controllers.SealedBrowserProfilePayload{}, s.desktopError(err)
 	}
-	var out controllers.SharedBrowserProfileExportResponse
+	var out controllers.SealedBrowserProfilePayload
 	if err := decodeDesktopValue(result.Value, &out); err != nil ||
-		out.Profile.ID != profileID ||
-		len(out.Cookies) > sharedBrowserProfileMaxCookiesPerPage ||
-		len(out.History) > sharedBrowserProfileMaxHistoryPerPage ||
-		(out.NextCursor != "" && !sharedBrowserProfileNextCursor.MatchString(out.NextCursor)) {
-		// Never log the decoded page: it holds cookie values.
-		s.log.Warn("shared browser profiles: desktop returned a malformed export page")
-		return controllers.SharedBrowserProfileExportResponse{}, errSharedBrowserProfileDesktopFailed
+		out.Version != 1 ||
+		!sharedBrowserProfileSealedKey.MatchString(out.Key) ||
+		!sharedBrowserProfileSealedIV.MatchString(out.IV) ||
+		len(out.Data) > sharedBrowserProfileMaxSealedBytes ||
+		!sharedBrowserProfileSealedData.MatchString(out.Data) {
+		s.log.Warn("shared browser profiles: desktop returned a malformed sealed payload")
+		return controllers.SealedBrowserProfilePayload{}, errSharedBrowserProfileDesktopFailed
 	}
 	return out, nil
 }
@@ -111,6 +116,8 @@ func (s sharedBrowserProfilesViaDesktop) desktopError(err error) error {
 		switch commandErr.Code {
 		case "BROWSER_PROFILE_SHARING_OFF":
 			return controllers.ErrBrowserProfileSharingOff
+		case "BROWSER_PROFILE_RECEIVER_UNVERIFIED":
+			return controllers.ErrSharedBrowserProfileReceiverUnverified
 		case "BROWSER_PROFILE_NOT_FOUND", "BROWSER_PROFILE_NOT_SHARED":
 			return controllers.ErrSharedBrowserProfileNotFound
 		case "INVALID_CURSOR":

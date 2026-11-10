@@ -356,7 +356,7 @@ export const aoBridge: AoBridge =
 			import: async () => ({ sourceName: "", entries: [] }),
 			onImportProgress: () => () => undefined,
 			getSharing: async () => ({ enabled: false }),
-			setSharing: async (enabled: boolean) => ({ enabled }),
+			setSharing: async ({ enabled }: { enabled: boolean }) => ({ enabled }),
 			listOtherMachines: async () => ({ signedIn: false, machines: [] }),
 			copyFromMachine: async () => ({ error: "Unavailable", code: "FAILED" as const }),
 			updateCopy: async () => ({ error: "Unavailable", code: "FAILED" as const }),

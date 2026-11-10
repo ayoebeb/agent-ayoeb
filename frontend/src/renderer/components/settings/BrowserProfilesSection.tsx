@@ -48,6 +48,7 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 	const [importOpen, setImportOpen] = useState(false);
 	const [sharing, setSharing] = useState<boolean | null>(null);
 	const [sharingError, setSharingError] = useState("");
+	const [sharingBusy, setSharingBusy] = useState(false);
 
 	const refresh = async () => {
 		if (!bridge) return;
@@ -81,14 +82,29 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 	}, [bridge]);
 
 	const toggleSharing = async (enabled: boolean) => {
-		if (!bridge) return;
+		if (!bridge || sharingBusy) return;
 		setSharingError("");
+		setSharingBusy(true);
 		try {
-			const state = await bridge.setSharing(enabled);
+			// Turning sharing on asks in a native dialog main shows; these are its words.
+			const state = await bridge.setSharing(enabled
+				? {
+					enabled,
+					labels: {
+						title: t("settings.browserProfiles.sharing.confirmTitle"),
+						message: t("settings.browserProfiles.sharing.confirmMessage"),
+						detail: t("settings.browserProfiles.sharing.confirmDetail"),
+						cancel: t("confirm.cancel"),
+						confirm: t("settings.browserProfiles.sharing.confirm"),
+					},
+				}
+				: { enabled });
 			setSharing(state.enabled);
 			if (state.error) setSharingError(t("settings.browserProfiles.sharing.saveFailed"));
 		} catch {
 			setSharingError(t("settings.browserProfiles.sharing.saveFailed"));
+		} finally {
+			setSharingBusy(false);
 		}
 	};
 
@@ -221,7 +237,7 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 					<Switch
 						aria-label={t("settings.browserProfiles.sharing.label")}
 						checked={sharing === true}
-						disabled={!bridge || sharing === null}
+						disabled={!bridge || sharing === null || sharingBusy}
 						onCheckedChange={(checked) => void toggleSharing(checked)}
 					/>
 				</SettingsRow>

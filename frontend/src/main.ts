@@ -213,7 +213,10 @@ import { registerChatImageIpc } from "./main/chat-image-ipc";
 import { pruneCloudArtifactFolders, registerCloudArtifactIpc } from "./main/cloud-artifact-ipc";
 import { BrowserProfileImportService } from "./main/browser-profile-import";
 import { BrowserProfileShareSource, BrowserProfileSharingSetting } from "./main/browser-profile-share";
-import { BrowserProfileCopyService, LinkedMachinesSignedOutError, type LinkedMachine } from "./main/browser-profile-copy";
+import { BrowserProfileCopyService } from "./main/browser-profile-copy";
+import { BrowserProfileCopyLedger } from "./main/browser-profile-copy-ledger";
+import { AccountDirectory, type LinkedMachine } from "./main/browser-profile-directory";
+import { BrowserProfileReceiverVerifier } from "./main/browser-profile-receiver";
 import {
 	registerBrowserProfileIpc,
 	type BrowserProfileIpc,
@@ -259,7 +262,7 @@ import { buildLinuxAppMenuTemplate, buildMacAppMenuTemplate, buildWindowsAppMenu
 import { ancestorRepositorySetupWarning, resolveCheckedOutBranch, scanImportFolder } from "./main/import-folder-scan";
 import { parseOpenFolderPathArg } from "./main/open-folder-arg";
 import { registerRemotesIpc, remotesFilePath } from "./main/remotes-main";
-import { readRemotes, sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
+import { sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
 import { createLocalHostIdentity, readRemoteIdentity } from "./main/remote-request";
 import { RemoteRegistry } from "./main/remote-registry";
 import { startRemoteProxy } from "./main/remote-proxy";
@@ -964,10 +967,16 @@ async function createWindowInternal(): Promise<void> {
 	});
 	await profileImporter.initialize();
 	const browserProfileSharing = new BrowserProfileSharingSetting(browserProfileStateDir());
+	const browserProfileCopies = new BrowserProfileCopyLedger(browserProfileStateDir());
 	const profileShareSource = new BrowserProfileShareSource({
 		store: browserProfileStore,
 		history: browserHistoryStore,
 		sharing: browserProfileSharing,
+		copies: browserProfileCopies,
+		receivers: new BrowserProfileReceiverVerifier({
+			localHostId: localHostIdentity,
+			accountHosts: () => browserProfileAccountDirectory.hosts(),
+		}),
 		cookies: (profileId) => session.fromPartition(browserProfilePartition(profileId)).cookies.get({}),
 	});
 	const windowOptions: Electron.BaseWindowConstructorOptions = {
@@ -1232,6 +1241,8 @@ async function createWindowInternal(): Promise<void> {
 		linkedMachines: linkedMachinesForBrowserProfiles,
 		identity: (url, signal) => readRemoteIdentity({ url }, fetch, signal),
 		localHostId: localHostIdentity,
+		issueTicket: issueBrowserProfileTicket,
+		ledger: browserProfileCopies,
 		setCookie: (partition, details) => session.fromPartition(partition).cookies.set(details),
 		flushCookies: (partition) => session.fromPartition(partition).cookies.flushStore(),
 		clearProfileData: (profileId) => profileHost.clearProfileData(profileId),
@@ -1269,6 +1280,23 @@ async function createWindowInternal(): Promise<void> {
 				title: labels.switchTitle,
 				message,
 			}).catch((error) => console.error("browser profile error dialog failed:", error));
+		},
+		// A native dialog the renderer cannot answer for itself: turning sharing
+		// on takes a click from the person at this machine.
+		confirmSharing: async (labels) => {
+			const options: Electron.MessageBoxOptions = {
+				type: "warning",
+				title: labels.title,
+				message: labels.message,
+				detail: labels.detail,
+				buttons: [labels.cancel, labels.confirm],
+				defaultId: 0,
+				cancelId: 0,
+			};
+			const result = mainWindow && !mainWindow.isDestroyed()
+				? await dialog.showMessageBox(mainWindow, options)
+				: await dialog.showMessageBox(options);
+			return result.response === 1;
 		},
 	});
 	if (daemonStatus.state === "ready") {
@@ -1936,7 +1964,7 @@ function establishBrowserRuntimeLink(): void {
 					throw Object.assign(new Error("Browser profiles are unavailable"), { code: "BROWSER_TARGET_UNAVAILABLE" });
 				}
 				return command.action === "__browser-profile-share-list"
-					? shareSource.list()
+					? shareSource.list(command.args ?? {})
 					: shareSource.exportPage(command.args ?? {});
 			}
 			const host = browserViewHost;
@@ -3453,17 +3481,42 @@ const localHostIdentity = createLocalHostIdentity(() => daemonStatus.state === "
 	: null);
 
 /**
- * The signed-in account's paired machines, as Remote hosts lists them, with
- * the saved credential. Main-only: the credential never reaches the renderer.
+ * The signed-in account's machines, from AO Cloud's directory with this
+ * desktop's session. Browser profile copies read it on both ends: a machine
+ * shares only with machines the account lists, and copies only from them.
+ * Main-only: the account credentials it holds never reach the renderer.
  */
+const browserProfileAccountDirectory = new AccountDirectory({
+	accountId: async () => (await getCloudSession(cloudDataDir()))?.user.id,
+	request: async (signal) => {
+		const baseUrl = await cloudControlPlaneUrl();
+		if (!baseUrl) throw new Error("No Orchestrator Cloud control plane is configured.");
+		return cloudCpProxy.request({ baseUrl, path: "/api/cloud/v1/me/hosts", method: "GET" }, { hostTokens: true, signal });
+	},
+});
+
+/** The account's other machines a browser profile can be copied from. */
 async function linkedMachinesForBrowserProfiles(): Promise<LinkedMachine[]> {
-	const account = (await getCloudSession(cloudDataDir()))?.user.id;
-	if (!account) throw new LinkedMachinesSignedOutError();
-	const local = await localHostIdentity();
-	return (await readRemotes(remotesFilePath()))
-		.filter((entry) => entry.hostId && entry.password && entry.hostId !== local
-			&& (!entry.accountUserId || entry.accountUserId === account))
-		.map((entry) => ({ hostId: entry.hostId!, name: entry.label, url: entry.url, credential: entry.password }));
+	return browserProfileAccountDirectory.linkedMachines(await localHostIdentity());
+}
+
+/**
+ * Has this machine's own daemon sign a browser profile ticket with its host
+ * key. The route is loopback-only: the remote listener never serves it.
+ */
+async function issueBrowserProfileTicket(sourceHostId: string, key: string): Promise<{ ticket: string; signature: string }> {
+	if (daemonStatus.state !== "ready" || !daemonStatus.port) throw new Error("The daemon is not ready.");
+	const response = await fetch(`http://127.0.0.1:${daemonStatus.port}/api/v1/mobile/browser-profile-ticket`, {
+		method: "POST",
+		redirect: "error",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ sourceHostId, key }),
+		signal: AbortSignal.timeout(5_000),
+	});
+	if (!response.ok) throw new Error(`The daemon did not sign a browser profile ticket (${response.status}).`);
+	const body = await response.json() as { ticket?: unknown; signature?: unknown };
+	if (typeof body.ticket !== "string" || typeof body.signature !== "string") throw new Error("The daemon answered without a ticket.");
+	return { ticket: body.ticket, signature: body.signature };
 }
 
 registerRemotesIpc(ipcMain, {

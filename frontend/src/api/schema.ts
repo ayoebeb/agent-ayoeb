@@ -1546,6 +1546,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mobile/browser-profile-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign a ticket with this machine's host key to read another machine's shared browser profiles */
+        post: operations["issueBrowserProfileTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mobile/devices": {
         parameters: {
             query?: never;
@@ -2160,6 +2177,23 @@ export interface paths {
         put?: never;
         /** Issue a host-scoped account credential using the pairing password */
         post: operations["issueRemoteHostAccountToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/remote-host/host-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read this machine's host id and public host key */
+        get: operations["getRemoteHostKey"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4322,7 +4356,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the browser profiles this machine shares with its linked machines */
+        /** List the browser profiles this machine shares, sealed to the linked machine whose ticket the request carries */
         get: operations["listSharedBrowserProfiles"];
         put?: never;
         post?: never;
@@ -4339,7 +4373,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Read one page of a shared browser profile's cookies and history for a linked machine */
+        /** Read one page of a shared browser profile's cookies and history, sealed to the linked machine whose ticket the request carries */
         get: operations["exportSharedBrowserProfile"];
         put?: never;
         post?: never;
@@ -5288,6 +5322,14 @@ export interface components {
             requestId: string;
             result: unknown;
             sessionId: string;
+        };
+        BrowserProfileTicketRequest: {
+            key: string;
+            sourceHostId: string;
+        };
+        BrowserProfileTicketResponse: {
+            signature: string;
+            ticket: string;
         };
         BrowserStatusResponse: {
             client?: string;
@@ -7035,6 +7077,10 @@ export interface components {
         ReloadConversationMCPServersResponse: {
             servers: components["schemas"]["ConversationMCPServerPayload"][];
         };
+        RemoteHostKeyResponse: {
+            hostId: string;
+            hostKey: string;
+        };
         RemoveProjectResult: {
             projectId: string;
             removedStorageDir: boolean;
@@ -7225,6 +7271,12 @@ export interface components {
             name: string;
             /** @description The file, relative to the session's artifact directory. */
             path: string;
+        };
+        SealedBrowserProfilePayload: {
+            data: string;
+            iv: string;
+            key: string;
+            version: number;
         };
         SendConversationMessageRequest: {
             attachments?: components["schemas"]["ConversationImageContentRequest"][];
@@ -7721,40 +7773,6 @@ export interface components {
             trackerIntakeEnabled: boolean;
             /** @description After a harness update, idle open sessions restart on the new release instead of running the old one until they happen to restart. */
             versionRefresh: boolean;
-        };
-        SharedBrowserCookie: {
-            domain: string;
-            expirationDate?: null | number;
-            hostOnly: boolean;
-            httpOnly: boolean;
-            name: string;
-            path: string;
-            sameSite?: string;
-            secure: boolean;
-            value: string;
-        };
-        SharedBrowserHistoryEntry: {
-            lastVisited: string;
-            title?: string;
-            url: string;
-            visitCount: number;
-        };
-        SharedBrowserProfile: {
-            cookieCount: number;
-            historyCount: number;
-            id: string;
-            name: string;
-            sourceBrowser?: string;
-            updatedAt: string;
-        };
-        SharedBrowserProfileExportResponse: {
-            cookies: components["schemas"]["SharedBrowserCookie"][];
-            history: components["schemas"]["SharedBrowserHistoryEntry"][];
-            nextCursor?: string;
-            profile: components["schemas"]["SharedBrowserProfile"];
-        };
-        SharedBrowserProfilesResponse: {
-            profiles: components["schemas"]["SharedBrowserProfile"][];
         };
         ShellTerminalEnvelope: {
             shellTerminal: components["schemas"]["ShellTerminalResponse"];
@@ -13843,6 +13861,66 @@ export interface operations {
             };
         };
     };
+    issueBrowserProfileTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrowserProfileTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserProfileTicketResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     listMobileDevices: {
         parameters: {
             query?: never;
@@ -15925,6 +16003,44 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getRemoteHostKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteHostKeyResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24683,7 +24799,12 @@ export interface operations {
     listSharedBrowserProfiles: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Signed receiver ticket, unpadded base64url, from the receiving machine's POST /api/v1/mobile/browser-profile-ticket. */
+                "X-AO-Receiver-Ticket"?: string;
+                /** @description The receiving machine's Ed25519 host key signature over the ticket, unpadded base64url. */
+                "X-AO-Receiver-Signature"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -24695,7 +24816,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SharedBrowserProfilesResponse"];
+                    "application/json": components["schemas"]["SealedBrowserProfilePayload"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -24751,7 +24881,12 @@ export interface operations {
                 /** @description Opaque cursor from the previous page's nextCursor; omit for the first page. */
                 cursor?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Signed receiver ticket, unpadded base64url, from the receiving machine's POST /api/v1/mobile/browser-profile-ticket. */
+                "X-AO-Receiver-Ticket"?: string;
+                /** @description The receiving machine's Ed25519 host key signature over the ticket, unpadded base64url. */
+                "X-AO-Receiver-Signature"?: string;
+            };
             path: {
                 /** @description Browser profile identifier on this machine. */
                 profileId: string;
@@ -24766,7 +24901,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SharedBrowserProfileExportResponse"];
+                    "application/json": components["schemas"]["SealedBrowserProfilePayload"];
                 };
             };
             /** @description Bad Request */

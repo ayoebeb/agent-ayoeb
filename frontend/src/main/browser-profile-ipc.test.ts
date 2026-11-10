@@ -67,6 +67,8 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 		isEnabled: vi.fn(async () => sharingEnabled),
 		setEnabled: vi.fn(async (enabled: boolean) => { sharingEnabled = enabled; return enabled; }),
 	};
+	let sharingConfirmed = true;
+	const confirmSharing = vi.fn(async () => sharingConfirmed);
 	const copier = {
 		listMachines: vi.fn(async () => ({ signedIn: true, machines: [] })),
 		copy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
@@ -87,10 +89,20 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 		},
 		confirmSwitch,
 		reportSwitchFailure,
+		confirmSharing,
 	});
 	const invoke = (channel: string, sender: object, ...args: unknown[]) => handlers.get(channel)!({ sender }, ...args);
-	return { copier, host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, sharing, shell, state: () => state, store };
+	const declineSharing = () => { sharingConfirmed = false; };
+	return { confirmSharing, copier, declineSharing, host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, sharing, shell, state: () => state, store };
 }
+
+const SHARING_LABELS = {
+	title: "Share your browser profiles?",
+	message: "Your other machines can copy them.",
+	detail: "Encrypted for the machine that asks.",
+	cancel: "Cancel",
+	confirm: "Share profiles",
+};
 
 describe("browser profile IPC", () => {
 	it("serves profile sharing and other machines only to the app shell", async () => {
@@ -105,11 +117,31 @@ describe("browser profile IPC", () => {
 		expect(copier.copy).not.toHaveBeenCalled();
 		expect(copier.update).not.toHaveBeenCalled();
 
-		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: true });
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: SHARING_LABELS })).toEqual({ enabled: true });
 		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true });
 		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: "yes" })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
 		await invoke("browserProfiles:machines:copy", shell, { hostId: "h_a", profileId: "p", name: "Brave (from A)" });
 		expect(copier.copy).toHaveBeenCalledWith("h_a", "p", "Brave (from A)");
+	});
+
+	// Turning sharing on shares sign-in cookies, so it takes a click in a
+	// native dialog: the renderer alone, even the app shell, cannot do it.
+	it("turns sharing on only after the native confirmation", async () => {
+		const { confirmSharing, declineSharing, invoke, shell, sharing } = await setup();
+		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: true })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: { ...SHARING_LABELS, confirm: SHARING_LABELS.cancel } }))
+			.rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+		expect(confirmSharing).not.toHaveBeenCalled();
+
+		declineSharing();
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: SHARING_LABELS })).toEqual({ enabled: false, cancelled: true });
+		expect(confirmSharing).toHaveBeenCalledWith(SHARING_LABELS);
+		expect(sharing.setEnabled).not.toHaveBeenCalled();
+
+		// Turning it off never asks.
+		confirmSharing.mockClear();
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: false })).toEqual({ enabled: false });
+		expect(confirmSharing).not.toHaveBeenCalled();
 	});
 
 	it("rejects untrusted profile management and invalid renderer ownership", async () => {

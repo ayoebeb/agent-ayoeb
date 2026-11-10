@@ -46,6 +46,8 @@ const machines: OtherMachinesResult = {
 		},
 		{ hostId: "h_closed", name: "Studio", state: "sharing-off", profiles: [] },
 		{ hostId: "h_off", name: "Travel", state: "offline", profiles: [] },
+		{ hostId: "h_lan", name: "Desk", state: "insecure", profiles: [] },
+		{ hostId: "h_new", name: "Spare", state: "unverified", profiles: [] },
 	],
 };
 
@@ -62,7 +64,7 @@ function makeBridge(overrides: Partial<AoBridge["browserProfiles"]> = {}): AoBri
 		import: vi.fn(async () => ({ sourceName: "", entries: [] })),
 		onImportProgress: vi.fn(() => () => undefined),
 		getSharing: vi.fn(async () => ({ enabled: false })),
-		setSharing: vi.fn(async (enabled: boolean) => ({ enabled })),
+		setSharing: vi.fn(async ({ enabled }: { enabled: boolean }) => ({ enabled })),
 		listOtherMachines: vi.fn(async () => machines),
 		copyFromMachine: vi.fn(async () => ({
 			profile: { ...copiedProfile, id: "33333333-3333-4333-8333-333333333333", name: "Brave (from Brave box)" },
@@ -87,7 +89,7 @@ describe("Browser settings: other machines", () => {
 		window.ao!.browserProfiles = bridge;
 	}
 
-	it("turns sharing on only when the owner flips the switch", async () => {
+	it("turns sharing on only when the owner flips the switch, asking through main's native confirmation", async () => {
 		const bridge = makeBridge();
 		install(bridge);
 		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
@@ -96,8 +98,32 @@ describe("Browser settings: other machines", () => {
 		expect(toggle).not.toBeChecked();
 		expect(bridge.setSharing).not.toHaveBeenCalled();
 		await userEvent.click(toggle);
-		await waitFor(() => expect(bridge.setSharing).toHaveBeenCalledWith(true));
-		expect(toggle).toBeChecked();
+		await waitFor(() => expect(bridge.setSharing).toHaveBeenCalledWith({
+			enabled: true,
+			labels: {
+				title: "Share your browser profiles?",
+				message: expect.stringContaining("including its sign-ins and history"),
+				detail: expect.stringContaining("copies already made stay on those machines"),
+				cancel: "Cancel",
+				confirm: "Share profiles",
+			},
+		}));
+		await waitFor(() => expect(toggle).toBeChecked());
+		await userEvent.click(toggle);
+		await waitFor(() => expect(bridge.setSharing).toHaveBeenLastCalledWith({ enabled: false }));
+	});
+
+	it("stays off when the owner declines the confirmation", async () => {
+		const bridge = makeBridge({ setSharing: vi.fn(async () => ({ enabled: false, cancelled: true })) });
+		install(bridge);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
+		const toggle = await screen.findByRole("switch", { name: "Share my browser profiles with my linked machines" });
+		await waitFor(() => expect(toggle).toBeEnabled());
+		await userEvent.click(toggle);
+		await waitFor(() => expect(bridge.setSharing).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(toggle).toBeEnabled());
+		expect(toggle).not.toBeChecked();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
 	it("lists each machine with its profiles or the reason it cannot", async () => {
@@ -107,6 +133,8 @@ describe("Browser settings: other machines", () => {
 		expect(screen.getByText(/Brave · 1,234 cookies · 56 history entries · Updated/)).toBeInTheDocument();
 		expect(screen.getByText("Sharing is off on Studio. Turn on sharing in its Browser settings.")).toBeInTheDocument();
 		expect(screen.getByText("Travel is offline.")).toBeInTheDocument();
+		expect(screen.getByText("Desk has no secure address, so its profiles can't be copied. Turn on Allow access from your devices on Desk.")).toBeInTheDocument();
+		expect(screen.getByText(/^Spare could not confirm this machine\./)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Copy to this machine" })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
 	});

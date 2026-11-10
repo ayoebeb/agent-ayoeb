@@ -105,6 +105,7 @@ import type {
 } from "./shared/browser-profile-import";
 import type {
 	BrowserProfileCopyResult,
+	BrowserProfileSharingInput,
 	BrowserProfileSharingState,
 	OtherMachinesResult,
 } from "./shared/browser-profile-share";
@@ -784,8 +785,9 @@ const api = {
 		import: (input: BrowserImportRequest) =>
 			ipcRenderer.invoke("browserProfiles:import:start", input) as Promise<BrowserImportResult>,
 		getSharing: () => ipcRenderer.invoke("browserProfiles:sharing:get") as Promise<BrowserProfileSharingState>,
-		setSharing: (enabled: boolean) =>
-			ipcRenderer.invoke("browserProfiles:sharing:set", { enabled }) as Promise<BrowserProfileSharingState>,
+		/** Turning sharing on shows a native confirmation in main, with these labels. */
+		setSharing: (input: BrowserProfileSharingInput) =>
+			ipcRenderer.invoke("browserProfiles:sharing:set", input) as Promise<BrowserProfileSharingState>,
 		listOtherMachines: () => ipcRenderer.invoke("browserProfiles:machines:list") as Promise<OtherMachinesResult>,
 		copyFromMachine: (input: { hostId: string; profileId: string; name?: string }) =>
 			ipcRenderer.invoke("browserProfiles:machines:copy", input) as Promise<BrowserProfileCopyResult>,

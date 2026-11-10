@@ -27,6 +27,11 @@ const HOST_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
  */
 export type BrowserProfileSource =
 	| { kind: "import"; browser: string }
+	/**
+	 * A provenance this build cannot read: a damaged record, or a kind from a
+	 * newer build. Kept as a marker so the profile is never shared onward.
+	 */
+	| { kind: "unknown" }
 	| {
 		kind: "copy";
 		browser?: string;
@@ -163,6 +168,7 @@ export function normalizeBrowserProfileSource(value: unknown): BrowserProfileSou
 		const browser = normalizeBrowserProfileLabel(record.browser, BROWSER_PROFILE_SOURCE_BROWSER_MAX_LENGTH);
 		return browser ? { kind: "import", browser } : null;
 	}
+	if (record.kind === "unknown") return { kind: "unknown" };
 	if (record.kind !== "copy") return null;
 	const machineName = normalizeBrowserProfileLabel(record.machineName, BROWSER_PROFILE_MACHINE_NAME_MAX_LENGTH);
 	const remoteProfileId = normalizeBrowserProfileId(record.remoteProfileId);
