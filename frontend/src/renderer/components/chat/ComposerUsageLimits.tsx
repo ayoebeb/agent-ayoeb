@@ -37,7 +37,7 @@ const WINDOWS = [
 // the layered shadow's hover halos.
 const TOOLTIP_SURFACE = "border border-(--color-border-overlay) shadow-none";
 const TRIGGER_CLASS =
-	"inline-flex h-7 min-w-0 shrink-0 cursor-default items-center gap-3 rounded-lg px-2 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring @max-[8.5rem]/usage:hidden";
+	"inline-flex h-7 min-w-0 shrink-0 cursor-default items-center gap-4 rounded-lg px-2 text-xs text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring @max-[8.5rem]/usage:hidden";
 const BAR_CLASS = "relative h-1 w-6 shrink-0 overflow-hidden rounded-full bg-muted @max-[12.5rem]/usage:hidden";
 
 /** The account a Claude session runs under: its bound account, else the default login. */
@@ -142,11 +142,12 @@ function UsageReadout({ account, windows, refreshFailed, namesAccount }: {
 										className={cn("block h-full rounded-full", reading.tone)}
 										style={{ width: `${reading.remaining}%`, backgroundColor: reading.tone ? undefined : agentTone(CLAUDE_HARNESS) }}
 									/>
-									{reading.leftAtReset !== null && reading.leftAtReset < reading.remaining ? (
+									{/* At 0% the marker would sit on the bar's rounded end; the tooltip's pace line says it runs out. */}
+									{reading.leftAtReset !== null && reading.leftAtReset > 0 && reading.leftAtReset < reading.remaining ? (
 										<span className="absolute inset-y-0 w-px bg-foreground/70" style={{ insetInlineStart: `${reading.leftAtReset}%` }} />
 									) : null}
 								</span>
-								<span className={cn("tabular-nums", reading.runsOut ? "text-warning" : "text-foreground")}>{reading.percent}</span>
+								<span className="tabular-nums">{reading.percent}</span>
 							</span>
 						))}
 					</div>
