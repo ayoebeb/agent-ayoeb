@@ -91,6 +91,27 @@ describe("opening and closing panes", () => {
 		expect(leafKeys(splitPaneBeside(full, e, a, "left").split!.root)).toEqual(["session:a", "session:e"]);
 	});
 
+	it("never shows one session in two panes: an orchestrator's own row moves its project's pane", () => {
+		const orchestratorRow: SessionPaneRef = { kind: "session", sessionId: "orch-1", projectId: "yoobi" };
+		const sessionOf = (ref: SessionPaneRef) => (ref.kind === "orchestrator" ? "orch-1" : ref.sessionId);
+
+		// Beside the project's orchestrator pane, which already shows it: nothing to add.
+		const split = openSplit([a, yoobi], sessionPaneKey(a))!;
+		expect(splitPaneBeside(split, yoobi, orchestratorRow, "right", sessionOf).outcome).toBe("unchanged");
+
+		// Beside another pane, the orchestrator pane moves there instead of a copy opening.
+		const moved = splitPaneBeside(split, a, orchestratorRow, "left", sessionOf);
+		expect(moved.outcome).toBe("split");
+		expect(leafKeys(moved.split!.root)).toEqual(["orchestrator:yoobi", "session:a"]);
+		expect(Object.keys(moved.split!.panes).sort()).toEqual(["orchestrator:yoobi", "session:a"]);
+		expect(moved.split!.focus).toBe("orchestrator:yoobi");
+
+		// Without a split yet, the session on screen is the anchor it is compared with.
+		expect(splitPaneBeside(null, orchestratorRow, yoobi, "right", sessionOf).outcome).toBe("unchanged");
+		// Without a resolver, panes are compared by what they name, as before.
+		expect(Object.keys(splitPaneBeside(split, a, orchestratorRow, "left").split!.panes)).toHaveLength(3);
+	});
+
 	it("resizes one split and leaves the rest alone", () => {
 		const split = openSplit([a, b])!;
 		const resized = resizeSplit(split, "r", 0.3);

@@ -24,7 +24,7 @@ import {
 	useMarkAllNotificationsReadMutation,
 	useNotificationsQuery,
 } from "../hooks/useNotificationsQuery";
-import { useAppMenuAction, useAppMenuAvailable } from "../hooks/useAppMenuCommand";
+import { useAppMenuAvailable, useSessionMenuAction } from "../hooks/useAppMenuCommand";
 import { useRestoreSession } from "../hooks/useRestoreSession";
 import { useSwipeToDismiss } from "../hooks/useSwipeToDismiss";
 import { useRemoteWorkspaces, useWorkspaceQuery } from "../hooks/useWorkspaceQuery";
@@ -498,10 +498,10 @@ export function NotificationCenter({ style }: NotificationCenterProps) {
 	}, [queryClient]);
 
 	// A fullscreen pane mounts its own bell and covers the panel's; only the bell
-	// the user can see answers the menu.
+	// the user can see answers the menu, and in a split only the focused pane's.
 	const anchorRef = useRef<HTMLSpanElement>(null);
 	useAppMenuAvailable("toggle-notifications", true);
-	useAppMenuAction("toggle-notifications", () => {
+	useSessionMenuAction("toggle-notifications", () => {
 		const fullscreenElement = document.fullscreenElement;
 		if (fullscreenElement && !fullscreenElement.contains(anchorRef.current)) return;
 		setPanelOpen(!openRef.current);

@@ -135,16 +135,25 @@ export function SessionSplitView({
 			const current = state.split;
 			if (!current) return;
 			const remaining = closeSplitPane(current, key);
-			const nextKey = remaining?.focus ?? leafKeys(current.root).find((candidate) => candidate !== key);
 			// The route may already be on its way to the focused pane.
 			const wasShown = routedRef.current.paneKey === key || current.focus === key;
 			state.close(key);
-			if (!wasShown || !nextKey) return;
-			const ref = current.panes[nextKey];
-			if (!ref) return;
-			const pane = resolvePane(ref, workspacesRef.current);
-			if (pane.kind === "session" || pane.kind === "ended") showPaneRoute(pane, true);
-			else void navigate({ ...projectNavigateTarget(ref.projectId), replace: true });
+			if (!wasShown) return;
+			// Only a pane with a session can hold the route, and the route is what
+			// keeps the split on screen. So the route moves to the first remaining
+			// pane that has one, the focused pane first; a project board only when none does.
+			const others = leafKeys(current.root).filter((candidate) => candidate !== key);
+			const order = remaining?.focus ? [remaining.focus, ...others.filter((candidate) => candidate !== remaining.focus)] : others;
+			for (const candidate of order) {
+				const ref = current.panes[candidate];
+				const pane = ref ? resolvePane(ref, workspacesRef.current) : undefined;
+				if (pane?.kind !== "session" && pane?.kind !== "ended") continue;
+				if (remaining) useSessionSplitStore.getState().focus(candidate);
+				showPaneRoute(pane, true);
+				return;
+			}
+			const fallback = order[0] ? current.panes[order[0]] : undefined;
+			if (fallback) void navigate({ ...projectNavigateTarget(fallback.projectId), replace: true });
 		},
 		[navigate, showPaneRoute],
 	);

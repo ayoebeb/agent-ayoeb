@@ -107,14 +107,18 @@ export function useSessionSplitActions(getWorkspaces: () => readonly WorkspaceSu
 	/** Shows `ref` on `side` of `anchor`: the session on screen or a pane of the split. */
 	const addBeside = useCallback(
 		(anchor: SessionPaneRef, ref: SessionPaneRef, side: SplitSide) => {
-			const outcome = useSessionSplitStore.getState().splitBeside(anchor, ref, side);
+			const sessionOf = (candidate: SessionPaneRef) => {
+				const pane = resolvePane(candidate, readWorkspaces(), routedSessionIdRef.current);
+				return pane.kind === "session" || pane.kind === "ended" ? pane.session.id : undefined;
+			};
+			const outcome = useSessionSplitStore.getState().splitBeside(anchor, ref, side, sessionOf);
 			if (outcome === "full") tooMany();
 			if (outcome !== "split") return false;
 			useSidebarSelectionStore.getState().clear();
 			showPane(ref);
 			return true;
 		},
-		[showPane, tooMany],
+		[readWorkspaces, showPane, tooMany],
 	);
 
 	return { open, addBeside, tooMany };

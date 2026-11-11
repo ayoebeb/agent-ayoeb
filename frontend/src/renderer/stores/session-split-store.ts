@@ -36,7 +36,13 @@ type SessionSplitState = {
 	split: SessionSplit | null;
 	/** Replaces the split with these panes, in order. False when fewer than two or more than four. */
 	open: (refs: readonly SessionPaneRef[], focus?: string) => boolean;
-	splitBeside: (anchor: SessionPaneRef, ref: SessionPaneRef, side: SplitSide) => SplitBesideResult["outcome"];
+	/** Shows `ref` beside `anchor`; with `sessionOf`, one session never fills two panes. */
+	splitBeside: (
+		anchor: SessionPaneRef,
+		ref: SessionPaneRef,
+		side: SplitSide,
+		sessionOf?: (ref: SessionPaneRef) => string | undefined,
+	) => SplitBesideResult["outcome"];
 	close: (key: string) => void;
 	resize: (path: string, ratio: number) => void;
 	focus: (key: string) => void;
@@ -62,8 +68,8 @@ export const useSessionSplitStore = create<SessionSplitState>((set, get) => {
 			commit(split);
 			return true;
 		},
-		splitBeside: (anchor, ref, side) => {
-			const result = splitPaneBeside(get().split, anchor, ref, side);
+		splitBeside: (anchor, ref, side, sessionOf) => {
+			const result = splitPaneBeside(get().split, anchor, ref, side, sessionOf);
 			commit(result.split);
 			return result.outcome;
 		},
