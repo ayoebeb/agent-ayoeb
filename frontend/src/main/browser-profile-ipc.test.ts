@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserProfileViewState } from "../shared/browser-profiles";
 import type { BrowserImportProgress, BrowserImportRequest } from "../shared/browser-profile-import";
 import { BrowserProfileStore } from "./browser-profile-store";
-import { registerBrowserProfileIpc, type BrowserProfileMenuItem } from "./browser-profile-ipc";
+import type { AppLocale } from "../shared/ui-locale";
+import { browserProfileSharingConfirmLabels, registerBrowserProfileIpc, type BrowserProfileMenuItem } from "./browser-profile-ipc";
 
 type Handler = (event: { sender: object }, ...args: unknown[]) => unknown;
 
@@ -68,7 +69,8 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 		setEnabled: vi.fn(async (enabled: boolean) => { sharingEnabled = enabled; return enabled; }),
 	};
 	let sharingConfirmed = true;
-	const confirmSharing = vi.fn(async () => sharingConfirmed);
+	const confirmSharing = vi.fn(async (_labels: unknown) => sharingConfirmed);
+	let uiLocale: AppLocale = "en";
 	const copier = {
 		listMachines: vi.fn(async () => ({ signedIn: true, machines: [] })),
 		copy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
@@ -90,18 +92,21 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 		confirmSwitch,
 		reportSwitchFailure,
 		confirmSharing,
+		uiLocale: async () => uiLocale,
 	});
 	const invoke = (channel: string, sender: object, ...args: unknown[]) => handlers.get(channel)!({ sender }, ...args);
 	const declineSharing = () => { sharingConfirmed = false; };
-	return { confirmSharing, copier, declineSharing, host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, sharing, shell, state: () => state, store };
+	const setUiLocale = (locale: AppLocale) => { uiLocale = locale; };
+	return { confirmSharing, copier, declineSharing, setUiLocale, host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, sharing, shell, state: () => state, store };
 }
 
-const SHARING_LABELS = {
-	title: "Share your browser profiles?",
-	message: "Your other machines can copy them.",
-	detail: "Encrypted for the machine that asks.",
-	cancel: "Cancel",
-	confirm: "Share profiles",
+// What a compromised renderer might send to disguise the dialog.
+const DISGUISE = {
+	title: "Update ready",
+	message: "Restart Orchestrator to finish updating?",
+	detail: "It only takes a moment.",
+	cancel: "Later",
+	confirm: "Restart",
 };
 
 describe("browser profile IPC", () => {
@@ -117,7 +122,7 @@ describe("browser profile IPC", () => {
 		expect(copier.copy).not.toHaveBeenCalled();
 		expect(copier.update).not.toHaveBeenCalled();
 
-		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: SHARING_LABELS })).toEqual({ enabled: true });
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: true });
 		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true });
 		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: "yes" })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
 		await invoke("browserProfiles:machines:copy", shell, { hostId: "h_a", profileId: "p", name: "Brave (from A)" });
@@ -126,17 +131,21 @@ describe("browser profile IPC", () => {
 
 	// Turning sharing on shares sign-in cookies, so it takes a click in a
 	// native dialog: the renderer alone, even the app shell, cannot do it.
-	it("turns sharing on only after the native confirmation", async () => {
-		const { confirmSharing, declineSharing, invoke, shell, sharing } = await setup();
-		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: true })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
-		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: { ...SHARING_LABELS, confirm: SHARING_LABELS.cancel } }))
-			.rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
-		expect(confirmSharing).not.toHaveBeenCalled();
-
+	// Review finding N1: main words that dialog itself, in its own saved UI
+	// language, whatever the renderer sends.
+	it("turns sharing on only after a native confirmation worded by main", async () => {
+		const { confirmSharing, declineSharing, invoke, setUiLocale, shell, sharing } = await setup();
 		declineSharing();
-		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: SHARING_LABELS })).toEqual({ enabled: false, cancelled: true });
-		expect(confirmSharing).toHaveBeenCalledWith(SHARING_LABELS);
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: DISGUISE })).toEqual({ enabled: false, cancelled: true });
+		expect(confirmSharing).toHaveBeenCalledWith(browserProfileSharingConfirmLabels("en"));
+		expect(confirmSharing.mock.calls[0]?.[0]).toMatchObject({ title: "Share your browser profiles?", confirm: "Share profiles", cancel: "Cancel" });
+		expect(JSON.stringify(confirmSharing.mock.calls)).not.toMatch(/Update ready|Restart/);
 		expect(sharing.setEnabled).not.toHaveBeenCalled();
+
+		setUiLocale("de");
+		await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: DISGUISE });
+		expect(confirmSharing).toHaveBeenLastCalledWith(browserProfileSharingConfirmLabels("de"));
+		expect(confirmSharing.mock.lastCall?.[0]).toMatchObject({ title: "Browserprofile freigeben?", confirm: "Profile freigeben" });
 
 		// Turning it off never asks.
 		confirmSharing.mockClear();

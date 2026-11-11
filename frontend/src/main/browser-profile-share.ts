@@ -71,6 +71,8 @@ export class BrowserProfileShareError extends Error {
 export class BrowserProfileSharingSetting {
 	private readonly file: string;
 	private enabled = false;
+	/** Whether this machine has started keeping a copy ledger; see expectsCopyLedger. */
+	private copyLedger = false;
 	private turnedOff = 0;
 	private loaded: Promise<void> | null = null;
 	private queue: Promise<void> = Promise.resolve();
@@ -83,14 +85,55 @@ export class BrowserProfileSharingSetting {
 		this.loaded ??= (async () => {
 			try {
 				const parsed = JSON.parse(await readFile(this.file, "utf8")) as unknown;
-				this.enabled = typeof parsed === "object" && parsed !== null
-					&& (parsed as Record<string, unknown>).version === 1
-					&& (parsed as Record<string, unknown>).shareWithLinkedMachines === true;
+				const valid = typeof parsed === "object" && parsed !== null && (parsed as Record<string, unknown>).version === 1;
+				this.enabled = valid && (parsed as Record<string, unknown>).shareWithLinkedMachines === true;
+				this.copyLedger = valid && (parsed as Record<string, unknown>).copyLedger === true;
 			} catch {
 				this.enabled = false;
 			}
 		})();
 		return this.loaded;
+	}
+
+	/**
+	 * Whether a copy ledger should exist: one was written here. A ledger that
+	 * is gone after that is not "no copies" but lost, and nothing is shared
+	 * until the owner turns sharing on again.
+	 */
+	async expectsCopyLedger(): Promise<boolean> {
+		await this.load();
+		return this.copyLedger;
+	}
+
+	/** Records that this machine keeps a copy ledger. */
+	markCopyLedger(): Promise<void> {
+		return this.enqueue(async () => {
+			if (!this.copyLedger) await this.persist(this.enabled, true);
+		});
+	}
+
+	private enqueue(change: () => Promise<void>): Promise<void> {
+		const write = this.queue.then(async () => {
+			await this.load();
+			await change();
+		});
+		this.queue = write.catch(() => undefined);
+		return write;
+	}
+
+	private async persist(enabled: boolean, copyLedger: boolean): Promise<void> {
+		await mkdir(path.dirname(this.file), { recursive: true, mode: 0o750 });
+		const temporary = path.join(path.dirname(this.file), `.${BROWSER_PROFILE_SHARING_FILE_NAME}.${process.pid}.${randomUUID()}.tmp`);
+		try {
+			const value = { version: 1, shareWithLinkedMachines: enabled, ...(copyLedger ? { copyLedger: true } : {}) };
+			await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+			await rename(temporary, this.file);
+		} catch (error) {
+			await rm(temporary, { force: true }).catch(() => undefined);
+			throw error;
+		}
+		this.enabled = enabled;
+		this.copyLedger = copyLedger;
 	}
 
 	async isEnabled(): Promise<boolean> {
@@ -109,21 +152,13 @@ export class BrowserProfileSharingSetting {
 	async setEnabled(enabled: boolean): Promise<boolean> {
 		// Counted at once, before the write: reads already running stop now.
 		if (!enabled) this.turnedOff += 1;
-		const write = this.queue.then(async () => {
-			await this.load();
-			await mkdir(path.dirname(this.file), { recursive: true, mode: 0o750 });
-			const temporary = path.join(path.dirname(this.file), `.${BROWSER_PROFILE_SHARING_FILE_NAME}.${process.pid}.${randomUUID()}.tmp`);
-			try {
-				await writeFile(temporary, `${JSON.stringify({ version: 1, shareWithLinkedMachines: enabled }, null, 2)}\n`, { mode: 0o600 });
-				await rename(temporary, this.file);
-			} catch (error) {
-				await rm(temporary, { force: true }).catch(() => undefined);
-				throw error;
-			}
-			this.enabled = enabled;
+		await this.enqueue(async () => {
+			// Turning sharing on, which the owner confirms in a native dialog, is
+			// the one way past a lost copy ledger: the next answer rebuilds it from
+			// the profile registry. "On" while already on changes nothing.
+			const copyLedger = enabled && !this.enabled ? false : this.copyLedger;
+			await this.persist(enabled, copyLedger);
 		});
-		this.queue = write.catch(() => undefined);
-		await write;
 		return this.enabled;
 	}
 }
@@ -147,7 +182,7 @@ export type BrowserProfileShareSourceOptions = {
 	history: Pick<BrowserHistoryStore, "entries">;
 	sharing: Pick<BrowserProfileSharingSetting, "isEnabled" | "generation">;
 	/** Every profile copied from another machine, kept apart from the registry. */
-	copies: Pick<BrowserProfileCopyLedger, "load">;
+	copies: Pick<BrowserProfileCopyLedger, "ensure">;
 	receivers: Pick<BrowserProfileReceiverVerifier, "verify">;
 	/** Every cookie in the profile's Electron partition. */
 	cookies: (profileId: string) => Promise<ElectronCookie[]>;
@@ -222,7 +257,8 @@ export class BrowserProfileShareSource {
 
 	private async copiedIds(): Promise<ReadonlySet<string>> {
 		try {
-			return (await this.options.copies.load()).ids;
+			// Also records copies the registry knows that the ledger does not.
+			return (await this.options.copies.ensure(this.options.store.profiles)).ids;
 		} catch {
 			// Without the ledger a stripped copy cannot be told apart: share nothing.
 			throw new BrowserProfileShareError("BROWSER_PROFILE_SHARE_FAILED", "Browser profiles could not be read.");

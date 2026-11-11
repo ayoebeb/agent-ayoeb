@@ -21,6 +21,8 @@ import type {
 import type { BrowserProfileCopyService } from "./browser-profile-copy";
 import type { BrowserProfileImportService } from "./browser-profile-import";
 import type { BrowserProfileSharingSetting } from "./browser-profile-share";
+import { trayCatalogs } from "./tray-catalog.generated";
+import type { AppLocale } from "../shared/ui-locale";
 import { BrowserProfileStore, BrowserProfileStoreError as StoreError } from "./browser-profile-store";
 
 export type BrowserProfileMenuItem = {
@@ -64,9 +66,13 @@ export type BrowserProfileIpcOptions = {
 	/**
 	 * Asks the person at this machine, in a native dialog, before sharing is
 	 * turned on. Without it sharing cannot be turned on: a compromised renderer
-	 * must not be able to start sharing sign-in cookies silently.
+	 * must not be able to start sharing sign-in cookies silently. The words come
+	 * from main's own catalog, never from the renderer, so it cannot disguise
+	 * the dialog as something else either.
 	 */
 	confirmSharing?: (labels: BrowserProfileSharingConfirmLabels) => Promise<boolean>;
+	/** The UI language main keeps in its own settings. */
+	uiLocale?: () => Promise<AppLocale>;
 };
 
 export type BrowserProfileIpc = {
@@ -143,18 +149,16 @@ function labelsFromInput(value: unknown): BrowserProfileMenuInput["labels"] {
 	return labels;
 }
 
-function sharingLabelsFromInput(value: unknown): BrowserProfileSharingConfirmLabels {
-	if (!isRecord(value)) throw invalid("Sharing confirmation labels are invalid.");
-	const labels = {} as BrowserProfileSharingConfirmLabels;
-	for (const key of ["title", "message", "detail", "cancel", "confirm"] as const) {
-		const label = value[key];
-		if (typeof label !== "string" || label.trim().length === 0 || label.length > 600 || /[\u0000-\u001f\u007f]/u.test(label)) {
-			throw invalid("Sharing confirmation labels are invalid.");
-		}
-		labels[key] = label;
-	}
-	if (labels.cancel === labels.confirm) throw invalid("Sharing confirmation labels are invalid.");
-	return labels;
+/** The sharing confirmation in locale, from main's catalog of the renderer's own strings. */
+export function browserProfileSharingConfirmLabels(locale: AppLocale): BrowserProfileSharingConfirmLabels {
+	const catalog = trayCatalogs[locale] ?? trayCatalogs.en;
+	return {
+		title: catalog["settings.browserProfiles.sharing.confirmTitle"],
+		message: catalog["settings.browserProfiles.sharing.confirmMessage"],
+		detail: catalog["settings.browserProfiles.sharing.confirmDetail"],
+		cancel: catalog["confirm.cancel"],
+		confirm: catalog["settings.browserProfiles.sharing.confirm"],
+	};
 }
 
 function trustedShellSender(event: IpcMainInvokeEvent, shellWebContents: WebContents): boolean {
@@ -275,7 +279,9 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 		}
 		if (!isRecord(input) || typeof input.enabled !== "boolean") throw invalid("Sharing setting is invalid.");
 		if (input.enabled && !(await options.sharing.isEnabled())) {
-			const labels = sharingLabelsFromInput(input.labels);
+			// Anything else the renderer sent is ignored: main words the dialog.
+			const locale = await (options.uiLocale?.() ?? Promise.resolve<AppLocale>("en")).catch((): AppLocale => "en");
+			const labels = browserProfileSharingConfirmLabels(locale);
 			if (!options.confirmSharing) return { enabled: false, error: "Browser profile sharing is unavailable." };
 			let confirmed = false;
 			try {

@@ -83,7 +83,7 @@ export type BrowserProfileSharingState = {
 	cancelled?: boolean;
 };
 
-/** The native confirmation main shows before sharing is turned on, in the renderer's language. */
+/** The native confirmation main shows before sharing is turned on, worded from main's own catalog. */
 export type BrowserProfileSharingConfirmLabels = {
 	title: string;
 	message: string;
@@ -92,4 +92,4 @@ export type BrowserProfileSharingConfirmLabels = {
 	confirm: string;
 };
 
-export type BrowserProfileSharingInput = { enabled: boolean; labels?: BrowserProfileSharingConfirmLabels };
+export type BrowserProfileSharingInput = { enabled: boolean };

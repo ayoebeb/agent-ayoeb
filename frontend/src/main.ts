@@ -967,7 +967,12 @@ async function createWindowInternal(): Promise<void> {
 	});
 	await profileImporter.initialize();
 	const browserProfileSharing = new BrowserProfileSharingSetting(browserProfileStateDir());
-	const browserProfileCopies = new BrowserProfileCopyLedger(browserProfileStateDir());
+	const browserProfileCopies = new BrowserProfileCopyLedger(browserProfileStateDir(), browserProfileSharing);
+	// Records copies an earlier build made before it kept a ledger, while their
+	// provenance is still readable. Sharing does the same before every answer.
+	void browserProfileStore.load()
+		.then(() => browserProfileCopies.ensure(browserProfileStore.profiles))
+		.catch(() => undefined);
 	const profileShareSource = new BrowserProfileShareSource({
 		store: browserProfileStore,
 		history: browserHistoryStore,
@@ -1281,8 +1286,12 @@ async function createWindowInternal(): Promise<void> {
 				message,
 			}).catch((error) => console.error("browser profile error dialog failed:", error));
 		},
-		// A native dialog the renderer cannot answer for itself: turning sharing
-		// on takes a click from the person at this machine.
+		uiLocale: async () => {
+			const runFile = runFilePath();
+			return runFile ? (await readUiSettings(path.dirname(runFile))).locale : DEFAULT_UI_SETTINGS.locale;
+		},
+		// A native dialog the renderer cannot answer or word for itself: turning
+		// sharing on takes a click from the person at this machine.
 		confirmSharing: async (labels) => {
 			const options: Electron.MessageBoxOptions = {
 				type: "warning",

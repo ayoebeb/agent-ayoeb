@@ -63,7 +63,7 @@ async function setup(options: { cookies?: (profileId: string) => Cookie[]; shari
 	const history = new BrowserHistoryStore({ stateDir: dir, now: () => NOW });
 	const setting = new BrowserProfileSharingSetting(dir);
 	if (options.sharing !== false) await setting.setEnabled(true);
-	const copies = new BrowserProfileCopyLedger(dir);
+	const copies = new BrowserProfileCopyLedger(dir, setting);
 	const receiver = receiverFixture();
 	const reads: string[] = [];
 	const hooks: { onRead?: () => Promise<void> } = {};
@@ -248,6 +248,48 @@ describe("BrowserProfileShareSource", () => {
 		expect(reloaded.store.getProfile(profile.id)?.source).toEqual({ kind: "unknown" });
 		expect(reloaded.receiver.openList(await reloaded.source.list(TICKET))).toEqual([]);
 		await expect(reloaded.source.exportPage({ ...TICKET, profileId: profile.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_SHARED" });
+	});
+
+	// Review finding N2: a ledger that is deleted after this machine started
+	// keeping one is lost, not empty, and withholds everything until the owner
+	// turns sharing on again, which rebuilds it from the registry.
+	it("shares nothing once a kept copy ledger is gone, until sharing is turned on again", async () => {
+		const { dir, store, source, copies, setting, receiver } = await setup({ cookies: () => [cookie("sid")] });
+		const copied = await store.createProfile("Chrome (from Laptop)", { source: COPY_SOURCE });
+		const own = await store.createProfile("Work");
+		await copies.record(copied.id, COPY_SOURCE, store.profiles.map((profile) => profile.id));
+		expect(JSON.parse(await readFile(path.join(dir, BROWSER_PROFILE_SHARING_FILE_NAME), "utf8"))).toMatchObject({ copyLedger: true });
+		await rm(path.join(dir, BROWSER_PROFILE_COPIES_FILE_NAME));
+		await expect(source.list(TICKET)).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARE_FAILED" });
+		await expect(source.exportPage({ ...TICKET, profileId: own.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARE_FAILED" });
+
+		// "On" while already on is not the owner's choice again: still closed.
+		await setting.setEnabled(true);
+		await expect(source.list(TICKET)).rejects.toMatchObject({ code: "BROWSER_PROFILE_SHARE_FAILED" });
+
+		await setting.setEnabled(false);
+		await setting.setEnabled(true);
+		expect(receiver.openList(await source.list(TICKET)).map((profile) => profile.id)).toEqual([own.id]);
+		const rebuilt = JSON.parse(await readFile(path.join(dir, BROWSER_PROFILE_COPIES_FILE_NAME), "utf8")) as { copies: Record<string, unknown> };
+		expect(Object.keys(rebuilt.copies)).toEqual([copied.id]);
+	});
+
+	it("records copies an earlier build made before the ledger, so stripping them later shares nothing", async () => {
+		const dir = await stateDir();
+		const first = await setup({ dir, cookies: () => [cookie("sid")] });
+		// A copy made by a build that kept no ledger: provenance in the registry only.
+		const copied = await first.store.createProfile("Chrome (from Laptop)", { source: COPY_SOURCE });
+		await expect(readFile(path.join(dir, BROWSER_PROFILE_COPIES_FILE_NAME), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+		expect(first.receiver.openList(await first.source.list(TICKET))).toEqual([]);
+		expect([...(await first.copies.load()).ids]).toEqual([copied.id]);
+
+		const registryPath = path.join(dir, "browser-profiles.json");
+		const registry = JSON.parse(await readFile(registryPath, "utf8")) as { profiles: Record<string, unknown>[] };
+		registry.profiles = registry.profiles.map(({ source: _source, ...rest }) => rest);
+		await writeFile(registryPath, JSON.stringify(registry));
+		const reloaded = await setup({ dir, cookies: () => [cookie("sid")] });
+		expect(reloaded.receiver.openList(await reloaded.source.list(TICKET))).toEqual([]);
+		await expect(reloaded.source.exportPage({ ...TICKET, profileId: copied.id })).rejects.toMatchObject({ code: "BROWSER_PROFILE_NOT_SHARED" });
 	});
 
 	it("shares nothing while the copy ledger cannot be read", async () => {

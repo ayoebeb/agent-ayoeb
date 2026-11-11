@@ -86,19 +86,8 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 		setSharingError("");
 		setSharingBusy(true);
 		try {
-			// Turning sharing on asks in a native dialog main shows; these are its words.
-			const state = await bridge.setSharing(enabled
-				? {
-					enabled,
-					labels: {
-						title: t("settings.browserProfiles.sharing.confirmTitle"),
-						message: t("settings.browserProfiles.sharing.confirmMessage"),
-						detail: t("settings.browserProfiles.sharing.confirmDetail"),
-						cancel: t("confirm.cancel"),
-						confirm: t("settings.browserProfiles.sharing.confirm"),
-					},
-				}
-				: { enabled });
+			// Turning sharing on asks in a native dialog main shows and words.
+			const state = await bridge.setSharing({ enabled });
 			setSharing(state.enabled);
 			if (state.error) setSharingError(t("settings.browserProfiles.sharing.saveFailed"));
 		} catch {

@@ -98,16 +98,8 @@ describe("Browser settings: other machines", () => {
 		expect(toggle).not.toBeChecked();
 		expect(bridge.setSharing).not.toHaveBeenCalled();
 		await userEvent.click(toggle);
-		await waitFor(() => expect(bridge.setSharing).toHaveBeenCalledWith({
-			enabled: true,
-			labels: {
-				title: "Share your browser profiles?",
-				message: expect.stringContaining("including its sign-ins and history"),
-				detail: expect.stringContaining("copies already made stay on those machines"),
-				cancel: "Cancel",
-				confirm: "Share profiles",
-			},
-		}));
+		// Main words the native confirmation itself; the renderer sends only the choice.
+		await waitFor(() => expect(bridge.setSharing).toHaveBeenCalledWith({ enabled: true }));
 		await waitFor(() => expect(toggle).toBeChecked());
 		await userEvent.click(toggle);
 		await waitFor(() => expect(bridge.setSharing).toHaveBeenLastCalledWith({ enabled: false }));

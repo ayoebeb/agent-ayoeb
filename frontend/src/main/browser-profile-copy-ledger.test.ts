@@ -68,4 +68,44 @@ describe("BrowserProfileCopyLedger", () => {
 		await ledger.remove(B);
 		expect((await ledger.load()).ids.size).toBe(0);
 	});
+
+	describe("ensure", () => {
+		function marker(expects = false) {
+			const state = { expects, marked: 0 };
+			return {
+				state,
+				expectsCopyLedger: async () => state.expects,
+				markCopyLedger: async () => { state.expects = true; state.marked += 1; },
+			};
+		}
+		const profile = (id: string, source?: Record<string, unknown>) =>
+			({ id, name: id, createdAt: "2026-11-10T12:00:00.000Z", updatedAt: "2026-11-10T12:00:00.000Z", ...(source ? { source } : {}) }) as never;
+
+		it("starts a ledger on a machine that never kept one, and records that it does", async () => {
+			const dir = await stateDir();
+			const kept = marker(false);
+			const copies = await new BrowserProfileCopyLedger(dir, kept).ensure([profile(A)]);
+			expect(copies.ids.size).toBe(0);
+			expect(JSON.parse(await readFile(path.join(dir, BROWSER_PROFILE_COPIES_FILE_NAME), "utf8"))).toEqual({ version: 1, copies: {} });
+			expect(kept.state).toMatchObject({ expects: true, marked: 1 });
+		});
+
+		it("refuses when a ledger this machine kept is gone", async () => {
+			const dir = await stateDir();
+			await expect(new BrowserProfileCopyLedger(dir, marker(true)).ensure([])).rejects.toBeInstanceOf(BrowserProfileCopyLedgerError);
+			await expect(readFile(path.join(dir, BROWSER_PROFILE_COPIES_FILE_NAME), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+		});
+
+		it("backfills copies and unreadable provenance from the registry, and leaves local profiles out", async () => {
+			const dir = await stateDir();
+			const ledger = new BrowserProfileCopyLedger(dir, marker(false));
+			const C = "22222222-2222-4222-8222-222222222222";
+			const copies = await ledger.ensure([profile(A, SOURCE), profile(B, { kind: "unknown" }), profile(C), profile("33333333-3333-4333-8333-333333333333", { kind: "import", browser: "Brave" })]);
+			expect([...copies.ids].sort()).toEqual([A, B].sort());
+			expect(copies.sources.get(A)).toEqual(SOURCE);
+			const reloaded = await new BrowserProfileCopyLedger(dir).load();
+			expect([...reloaded.ids].sort()).toEqual([A, B].sort());
+		});
+	});
 });
+

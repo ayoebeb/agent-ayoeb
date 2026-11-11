@@ -785,7 +785,7 @@ const api = {
 		import: (input: BrowserImportRequest) =>
 			ipcRenderer.invoke("browserProfiles:import:start", input) as Promise<BrowserImportResult>,
 		getSharing: () => ipcRenderer.invoke("browserProfiles:sharing:get") as Promise<BrowserProfileSharingState>,
-		/** Turning sharing on shows a native confirmation in main, with these labels. */
+		/** Turning sharing on shows a native confirmation in main, worded by main. */
 		setSharing: (input: BrowserProfileSharingInput) =>
 			ipcRenderer.invoke("browserProfiles:sharing:set", input) as Promise<BrowserProfileSharingState>,
 		listOtherMachines: () => ipcRenderer.invoke("browserProfiles:machines:list") as Promise<OtherMachinesResult>,
