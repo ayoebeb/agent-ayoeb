@@ -35,6 +35,19 @@ export function registerPaneDropTarget(target: PaneDropTarget): () => void {
 	};
 }
 
+let sessionDropTarget: PaneDropTarget | null = null;
+
+/**
+ * The center registers itself while a session row dragged out of the sidebar
+ * can land there, beside the session on screen or a pane of the split.
+ */
+export function registerSessionDropTarget(target: PaneDropTarget): () => void {
+	sessionDropTarget = target;
+	return () => {
+		if (sessionDropTarget === target) sessionDropTarget = null;
+	};
+}
+
 /** Distance past the strip's edge before a tab lifts out of it. */
 const DETACH_DISTANCE_PX = 14;
 /** A press held this long without moving lifts the tab out in place. */
@@ -48,7 +61,11 @@ type ActiveDrag = {
 	key: string;
 	pointerId: number;
 	source: HTMLElement;
+	/** Where the drop lands: tabs and session rows have their own targets. */
+	target: () => PaneDropTarget | null;
+	/** The list the press started in; leaving it across `axis` lifts the item out. */
 	strip: DOMRect;
+	axis: "x" | "y";
 	detached: boolean;
 	grabX: number;
 	grabY: number;
@@ -79,19 +96,58 @@ export function isPaneTabDragging(): boolean {
  * tab (it is cloned for the ghost). `onDetach` stops the strip's own drag.
  */
 export function beginPaneTabDrag(
-	event: { pointerId: number; clientX: number; clientY: number; button: number; target?: EventTarget | null },
+	event: PressEvent,
 	key: string,
 	source: HTMLElement,
 	onDetach?: () => void,
 ): void {
+	beginDrag(event, key, source, {
+		target: () => dropTarget,
+		strip: (source.closest("[role=tablist]") ?? source).getBoundingClientRect(),
+		axis: "y",
+		holdToLift: true,
+		onDetach,
+	});
+}
+
+/**
+ * Call from a sidebar session row's pointerdown. The row lifts out once the
+ * pointer leaves the sidebar sideways; until then the list's own reorder
+ * drag owns it. `onDetach` stops that reorder.
+ */
+export function beginSessionRowDrag(
+	event: PressEvent,
+	key: string,
+	source: HTMLElement,
+	onDetach?: () => void,
+): void {
+	beginDrag(event, key, source, {
+		target: () => sessionDropTarget,
+		strip: (source.closest<HTMLElement>("[data-slot='sidebar-container']") ?? source).getBoundingClientRect(),
+		axis: "x",
+		holdToLift: false,
+		onDetach,
+	});
+}
+
+type PressEvent = { pointerId: number; clientX: number; clientY: number; button: number; target?: EventTarget | null };
+
+function beginDrag(
+	event: PressEvent,
+	key: string,
+	source: HTMLElement,
+	options: { target: () => PaneDropTarget | null; strip: DOMRect; axis: "x" | "y"; holdToLift: boolean; onDetach?: () => void },
+): void {
 	if (event.button !== 0 || active) return;
-	if (!dropTarget?.canDrag(key)) return;
-	const strip = (source.closest("[role=tablist]") ?? source).getBoundingClientRect();
+	if (!options.target()?.canDrag(key)) return;
+	const { strip, axis, onDetach } = options;
 	const drag: ActiveDrag = {
 		key,
 		pointerId: event.pointerId,
 		source,
+		target: options.target,
 		strip,
+		axis,
 		detached: false,
 		grabX: 0,
 		grabY: 0,
@@ -119,8 +175,9 @@ export function beginPaneTabDrag(
 				window.clearTimeout(drag.holdTimer);
 				drag.holdTimer = null;
 			}
-			const outside =
-				drag.y > drag.strip.bottom + DETACH_DISTANCE_PX || drag.y < drag.strip.top - DETACH_DISTANCE_PX;
+			const outside = drag.axis === "y"
+				? drag.y > drag.strip.bottom + DETACH_DISTANCE_PX || drag.y < drag.strip.top - DETACH_DISTANCE_PX
+				: drag.x > drag.strip.right + DETACH_DISTANCE_PX || drag.x < drag.strip.left - DETACH_DISTANCE_PX;
 			if (!outside) return;
 			detach(drag);
 		}
@@ -155,12 +212,14 @@ export function beginPaneTabDrag(
 		window.removeEventListener("keydown", onKey, true);
 		window.removeEventListener("blur", onBlur);
 	};
-	drag.holdTimer = window.setTimeout(() => {
-		drag.holdTimer = null;
-		if (active !== drag || drag.detached) return;
-		detach(drag);
-		schedule(drag);
-	}, HOLD_MS);
+	if (options.holdToLift) {
+		drag.holdTimer = window.setTimeout(() => {
+			drag.holdTimer = null;
+			if (active !== drag || drag.detached) return;
+			detach(drag);
+			schedule(drag);
+		}, HOLD_MS);
+	}
 	active = drag;
 }
 
@@ -223,7 +282,7 @@ function schedule(drag: ActiveDrag): void {
 
 function paint(drag: ActiveDrag): void {
 	if (drag.ghost) drag.ghost.style.transform = ghostTransform(drag);
-	const resolution = dropTarget?.resolve(drag.key, drag.x, drag.y) ?? null;
+	const resolution = drag.target()?.resolve(drag.key, drag.x, drag.y) ?? null;
 	drag.resolution = resolution;
 	const preview = drag.preview;
 	if (!preview) return;
@@ -282,7 +341,7 @@ function finish(drag: ActiveDrag, commit: boolean): void {
 		if (commit && stayedPut && drag.pressTarget instanceof HTMLElement && drag.pressTarget.isConnected) drag.pressTarget.click();
 	}, 0);
 	// Resolve against the final pointer position, not the last painted frame.
-	const resolution = commit && !stayedPut ? (dropTarget?.resolve(drag.key, drag.x, drag.y) ?? null) : null;
+	const resolution = commit && !stayedPut ? (drag.target()?.resolve(drag.key, drag.x, drag.y) ?? null) : null;
 	drag.source.removeAttribute("data-pane-drag-source");
 	document.body.classList.remove("is-pane-dragging");
 	const { ghost, preview } = drag;

@@ -6534,6 +6534,16 @@ body.is-pane-dragging webview {
 	pointer-events: none;
 }
 
+/* A session row lifted off the sidebar leaves its hover preview behind. */
+body.is-pane-dragging [data-slot="hover-card-content"] {
+	visibility: hidden;
+}
+
+/* The sidebar row being dragged to the center rests at half strength. */
+[data-session-row][data-pane-drag-source] {
+	opacity: 0.4;
+}
+
 [data-pane-drag-source] [data-terminal-tab-frame],
 [data-pane-drag-source][data-terminal-tab-frame] {
 	opacity: 0.4;
@@ -6609,6 +6619,43 @@ body.is-pane-dragging webview {
 
 .pane-drop-preview[data-instant] {
 	transition: none;
+}
+
+/* Sidebar rows picked to open side by side wear the split's drop preview: a
+ * faint accent fill and edge, so the selection reads as where they will go. */
+[data-session-row][data-split-selected] > [data-nav-row-highlight],
+[data-project-drag-row][data-split-selected] [data-nav-row-highlight] {
+	width: 100%;
+	height: 100%;
+	opacity: 1;
+	background: color-mix(in oklch, var(--color-accent) 12%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 40%, transparent);
+}
+
+[data-session-row][data-split-selected] [data-session-name],
+[data-project-drag-row][data-split-selected] [data-project-label] {
+	color: var(--color-foreground);
+}
+
+/* Sessions side by side: each pane's top bar is its header. Only the pane in
+ * the panel's top-right corner sits under the panel's trailing controls, and
+ * only the top-left one under the titlebar controls of a closed sidebar. */
+.center-panel-surface .session-split-view [data-session-pane]:not([data-pane-top][data-pane-right]) .session-topbar-actions:not([data-fullscreen]) {
+	padding-right: var(--gap-topbar-control);
+}
+
+.session-split-view [data-session-pane]:not([data-pane-top][data-pane-left]) :is(.session-topbar-titlebar-clearance-mac, .session-topbar-titlebar-clearance-linux) {
+	padding-left: 0;
+}
+
+/* The pane taking keys has a focus edge; the others stay fully readable, since
+ * the point of the split is to watch every session work. */
+.session-pane-focus-ring {
+	position: absolute;
+	inset: 0;
+	z-index: 7;
+	pointer-events: none;
+	box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 55%, transparent);
 }
 
 /* Unfocused panes of a split rest under a light veil of the background, so

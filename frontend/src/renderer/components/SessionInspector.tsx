@@ -165,7 +165,7 @@ export const SessionInspector = memo(function SessionInspector({
 	view: viewProp,
 	onViewChange,
 }: {
-	/** An orchestrator's rail has Summary, Browser, and contextual Artifacts. */
+	/** An orchestrator's rail has Summary, Files (local and remote hosts), Browser, and contextual Artifacts. */
 	orchestrator?: boolean;
 	session?: WorkspaceSession;
 	hostId?: string;
@@ -243,7 +243,11 @@ export const SessionInspector = memo(function SessionInspector({
 	// Keep the shell on a real, visible tab instead of rendering an empty, unlabelled body.
 	const reviewsAvailable = reviewsTabVisible(session);
 	const availableViewDefs = orchestrator ? VIEW_DEFS.filter((entry) =>
-		entry.id === "summary" || entry.id === "browser" || (entry.id === "artifacts" && ((session?.artifactFiles?.length ?? 0) > 0 || artifactRequestPending)))
+		entry.id === "summary" || entry.id === "browser"
+			// Files browses the orchestrator's own checkout of the project. A Cloud
+			// orchestrator's workspace is not reviewed through Files.
+			|| (entry.id === "files" && !session?.cloud)
+			|| (entry.id === "artifacts" && ((session?.artifactFiles?.length ?? 0) > 0 || artifactRequestPending)))
 		: VIEW_DEFS.filter((entry) => (!hostId || entry.id !== "browser" || browserView) && (reviewsAvailable || entry.id !== "reviews")
 			// The host passes a side chat view only where side chats can run.
 			&& (entry.id !== "sideChat" || sideChatView !== undefined)

@@ -93,6 +93,10 @@ import { useSidebarOrderStore } from "../stores/sidebar-order-store";
 import { useAppMenuAvailable } from "../hooks/useAppMenuCommand";
 import { useAppShortcut } from "../hooks/useAppShortcut";
 import { recordManualWorkerOpen, recordSessionSurface } from "../lib/session-management-telemetry";
+import { SessionSplitView, useSessionRowDropTarget, type SessionPaneViewProps } from "../components/SessionSplitView";
+import { findLocalSession } from "../hooks/useSessionSplitActions";
+import { paneKeyForSession, sessionPaneKey } from "../lib/session-split";
+import { useSessionSplitStore } from "../stores/session-split-store";
 
 const SHELL_LOADER_STALE_MS = 2_000;
 
@@ -115,6 +119,9 @@ function SessionView(props: ComponentProps<typeof LoadedSessionView>) {
 }
 function preloadSessionView(): void {
 	void loadSessionView().catch(() => undefined);
+}
+function renderPaneSession(props: SessionPaneViewProps) {
+	return <SessionView {...props} />;
 }
 
 const LAST_PROJECT_KEY = "ao.newTask.lastProject";
@@ -205,11 +212,38 @@ function LocalSessionHost() {
 	const cloudOrgId = org?.id;
 	const liveSessionId = projectSession?.sessionId ?? scratchpadSessionId;
 	const liveProjectId = projectSession?.projectId;
-	const { sessionId, projectId } = useHeldSession(liveSessionId, liveProjectId);
+	const held = useHeldSession(liveSessionId, liveProjectId);
+	// Sessions side by side show while the route points at one of them; any
+	// other session shows on its own and the split waits until one returns.
+	const split = useSessionSplitStore((state) => state.split);
+	const workspaceQuery = useWorkspaceQuery();
+	const splitPaneOf = useCallback((id: string | undefined) => {
+		if (!split || !id) return undefined;
+		const own = sessionPaneKey({ kind: "session", sessionId: id, projectId: STANDALONE_WORKSPACE_ID });
+		return split.panes[own] ? own : paneKeyForSession(split, findLocalSession(workspaceQuery.data, id)?.session);
+	}, [split, workspaceQuery.data]);
+	const routedPaneKey = useMemo(() => splitPaneOf(liveSessionId), [liveSessionId, splitPaneOf]);
+	// Leaving the split, the session held on screen is one of its panes, not
+	// the single view: show the destination at once instead of mounting it alone.
+	const leavingSplit = held.switching && Boolean(splitPaneOf(held.sessionId));
+	const sessionId = leavingSplit ? liveSessionId : held.sessionId;
+	const projectId = leavingSplit ? liveProjectId : held.projectId;
 	const view = useMemo(
 		() => (sessionId ? <SessionView cloudOrgId={cloudOrgId} projectId={projectId} sessionId={sessionId} /> : null),
 		[cloudOrgId, projectId, sessionId],
 	);
+	useSessionRowDropTarget(liveSessionId, Boolean(liveSessionId));
+	if (split && routedPaneKey && liveSessionId) {
+		return (
+			<SessionSplitView
+				cloudOrgId={cloudOrgId}
+				renderSession={renderPaneSession}
+				routedPaneKey={routedPaneKey}
+				routedSessionId={liveSessionId}
+				split={split}
+			/>
+		);
+	}
 	if (!sessionId) return null;
 	return (
 		<CatchBoundary errorComponent={LazyChunkErrorPanel} getResetKey={() => sessionId} onCatch={captureSessionViewCrash}>

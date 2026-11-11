@@ -14,7 +14,7 @@ import type { SessionInterfaceTransitionStatus } from "../hooks/useSessionInterf
 import { conversationQueryKey } from "../hooks/useConversation";
 import type { BrowserTabsState } from "../../main/browser-view-host";
 import type { ObservedBrowserAgentActivity } from "../hooks/useBrowserView";
-import { inspectorIsOpen, rememberedFileDisplayMode, useUiStore, type InspectorView } from "../stores/ui-store";
+import { filesSidebarStorageKey, inspectorIsOpen, rememberedFileDisplayMode, useUiStore, type InspectorView } from "../stores/ui-store";
 import { useTerminalResetStore } from "../stores/terminal-reset-store";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 import { setChatDraftBoundary } from "../lib/chat-draft-boundary";
@@ -5807,6 +5807,98 @@ describe("SessionView", () => {
 		await waitFor(() => expect(screen.getByTestId("session-file-workspace")).toBeInTheDocument());
 		expect(inspectorOpen("sess-orch")).toBe(false);
 		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("summary");
+	});
+
+	// The orchestrator's rail starts closed: open it, then pick Files.
+	function openOrchestratorFiles() {
+		fireEvent.click(screen.getByRole("button", { name: "Open inspector panel" }));
+		fireEvent.click(screen.getByRole("button", { name: "open files" }));
+	}
+
+	it.each(["tui", "chat"] as const)("opens a %s orchestrator's Files on its whole tree and a picked file in the center", (mode) => {
+		if (mode === "chat") workerSession("sess-orch").mode = "chat";
+		render(<SessionView sessionId="sess-orch" />);
+		openOrchestratorFiles();
+
+		expect(inspectorOpen("sess-orch")).toBe(true);
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]).toMatchObject({ view: "files", filesChangedOnly: false });
+		const inspector = screen.getByTestId("panel-inspector");
+		expect(inspector).toHaveAttribute("data-workspace-mode", "files");
+		fireEvent.click(within(inspector).getByRole("button", { name: "select src/App.tsx" }));
+		expect(screen.getByTestId("session-file-workspace")).toHaveTextContent("src/App.tsx");
+		expect(screen.getByTestId("session-file-workspace")).toHaveAttribute("data-mode", "file");
+		expect(within(inspector).getByText("file tree")).toBeInTheDocument();
+		expect(browserUnseen("sess-orch")).toBe(false);
+	});
+
+	it("still opens a worker's Files on its changes", () => {
+		render(<SessionView sessionId="sess-1" />);
+		fireEvent.click(screen.getByRole("button", { name: "open files" }));
+		const state = useUiStore.getState().inspectorSessions["sess-1"];
+		expect(state).toMatchObject({ isOpen: true, view: "files" });
+		expect(state?.filesChangedOnly ?? true).toBe(true);
+		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-1"))).toBeNull();
+	});
+
+	it("keeps a Cloud orchestrator's rail without Files", () => {
+		workerSession("sess-orch").cloud = { orgId: "cloud-org", sandboxProvider: "docker" };
+		render(<SessionView sessionId="sess-orch" />);
+		openOrchestratorFiles();
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("summary");
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.remembersFilesSidebar).toBeUndefined();
+	});
+
+	it("opens an orchestrator's Files as a narrow explorer, apart from the workers' width", () => {
+		window.localStorage.setItem("ao.inspector.widthPx", "520");
+		const { rerender } = render(<SessionView sessionId="sess-orch" />);
+		openOrchestratorFiles();
+		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("300px");
+
+		rerender(<SessionView sessionId="sess-1" />);
+		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("520px");
+	});
+
+	it("restores the Files width an orchestrator was resized to", () => {
+		window.localStorage.setItem("ao.inspector.filesWidthPx:sess-orch", "360");
+		render(<SessionView sessionId="sess-orch" />);
+		openOrchestratorFiles();
+		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("360px");
+	});
+
+	it("reopens an orchestrator's Files sidebar it left open, until it is closed", () => {
+		const first = render(<SessionView sessionId="sess-orch" />);
+		openOrchestratorFiles();
+		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-orch"))).toBe("open");
+		first.unmount();
+
+		// A restart forgets the in-memory inspector state.
+		act(() => useUiStore.setState({ inspectorSessions: {} }));
+		render(<SessionView sessionId="sess-orch" />);
+		expect(inspectorOpen("sess-orch")).toBe(true);
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]).toMatchObject({ view: "files", filesChangedOnly: false });
+		expect(within(screen.getByTestId("panel-inspector")).getByText("file tree")).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Close inspector panel" }));
+		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-orch"))).toBeNull();
+	});
+
+	it("still reveals an explicit orchestrator preview over Files and badges passive Browser use", () => {
+		const orchestrator = workerSession("sess-orch");
+		const { rerender } = render(<SessionView sessionId="sess-orch" />);
+		openOrchestratorFiles();
+		browserViewState.agentBrowserActive = true;
+		rerender(<SessionView sessionId="sess-orch" />);
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("files");
+		expect(browserUnseen("sess-orch")).toBe(true);
+
+		browserViewState.agentBrowserActive = false;
+		orchestrator.previewUrl = "https://example.com";
+		orchestrator.previewRevision = 1;
+		rerender(<SessionView sessionId="sess-orch" />);
+		expect(inspectorOpen("sess-orch")).toBe(true);
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("browser");
+		expect(browserUnseen("sess-orch")).toBe(false);
+		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-orch"))).toBeNull();
 	});
 
 	it("reveals each explicit orchestrator preview and respects closing it during passive activity", () => {

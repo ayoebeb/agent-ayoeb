@@ -22,6 +22,7 @@ import {
 	CalendarClock,
 	ChevronRight,
 	CircleAlert,
+	Columns2,
 	Copy,
 	GitMerge,
 	GitPullRequest,
@@ -49,7 +50,9 @@ import {
 	ArrowLeft,
 } from "@/components/app-icons";
 import {
+	createContext,
 	useCallback,
+	useContext,
 	useEffect,
 	useLayoutEffect,
 	memo,
@@ -87,7 +90,7 @@ import {
 	sessionNeedsInput,
 	type SessionRowMarker,
 } from "../lib/session-presentation";
-import { SessionContextMenuItems, useCopyToClipboard } from "./SessionContextMenuItems";
+import { useCopyToClipboard, useSessionMenuEntries } from "./SessionContextMenuItems";
 import { dropdownMenuKit, MenuEntries, MenuKitContext, type MenuEntry } from "./menu-model";
 import { isArchivedSession } from "../lib/standalone-archive";
 import { aoBridge } from "../lib/bridge";
@@ -174,6 +177,11 @@ import type { RemoteHost } from "../hooks/useRemoteHosts";
 import { sessionNavigateTarget } from "../lib/navigate-to-session";
 import { sessionUiKey } from "../lib/hosts";
 import { RemoteHostsSection } from "./RemoteHostsSection";
+import { beginSessionRowDrag } from "../lib/pane-drag";
+import { MAX_SPLIT_PANES, paneDragKey, sessionPaneKey, type SelectionKind, type SessionPaneRef } from "../lib/session-split";
+import { paneOnScreen, useSessionSplitActions } from "../hooks/useSessionSplitActions";
+import { useSessionSplitStore } from "../stores/session-split-store";
+import { selectedPaneRefs, useSidebarSelectionStore } from "../stores/sidebar-selection-store";
 
 // macOS paints framed chrome: the fixed TitlebarNav cluster carries the
 // sidebar toggle + history arrows above this surface. Windows hangs the sidebar
@@ -584,6 +592,202 @@ function useSelection() {
 	}), [goArtifacts, goAutomations, goUsage, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
 }
 
+/*
+ * Side by side. Ctrl-click (Cmd on macOS) toggles a session or project row in
+ * the selection and Shift-click selects up to it, in the order the rows are on
+ * screen; a plain click clears it. Rows carry their pane in data attributes so
+ * a range reads off the list as shown, and the open row seeds a new selection.
+ */
+function splitSelectMode(event: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean }): "toggle" | "range" | null {
+	if (event.shiftKey) return "range";
+	return (isMacPlatform() ? event.metaKey : event.ctrlKey) ? "toggle" : null;
+}
+
+function splitSelectAttrs(kind: SelectionKind, ref: SessionPaneRef | undefined, active: boolean): Record<`data-${string}`, string | undefined> {
+	if (!ref) return {};
+	return {
+		"data-split-select": kind,
+		"data-split-key": sessionPaneKey(ref),
+		"data-split-ref": JSON.stringify(ref),
+		"data-split-active": active ? "" : undefined,
+	};
+}
+
+function splitRowsOnScreen(kind: SelectionKind) {
+	const ordered: string[] = [];
+	const refs: Record<string, SessionPaneRef> = {};
+	let active: { key: string; ref: SessionPaneRef } | undefined;
+	document.querySelectorAll<HTMLElement>(`[data-split-select="${kind}"]`).forEach((row) => {
+		const key = row.dataset.splitKey;
+		let ref: SessionPaneRef;
+		try {
+			ref = JSON.parse(row.dataset.splitRef ?? "") as SessionPaneRef;
+		} catch {
+			return;
+		}
+		if (!key) return;
+		// A pinned session is listed twice; it counts where it shows first.
+		if (!refs[key]) {
+			ordered.push(key);
+			refs[key] = ref;
+		}
+		if (!active && row.dataset.splitActive !== undefined) active = { key, ref };
+	});
+	return { ordered, refs, active };
+}
+
+/**
+ * Applies a Ctrl/Cmd or Shift click to the selection. False for a plain
+ * click, which clears the selection and opens the row as usual.
+ */
+function selectOnModifiedClick(event: MouseEvent, kind: SelectionKind, ref: SessionPaneRef | undefined, onTooMany: () => void): boolean {
+	const mode = splitSelectMode(event);
+	const store = useSidebarSelectionStore.getState();
+	if (!mode || !ref) {
+		store.clear();
+		return false;
+	}
+	event.preventDefault();
+	event.stopPropagation();
+	const rows = splitRowsOnScreen(kind);
+	if (!store.select({ kind, key: sessionPaneKey(ref), ref, range: mode === "range" ? rows : undefined, seed: rows.active })) onTooMany();
+	return true;
+}
+
+function useSplitSelected(kind: SelectionKind, ref: SessionPaneRef | undefined): boolean {
+	const key = ref ? sessionPaneKey(ref) : undefined;
+	return useSidebarSelectionStore((state) => Boolean(key && state.selection?.kind === kind && state.selection.keys.includes(key)));
+}
+
+/**
+ * A row lifted off the sidebar leaves its list's reorder drag. dnd-kit cancels
+ * on an Escape keydown it reads by `code`; the pane drag and the selection bar
+ * read `key`, so this stops the reorder alone.
+ */
+function cancelSidebarReorder() {
+	document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", bubbles: true }));
+}
+
+/** A Shift press would otherwise start a text selection across the rows. */
+function preventShiftSelection(event: MouseEvent) {
+	if (event.shiftKey) event.preventDefault();
+}
+
+/** The Sidebar's workspace list, read when an action runs rather than on every row render. */
+const SidebarWorkspacesContext = createContext<() => readonly WorkspaceSummary[] | undefined>(() => undefined);
+
+function useTooManyToast(): () => void {
+	const { t } = useTranslation();
+	return useCallback(() => useUiStore.getState().showGlobalToast(t("sessionSplit.tooMany", { count: MAX_SPLIT_PANES })), [t]);
+}
+
+/**
+ * A session row's menu: Open side by side first, then its usual actions. With
+ * this row in a selection of two or more it opens the selection; otherwise it
+ * puts this session beside the one on screen.
+ */
+function SessionRowMenuEntries({ session, splitRef, onArchive, onRename }: {
+	session: WorkspaceSession;
+	splitRef?: SessionPaneRef;
+	onArchive?: () => void;
+	onRename: () => void;
+}) {
+	const { t } = useTranslation();
+	const entries = useSessionMenuEntries(session, { onArchive, onRename });
+	const getWorkspaces = useContext(SidebarWorkspacesContext);
+	const { open, addBeside } = useSessionSplitActions(getWorkspaces);
+	const routedSessionId = useParams({ strict: false, select: (params) => ((params as { hostId?: string }).hostId ? undefined : (params as { sessionId?: string }).sessionId) });
+	const selection = useSidebarSelectionStore((state) => state.selection);
+	const split = useSessionSplitStore((state) => state.split);
+	let onSelect: (() => void) | undefined;
+	if (splitRef) {
+		const key = sessionPaneKey(splitRef);
+		if (selection?.kind === "session" && selection.keys.length >= 2 && selection.keys.includes(key)) {
+			onSelect = () => void open(selectedPaneRefs(useSidebarSelectionStore.getState()));
+		} else {
+			const anchor = paneOnScreen(split, getWorkspaces(), routedSessionId);
+			const shown = anchor && split?.panes[sessionPaneKey(anchor)] ? split : null;
+			if (anchor && sessionPaneKey(anchor) !== key && !shown?.panes[key]) onSelect = () => void addBeside(anchor, splitRef, "right");
+		}
+	}
+	return (
+		<MenuEntries
+			entries={onSelect
+				? [{ kind: "item", id: "open-side-by-side", icon: <Columns2 aria-hidden="true" />, label: t("sessionSplit.open"), onSelect }, { kind: "separator", id: "side-by-side-sep" }, ...entries]
+				: entries}
+		/>
+	);
+}
+
+/**
+ * With two or more rows selected, the one action they share: open them side
+ * by side. Escape or the close button clears the selection.
+ */
+function SidebarSelectionBar() {
+	const { t } = useTranslation();
+	const selection = useSidebarSelectionStore((state) => state.selection);
+	const getWorkspaces = useContext(SidebarWorkspacesContext);
+	const { open } = useSessionSplitActions(getWorkspaces);
+	const count = selection?.keys.length ?? 0;
+	useEffect(() => {
+		if (!count) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			// A row's hover preview takes Escape first; from the sidebar it still clears.
+			const inSidebar = document.activeElement?.closest("[data-slot='sidebar-container']");
+			if (!event.defaultPrevented || inSidebar) useSidebarSelectionStore.getState().clear();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [count]);
+	if (!selection || count < 2) return null;
+	// The full "orchestrators side by side" does not fit the sidebar; the
+	// tooltip and the row menus carry it.
+	const label = selection.kind === "project" ? t("sessionSplit.openOrchestratorsShort") : t("sessionSplit.open");
+	const action = (
+		<Button
+			className="w-full justify-start"
+			data-testid="sidebar-open-side-by-side"
+			onClick={() => void open(selectedPaneRefs(useSidebarSelectionStore.getState()))}
+			size="sm"
+			type="button"
+			variant="primary"
+		>
+			<Columns2 aria-hidden="true" />
+			<span className="truncate">{label}</span>
+		</Button>
+	);
+	return (
+		<div className="sidebar-expanded-chrome flex flex-col gap-1 px-2 pb-2" data-testid="sidebar-split-selection">
+			<div className="flex h-6 items-center justify-between gap-2 pl-2">
+				<span className="min-w-0 truncate text-caption tabular-nums text-muted-foreground" role="status">
+					{t(selection.kind === "project" ? "sessionSplit.projectsSelected" : "sessionSplit.sessionsSelected", { count })}
+				</span>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button
+							aria-label={t("sessionSplit.clearSelection")}
+							onClick={() => useSidebarSelectionStore.getState().clear()}
+							size="icon-xs"
+							type="button"
+							variant="quiet"
+						>
+							<X aria-hidden="true" />
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent side="top">{t("sessionSplit.clearSelection")}</TooltipContent>
+				</Tooltip>
+			</div>
+			{selection.kind === "project" ? (
+				<Tooltip>
+					<TooltipTrigger asChild>{action}</TooltipTrigger>
+					<TooltipContent side="top">{t("sessionSplit.openOrchestrators")}</TooltipContent>
+				</Tooltip>
+			) : action}
+		</div>
+	);
+}
+
 // Rows showing the red alert sit above the rest, but only in the default
 // order: once the user has dragged rows into their own order, it wins. Stable,
 // so the order still holds within each group.
@@ -704,6 +908,12 @@ function SessionStatusDot({ session, indicator, legacy }: {
 			)}
 		</span>
 	);
+}
+
+/** A session's sidebar status glyph, also the status in a split pane's header. */
+export function SessionRowStatusGlyph({ session }: { session: WorkspaceSession }) {
+	const newSidebarDesign = useUiStore(isNewSidebarDesign);
+	return <SessionStatusDot indicator={getSessionRowIndicator(session)} legacy={!newSidebarDesign} session={session} />;
 }
 
 export {
@@ -1074,8 +1284,14 @@ export function Sidebar({
 		[onOpenRemoteProject, remoteNavigate, remoteWorkspaces, selection, workspaces],
 	);
 
+	// Rows read the list when an action runs, so a streamed update re-renders none of them.
+	const sidebarWorkspacesRef = useRef(workspaces);
+	sidebarWorkspacesRef.current = workspaces;
+	const getSidebarWorkspaces = useCallback(() => sidebarWorkspacesRef.current, []);
+
 	return (
-		// Pinned sidebars start below shell chrome.
+		<SidebarWorkspacesContext.Provider value={getSidebarWorkspaces}>
+		{/* Pinned sidebars start below shell chrome. */}
 		<SidebarRoot
 			collapsible={SIDEBAR_COLLAPSIBLE}
 			resizeScopeRef={resizeScopeRef}
@@ -1360,6 +1576,8 @@ export function Sidebar({
 			</>
 			)}
 
+			{settingsPage || isIconRail ? null : <SidebarSelectionBar />}
+
 			{/* Footer — Settings opens the global settings page directly.
 			    Footer rows share NAV_ROW height so Settings, Connect mobile,
 			    and account actions line up. Bottom spacing stays inside the
@@ -1522,6 +1740,7 @@ export function Sidebar({
 				onPointerDown={onCollapsedResizePointerDown}
 			/>
 		</SidebarRoot>
+		</SidebarWorkspacesContext.Provider>
 	);
 }
 
@@ -1629,6 +1848,15 @@ const ProjectItem = memo(function ProjectItem({
 	const requestNewTask = useUiStore((state) => state.requestNewTask);
 	const showGlobalToast = useUiStore((state) => state.showGlobalToast);
 	const projectIsDragging = isDragged;
+	// Projects on this computer can be selected to open their orchestrators side by side.
+	const splitRef = useMemo<SessionPaneRef | undefined>(
+		() => (isStandalone || workspace.hostId ? undefined : { kind: "orchestrator", projectId: workspace.id }),
+		[isStandalone, workspace.hostId, workspace.id],
+	);
+	const splitSelected = useSplitSelected("project", splitRef);
+	const tooManySelected = useTooManyToast();
+	const getWorkspaces = useContext(SidebarWorkspacesContext);
+	const { open: openSideBySide } = useSessionSplitActions(getWorkspaces);
 	// Keep completed PR sessions reachable while their runtime still exists.
 	// Only termination removes a worker from the sidebar; archived sessions stay
 	// reachable through SessionsBoard.
@@ -1811,8 +2039,10 @@ const ProjectItem = memo(function ProjectItem({
 	// session (orchestrator or worker) → board. Collapsed → expand + board.
 	// Do not treat orchestratorActive like the board: the project row is the
 	// one-click path back from the orchestrator button.
-	const onProjectClick = () => {
+	const onProjectClick = (event: MouseEvent) => {
 		if (consumeDragClick(workspace.id)) return;
+		// Ctrl/Cmd or Shift selects the project; it never expands or collapses it.
+		if (selectOnModifiedClick(event, "project", splitRef, tooManySelected)) return;
 		if (isStandalone) {
 			toggleDisclosure();
 			return;
@@ -1833,6 +2063,7 @@ const ProjectItem = memo(function ProjectItem({
 	const onFolderClick = (event: MouseEvent) => {
 		event.stopPropagation();
 		if (consumeDragClick(workspace.id)) return;
+		if (selectOnModifiedClick(event, "project", splitRef, tooManySelected)) return;
 		toggleDisclosure();
 	};
 
@@ -1863,7 +2094,24 @@ const ProjectItem = memo(function ProjectItem({
 		// archive is its own section's entry. Hidden while empty, as the board's
 		// Archive button and Cmd+K's Open archive are.
 		const archivedCount = isStandalone ? 0 : workerSessions(workspace.sessions).filter(isArchivedSession).length;
+		// With this project in a selection of two or more: open their orchestrators side by side.
+		const { selection: splitSelection } = useSidebarSelectionStore.getState();
+		const inSplitSelection = Boolean(
+			splitRef && splitSelection?.kind === "project" && splitSelection.keys.length >= 2 && splitSelection.keys.includes(sessionPaneKey(splitRef)),
+		);
 		return [
+			...(inSplitSelection
+				? [
+					{
+						kind: "item" as const,
+						id: "open-side-by-side",
+						icon: <Columns2 aria-hidden="true" />,
+						label: t("sessionSplit.openOrchestrators"),
+						onSelect: () => void openSideBySide(selectedPaneRefs(useSidebarSelectionStore.getState())),
+					},
+					{ kind: "separator" as const, id: "side-by-side-sep" },
+				]
+				: []),
 			{
 				kind: "item",
 				id: "new-task",
@@ -1996,6 +2244,8 @@ const ProjectItem = memo(function ProjectItem({
 						)}
 						data-project-drag-row=""
 						data-project-id={workspace.id}
+						data-split-selected={splitSelected ? "" : undefined}
+						{...splitSelectAttrs("project", splitRef, projectActive)}
 						draggable={!workspace.hostId}
 						onDragStart={(event) => onProjectDragStart(event, workspace.id)}
 						onDragEnd={onProjectDragEnd}
@@ -2010,6 +2260,7 @@ const ProjectItem = memo(function ProjectItem({
 									isActive={projectActive}
 									tooltip={nameWithHost}
 									onClick={onProjectClick}
+									onMouseDown={preventShiftSelection}
 									className={cn(
 										NAV_ROW_CLASS,
 										NAV_ROW_HIGHLIGHT_HOST_CLASS,
@@ -2024,7 +2275,7 @@ const ProjectItem = memo(function ProjectItem({
 										"group-data-[collapsible=icon]:size-control-board! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:font-semibold",
 									)}
 								>
-									<NavRowHighlight active={projectActive} disabled={projectIsDragging} />
+									<NavRowHighlight active={projectActive || splitSelected} disabled={projectIsDragging} />
 									{/* Expanded sidebar: visual folder/chevron icon (decorative — toggle button is a sibling).
 		    size-icon-md matches the Projects section row; an 18px centered box was
 		    optically indenting these icons relative to the header. */}
@@ -2108,6 +2359,7 @@ const ProjectItem = memo(function ProjectItem({
 									data-project-folder=""
 									tabIndex={-1}
 									onClick={onFolderClick}
+									onMouseDown={preventShiftSelection}
 									type="button"
 								/>
 							</div>
@@ -2789,6 +3041,13 @@ const SessionRow = memo(function SessionRow({
 	}, [rename.begin, renamable]);
 	// Owned here so both the hover Archive button and the context menu open the same confirm.
 	const [archiveOpen, setArchiveOpen] = useState(false);
+	// Sessions on this computer can be selected and opened side by side.
+	const splitRef = useMemo<SessionPaneRef | undefined>(
+		() => (session.hostId ? undefined : { kind: "session", sessionId: session.id, projectId: session.workspaceId }),
+		[session.hostId, session.id, session.workspaceId],
+	);
+	const splitSelected = useSplitSelected("session", splitRef);
+	const tooManySelected = useTooManyToast();
 
 	if (rename.isEditing) {
 		return (
@@ -2859,8 +3118,10 @@ const SessionRow = memo(function SessionRow({
 					data-session-row=""
 					data-dragging={reorder?.isDragging ? "true" : undefined}
 					data-preview-open={preview.open ? "" : undefined}
+					data-split-selected={splitSelected ? "" : undefined}
+					{...splitSelectAttrs("session", splitRef, active)}
 				>
-					<NavRowHighlight active={active} disabled={Boolean(reorder?.isDragging)} />
+					<NavRowHighlight active={active || splitSelected} disabled={Boolean(reorder?.isDragging)} />
 					<div className={cn("relative z-[1] flex min-w-0 flex-1", reorder?.isDragging && "cursor-grabbing")}>
 						<Pressable
 							aria-current={active ? "page" : undefined}
@@ -2876,6 +3137,13 @@ const SessionRow = memo(function SessionRow({
 								reorder?.isDragging && "!cursor-grabbing",
 							)}
 							{...(reorder?.listeners ?? {})}
+							onPointerDown={(event) => {
+								reorder?.listeners?.onPointerDown?.(event);
+								// Dragged off the sidebar, the row lifts out and drops beside a session.
+								const row = splitRef ? event.currentTarget.closest<HTMLElement>("[data-session-row]") : null;
+								if (splitRef && row) beginSessionRowDrag(event, paneDragKey(splitRef), row, cancelSidebarReorder);
+							}}
+							onMouseDown={preventShiftSelection}
 							onMouseEnter={() => {
 								if (!canPrefetchChat) return;
 								hoverTimerRef.current = setTimeout(prefetchConversation, 100);
@@ -2892,6 +3160,7 @@ const SessionRow = memo(function SessionRow({
 									suppressTouchOpenRef.current = false;
 									return;
 								}
+								if (selectOnModifiedClick(event, "session", splitRef, tooManySelected)) return;
 								onOpen();
 							}}
 							onKeyDown={(event) => {
@@ -2967,7 +3236,7 @@ const SessionRow = memo(function SessionRow({
 			</HoverCard>
 			<ContextMenuContent className="min-w-44">
 				{/* Archiving is the owner workspace's; a guest's archive would always be refused. */}
-				<SessionContextMenuItems onArchive={session.cloud?.shared ? undefined : () => setArchiveOpen(true)} onRename={beginRename} session={session} />
+				<SessionRowMenuEntries onArchive={session.cloud?.shared ? undefined : () => setArchiveOpen(true)} onRename={beginRename} session={session} splitRef={splitRef} />
 			</ContextMenuContent>
 		</ContextMenu>
 	);

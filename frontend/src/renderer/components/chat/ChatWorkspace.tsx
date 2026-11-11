@@ -177,6 +177,7 @@ import type { AgentSwitchProps } from "./AgentSwitchPicker";
 import type { ComposerPromptSuggestion } from "./ComposerEditor";
 import { ChatTokenSkills } from "./sentComposerTokens";
 import { ChatComposer, type ChatComposerHandle, type StoredComposerAttachment } from "./ChatComposer";
+import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { ContextMeter } from "./ContextMeter";
 import { stagedAttachmentParts, attachmentName } from "./messageAttachments";
 import type { QueuedMessageEditOptions } from "../../types/conversation";
@@ -192,6 +193,7 @@ import { agentAccountProviderFor } from "../../hooks/useAgentAccounts";
 import { ImportedAgentBlocked, McpServerBanner, ReauthBanner, ThreadStateBanner, VersionSwitchBanner } from "./ChatStatusBanners";
 import type { AgentBlock } from "../../lib/session-import";
 import { UsageLimitNotice } from "./UsageLimitNotice";
+import { useSessionPane, useSessionPaneFocusedGetter } from "../session-pane-context";
 import {
 	activeTurn,
 	activityPlan,
@@ -1021,6 +1023,11 @@ function ChatWorkspaceContent({
 	const shellActive = Boolean(shellTarget && session);
 	const splitHiddenTabKeys = useSplitHiddenTabKeys();
 	const closeFocusedSplitPane = useSplitCloseFocused();
+	// Sessions side by side: only the focused pane's composer takes the caret,
+	// and tab cycling and ⌘W act on that pane alone.
+	const sessionPane = useSessionPane();
+	const paneFocused = sessionPane ? sessionPane.focused : true;
+	const isPaneFocused = useSessionPaneFocusedGetter();
 	const auxiliaryTabs = useMemo<ChatAuxiliaryTab[]>(
 		() => [
 			...(reviewerTerminal
@@ -1589,22 +1596,23 @@ function ChatWorkspaceContent({
 	useEffect(
 		() =>
 			!hideHeader ? aoBridge.app.onCloseShellTerminalShortcut(() => {
+				if (!isPaneFocused()) return;
 				if (closeFocusedSplitPane) closeFocusedSplitPane();
 				else if (activeWorkspaceTab?.onClose) activeWorkspaceTab.onClose();
 				else if (shellTarget) onCloseShellTerminal?.(shellTarget.handleId);
 			}) : undefined,
-		[activeWorkspaceTab, closeFocusedSplitPane, hideHeader, onCloseShellTerminal, shellTarget],
+		[activeWorkspaceTab, closeFocusedSplitPane, hideHeader, isPaneFocused, onCloseShellTerminal, shellTarget],
 	);
 
 	useEffect(() => {
 		if (hideHeader) return;
-		const disposePrevious = aoBridge.app.onPreviousTabShortcut(() => !isSettingsPageOpen() && selectAdjacentTab(-1));
-		const disposeNext = aoBridge.app.onNextTabShortcut(() => !isSettingsPageOpen() && selectAdjacentTab(1));
+		const disposePrevious = aoBridge.app.onPreviousTabShortcut(() => !isSettingsPageOpen() && isPaneFocused() && selectAdjacentTab(-1));
+		const disposeNext = aoBridge.app.onNextTabShortcut(() => !isSettingsPageOpen() && isPaneFocused() && selectAdjacentTab(1));
 		return () => {
 			disposePrevious();
 			disposeNext();
 		};
-	}, [hideHeader, selectAdjacentTab]);
+	}, [hideHeader, isPaneFocused, selectAdjacentTab]);
 
 	useEffect(() => {
 		if (hideHeader) return;
@@ -1636,6 +1644,8 @@ function ChatWorkspaceContent({
 	// Claude Code compacts at the window picked for it, well before its model's full context.
 	const compactsAt = snapshot.harness === "claude-code" ? snapshot.settings?.autoCompactWindow : undefined;
 	const stableUsage = useStableValue(snapshot.usage);
+	// Subscription limits come from this computer's accounts, so only a local session shows them.
+	const usageLimitsSessionId = session && !session.cloud && !activeRemoteHostId ? session.id : undefined;
 	// A reroute describes the model it was recorded against; once the user picks a
 	// different model it no longer says anything about the next turn.
 	const currentModelReroute =
@@ -1654,6 +1664,7 @@ function ChatWorkspaceContent({
 				<TurnSettingsBar
 					agentSwitch={agentSwitch}
 					beforePicker={agentSwitch ? <ContextMeter usage={stableUsage} compactsAt={compactsAt} /> : undefined}
+					afterPicker={usageLimitsSessionId ? <ComposerUsageLimits harness={snapshot.harness} sessionId={usageLimitsSessionId} /> : undefined}
 					// While the agent wakes or starts; a chat reads "hibernated" until ready.
 					modelsLoading={settingsLoading}
 					lastModel={lastModel}
@@ -1718,6 +1729,8 @@ function ChatWorkspaceContent({
 			stableModelReroute,
 			stableSettings,
 			compactsAt,
+			usageLimitsSessionId,
+			snapshot.harness,
 		],
 	);
 	const composerApproval = useMemo(
@@ -2277,7 +2290,7 @@ function ChatWorkspaceContent({
 										holdAttachments={newWorkDisabled ? undefined : holdAttachments}
 										onHeldAttachmentsChange={onHeldAttachmentsChange}
 										nativeImages={queueEdit?.clientMessageId ? queueEdit.nativeImages ?? nativeImages : nativeImages}
-										autoFocus={!reviewerActive}
+										autoFocus={!reviewerActive && paneFocused}
 										autoFocusKey={draftScope.sessionId}
 										// Steering is only meaningful into a turn that is running. A queued turn
 										// has not reached the provider, so there is nothing to steer.

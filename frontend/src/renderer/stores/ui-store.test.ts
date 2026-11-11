@@ -1,7 +1,43 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { rememberedFileDisplayMode, sidebarIsVisible, sidebarOccupiesLayout, useUiStore } from "./ui-store";
+import { filesSidebarStorageKey, rememberedFileDisplayMode, sidebarIsVisible, sidebarOccupiesLayout, useUiStore } from "./ui-store";
 import { sessionUiKey } from "../lib/hosts";
 import { previewDocumentThemeStyle } from "../lib/theme";
+
+describe("remembered Files sidebar", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+		useUiStore.setState({ inspectorSessions: {} });
+	});
+
+	it("reopens Files only for a session that opts in", () => {
+		window.localStorage.setItem(filesSidebarStorageKey("orch"), "open");
+		window.localStorage.setItem(filesSidebarStorageKey("worker"), "open");
+		useUiStore.getState().initializeInspectorSession("orch", false, true, true);
+		useUiStore.getState().initializeInspectorSession("worker", false, true);
+
+		const { inspectorSessions } = useUiStore.getState();
+		expect(inspectorSessions.orch).toMatchObject({ isOpen: true, view: "files", filesChangedOnly: false, remembersFilesSidebar: true });
+		expect(inspectorSessions.worker).toMatchObject({ isOpen: false, view: "summary" });
+		expect(inspectorSessions.worker?.remembersFilesSidebar).toBeUndefined();
+	});
+
+	it("stores the open Files sidebar and forgets it once closed or switched away", () => {
+		const store = useUiStore.getState();
+		store.initializeInspectorSession("orch", false, true, true);
+		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBeNull();
+
+		store.setInspectorView("orch", "files");
+		store.setInspectorOpen("orch", true);
+		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBe("open");
+
+		store.setInspectorView("orch", "summary");
+		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBeNull();
+
+		store.setInspectorView("orch", "files");
+		store.toggleInspector("orch");
+		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBeNull();
+	});
+});
 
 describe("sidebar visibility", () => {
 	beforeEach(() => {

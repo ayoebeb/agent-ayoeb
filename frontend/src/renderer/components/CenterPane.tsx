@@ -41,6 +41,7 @@ import { SessionTabsTopbar } from "./PageTopbar";
 import { beginPaneTabDrag } from "../lib/pane-drag";
 import { SESSION_TAB_KEY } from "../lib/pane-split";
 import { useSplitCloseFocused, useSplitHiddenTabKeys } from "./split-pane-context";
+import { useSessionPane, useSessionPaneFocusedGetter } from "./session-pane-context";
 import { TabContextMenu, TabMenuSpecContext, type TabMenuSpec } from "./TabContextMenu";
 
 type CenterPaneProps = {
@@ -250,6 +251,11 @@ export function CenterPane({
 }: CenterPaneProps) {
 	const { t } = useTranslation();
 	const paneRef = useRef<HTMLDivElement | null>(null);
+	// Sessions side by side: only the focused pane's terminal asks for the caret,
+	// and tab cycling and ⌘W act on that pane alone.
+	const sessionPane = useSessionPane();
+	const paneFocused = sessionPane ? sessionPane.focused : true;
+	const isPaneFocused = useSessionPaneFocusedGetter();
 	const tabListRef = useTabListTabStop<HTMLDivElement>();
 	const wheelZoomRemainderRef = useRef(0);
 	const lastWheelZoomAtRef = useRef(0);
@@ -414,21 +420,22 @@ export function CenterPane({
 	useEffect(
 		() =>
 			aoBridge.app.onCloseShellTerminalShortcut(() => {
+				if (!isPaneFocused()) return;
 				if (closeFocusedSplitPane) closeFocusedSplitPane();
 				else if (activeWorkspaceTab?.onClose) activeWorkspaceTab.onClose();
 				else if (target.kind === "shell") onCloseShellTerminal?.(target.handleId);
 			}),
-		[activeWorkspaceTab, closeFocusedSplitPane, target, onCloseShellTerminal],
+		[activeWorkspaceTab, closeFocusedSplitPane, isPaneFocused, target, onCloseShellTerminal],
 	);
 
 	useEffect(() => {
-		const disposePrevious = aoBridge.app.onPreviousTabShortcut(() => !isSettingsPageOpen() && selectAdjacentTab(-1));
-		const disposeNext = aoBridge.app.onNextTabShortcut(() => !isSettingsPageOpen() && selectAdjacentTab(1));
+		const disposePrevious = aoBridge.app.onPreviousTabShortcut(() => !isSettingsPageOpen() && isPaneFocused() && selectAdjacentTab(-1));
+		const disposeNext = aoBridge.app.onNextTabShortcut(() => !isSettingsPageOpen() && isPaneFocused() && selectAdjacentTab(1));
 		return () => {
 			disposePrevious();
 			disposeNext();
 		};
-	}, [selectAdjacentTab]);
+	}, [isPaneFocused, selectAdjacentTab]);
 
 	useEffect(() => {
 		aoBridge.app.setCloseShellTerminalShortcutEnabled(
@@ -681,7 +688,7 @@ export function CenterPane({
 						// open or switch to the session, the same way the chat composer does.
 						// Worker input is off during an interface transition; every other target
 						// is interactive as soon as it is on screen.
-							focusRequested={target.kind !== "worker" || !workerInputDisabled}
+							focusRequested={paneFocused && (target.kind !== "worker" || !workerInputDisabled)}
 							isFullscreen={isFullscreen}
 							inputDisabled={workerInputDisabled}
 							booting={terminalBooting && target.kind === "worker"}

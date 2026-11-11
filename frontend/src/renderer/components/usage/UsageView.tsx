@@ -1,8 +1,9 @@
 import { ChevronLeft, ChevronRight, Gauge, RefreshCw } from "lucide-react";
 import { ScrollArea } from "radix-ui";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAgentAccountActions, useAgentAccounts } from "../../hooks/useAgentAccounts";
+import { useNow } from "../../hooks/useNow";
 import { useUsageLimitWindows, useUsageReport } from "../../hooks/useUsageReport";
 import { useWorkspaceQuery } from "../../hooks/useWorkspaceQuery";
 import { formatRange } from "../../lib/usage-format";
@@ -30,15 +31,6 @@ const PERIODS = [
 	{ days: 30, label: "usage.period.month" },
 	{ days: 90, label: "usage.period.quarter" },
 ] as const;
-
-function useNow(intervalMs: number): Date {
-	const [now, setNow] = useState(() => new Date());
-	useEffect(() => {
-		const id = window.setInterval(() => setNow(new Date()), intervalMs);
-		return () => window.clearInterval(id);
-	}, [intervalMs]);
-	return now;
-}
 
 export function UsageView() {
 	const { t, i18n } = useTranslation();
