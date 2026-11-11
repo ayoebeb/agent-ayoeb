@@ -1,4 +1,5 @@
 import { Pencil, Server, Trash2 } from "@/components/app-icons";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { aoBridge } from "../../lib/bridge";
@@ -15,6 +16,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { SettingsRow } from "./SettingsRow";
+import { fetchMobileStatus, mobileStatusQueryKey, rotatePairingPassword } from "./ConnectMobileContent";
 import { SettingsSection } from "./SettingsSection";
 import { ThisComputerAccess } from "./ThisComputerAccess";
 
@@ -24,7 +26,8 @@ export function RemoteHostsSettings({ titleHidden }: { titleHidden?: boolean }) 
 	const { t } = useTranslation();
 	const enabled = useUiStore((state) => state.remoteHosts);
 	const setEnabled = useUiStore((state) => state.setRemoteHosts);
-	const { status, signIn } = useCloudSession();
+	const { status, signIn, session } = useCloudSession();
+	const queryClient = useQueryClient();
 	const { settings } = useSettings();
 	const cloudBaseUrl = settings?.cloudControlPlaneUrl ?? "";
 	const { available: localAuthAvailable } = useCloudLocalAuth();
@@ -41,6 +44,10 @@ export function RemoteHostsSettings({ titleHidden }: { titleHidden?: boolean }) 
 	const [confirmingRemoval, setConfirmingRemoval] = useState<SavedHost | null>(null);
 	const [removeBusy, setRemoveBusy] = useState(false);
 	const [removeError, setRemoveError] = useState("");
+	// The label of a host just removed, while offering this computer a new connection password.
+	const [rotationOffer, setRotationOffer] = useState<string | null>(null);
+	const [rotateBusy, setRotateBusy] = useState(false);
+	const [rotateError, setRotateError] = useState("");
 	const formRef = useRef<HTMLFormElement>(null);
 
 	const load = async () => {
@@ -107,19 +114,47 @@ export function RemoteHostsSettings({ titleHidden }: { titleHidden?: boolean }) 
 
 	const remove = async () => {
 		if (!confirmingRemoval) return;
+		const removed = confirmingRemoval;
 		setRemoveBusy(true);
 		setRemoveError("");
 		try {
-			if (confirmingRemoval.hostId && cloudBaseUrl) await deleteAccountRemoteHost(cloudBaseUrl, confirmingRemoval.hostId);
-			await aoBridge.remotes.remove(confirmingRemoval.url);
-			if (confirmingRemoval.hostId) await disconnectHost(confirmingRemoval.hostId);
+			if (removed.hostId && cloudBaseUrl) await deleteAccountRemoteHost(cloudBaseUrl, removed.hostId);
+			await aoBridge.remotes.remove(removed.url);
+			if (removed.hostId) await disconnectHost(removed.hostId);
 			await load();
 			setConfirmingRemoval(null);
 			requestRemoteHostsRefresh();
 		} catch (cause) {
 			setRemoveError(cause instanceof Error ? cause.message : t("remote.removeHostFailed"));
+			return;
 		} finally {
 			setRemoveBusy(false);
+		}
+		// Removing a host here does not take this computer's connection password
+		// back from it: a machine that was ever paired with this computer can
+		// keep using it. While this computer is reachable remotely, offer a new one.
+		const reachable = await fetchMobileStatus().then((mobile) => mobile.enabled === true, () => false);
+		if (reachable) {
+			setRotateError("");
+			setRotationOffer(removed.label);
+		}
+	};
+
+	const rotate = async () => {
+		setRotateBusy(true);
+		setRotateError("");
+		try {
+			await rotatePairingPassword({
+				cloudBaseUrl,
+				accountId: session?.user.id ?? "",
+				tunnelTimeoutMessage: t("remote.shareThisComputerTimeout"),
+				onRotated: () => void queryClient.invalidateQueries({ queryKey: mobileStatusQueryKey }),
+			});
+			setRotationOffer(null);
+		} catch (cause) {
+			setRotateError(cause instanceof Error && cause.message ? cause.message : t("remote.rotatePasswordFailed"));
+		} finally {
+			setRotateBusy(false);
 		}
 	};
 
@@ -206,6 +241,18 @@ export function RemoteHostsSettings({ titleHidden }: { titleHidden?: boolean }) 
 			onOpenChange={(open) => { if (!open && !removeBusy) setConfirmingRemoval(null); }}
 			open={confirmingRemoval !== null}
 			title={t("remote.removeTitle", { label: confirmingRemoval?.label })}
+		/>
+
+		<ConfirmDialog
+			busy={rotateBusy}
+			cancelLabel={t("remote.rotateAfterRemoveLater")}
+			confirmLabel={t("remote.rotateAfterRemoveConfirm")}
+			description={t("remote.rotateAfterRemoveDescription", { label: rotationOffer ?? "" })}
+			error={rotateError || null}
+			onConfirm={() => void rotate()}
+			onOpenChange={(open) => { if (!open && !rotateBusy) setRotationOffer(null); }}
+			open={rotationOffer !== null}
+			title={t("remote.rotateAfterRemoveTitle")}
 		/>
 	</>;
 }

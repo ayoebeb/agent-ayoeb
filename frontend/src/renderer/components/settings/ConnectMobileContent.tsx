@@ -322,6 +322,52 @@ type KeepAwakeStatus = NonNullable<MobileStatus["keepAwake"]>;
  * this is rare). The row is drawn disabled in this state rather than popping
  * in, or flipping, when the status lands.
  */
+/**
+ * Gives this computer a new connection password, which locks out every
+ * device that holds the old one. Connect Mobile's Regenerate and the prompt
+ * after removing a remote host both use it.
+ *
+ * A new password revokes the account link with the old one; link again so
+ * the fixed address survives the next restart. Only while remote access is
+ * on and the account still lists this computer: a LAN-only computer, or one
+ * removed from the account, is not listed again. A lost device signed in to
+ * the account is cut off by signing it out of the account; a new password is
+ * for password-paired devices.
+ */
+export async function rotatePairingPassword(options: {
+	cloudBaseUrl: string;
+	accountId: string;
+	tunnelTimeoutMessage: string;
+	onRotated?: () => void;
+	onLinkError?: (cause: unknown) => void;
+}): Promise<MobileStatus | undefined> {
+	const { data, error } = await apiClient.POST("/api/v1/mobile/regenerate");
+	if (error) throw apiErrorException(error);
+	options.onRotated?.();
+	if (!data || data.noPublicTunnel || !options.cloudBaseUrl || !options.accountId || !data.password) return data;
+	const link = (url?: string) =>
+		linkThisComputer(options.cloudBaseUrl, options.accountId, data.hostId ?? "", data.password ?? "", { ifListed: true, ...(url ? { url } : {}) });
+	const linked = await link().then(
+		(result) => ({ hostId: result.hostId, failed: false }),
+		(cause: unknown) => {
+			// An account that uses all of its fixed addresses keeps this
+			// computer at its quick tunnel's address, as without them.
+			if (cause instanceof AccountHostSyncError && cause.status === 409) return { hostId: "", failed: false };
+			options.onLinkError?.(cause);
+			return { hostId: "", failed: true };
+		},
+	);
+	// An AO Cloud without fixed addresses, or an account that uses all of them,
+	// links nothing without a url, and the account would keep the old token:
+	// it lists the tunnel's address instead.
+	if (!linked.hostId && !linked.failed) {
+		void waitForTunnel(options.tunnelTimeoutMessage)
+			.then((ready) => ready && link(ready.url))
+			.catch((cause: unknown) => options.onLinkError?.(cause));
+	}
+	return data;
+}
+
 const KEEP_AWAKE_STORAGE_KEY = "ao.mobile.keepAwake";
 
 function readLastKeepAwake(): KeepAwakeStatus | null {
@@ -498,29 +544,16 @@ export function ConnectMobileContent({ active }: { active: boolean }) {
 	});
 
 	const regenerate = useMutation({
-		mutationFn: async () => {
-			const { data, error } = await apiClient.POST("/api/v1/mobile/regenerate");
-			if (error) throw apiErrorException(error);
-			invalidate(); // the new password shows at once; linking can take a minute
-			// A new password revokes the account link with the old one; link
-			// again so the fixed address survives the next restart. Only while
-			// remote access is on and the account still lists this computer:
-			// a LAN-only computer, or one removed from the account, is not
-			// listed again. A lost device signed in to the account is cut off
-			// by signing it out of the account; a new password is for
-			// password-paired devices.
-			if (data && !data.noPublicTunnel) {
-				const { linked, failed } = await linkIfSignedIn(data.password ?? "", data.hostId ?? "", { ifListed: true });
-				// An AO Cloud without fixed addresses, or an account that uses all of them,
-				// links nothing without a url, and the account would keep the old token:
-				// it lists the tunnel's address instead.
-				if (signedIn && !linked && !failed) {
-					void waitForTunnel(t("remote.shareThisComputerTimeout"))
-						.then((ready) => ready && linkThisComputer(cloudBaseUrl, accountId, data.hostId ?? "", data.password ?? "", { ifListed: true, url: ready.url }))
-						.catch(reportLinkError);
-				}
-			}
-			return data;
+		mutationFn: () => {
+			setLinkError("");
+			return rotatePairingPassword({
+				cloudBaseUrl,
+				accountId,
+				tunnelTimeoutMessage: t("remote.shareThisComputerTimeout"),
+				// The new password shows at once; linking can take a minute.
+				onRotated: invalidate,
+				onLinkError: reportLinkError,
+			});
 		},
 		onSuccess: invalidate,
 	});
