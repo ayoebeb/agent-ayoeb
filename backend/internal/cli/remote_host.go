@@ -19,6 +19,7 @@ type remoteHostStatus struct {
 	// account token, so the account's devices may not list it.
 	AccountLinkRefused bool   `json:"accountLinkRefused"`
 	HostID             string `json:"hostId"`
+	Port               int    `json:"port"` // the port actually bound
 	Password           string `json:"password"`
 	Tunnel             struct {
 		Supported  bool   `json:"supported"`
@@ -77,6 +78,15 @@ func newRemoteHostCommand(ctx *commandContext) *cobra.Command {
 				}
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Remote host enabled\nHost ID: %s\n", status.HostID); err != nil {
 					return err
+				}
+				if status.Port > 0 {
+					bindHost := "0.0.0.0"
+					if status.LoopbackOnly {
+						bindHost = "127.0.0.1"
+					}
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Listening on %s\n", net.JoinHostPort(bindHost, strconv.Itoa(status.Port))); err != nil {
+						return err
+					}
 				}
 				if status.AccountLinked {
 					message := "Linked to an Orchestrator account: its signed-in devices list this machine."
