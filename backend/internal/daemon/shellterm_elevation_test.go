@@ -92,9 +92,9 @@ func TestBrowserRuntimeKeyReaderCannotReachAdministratorTerminals(t *testing.T) 
 	}
 	derivedToken := hmacB64(readKey, "ao-browser-runtime-token-v1")
 	for name, credential := range map[string]string{
-		"the browser runtime token":     derivedToken,
+		"the browser runtime token":      derivedToken,
 		"the earlier derived credential": hmacB64([]byte(derivedToken), "ao-desktop-elevated-terminal-v1"),
-		"the raw key":                   strings.TrimSpace(string(keyFile)),
+		"the raw key":                    strings.TrimSpace(string(keyFile)),
 	} {
 		attacker := elevationClient{base: boundary.url, credential: credential}
 		if listed := attacker.listsElevated(t); listed {
@@ -375,7 +375,9 @@ func (a *boundaryAttach) Attach(ctx context.Context, handle ports.RuntimeHandle,
 	context.AfterFunc(ctx, func() { _ = stream.Close() })
 	return stream, nil
 }
-func (a *boundaryAttach) IsAlive(context.Context, ports.RuntimeHandle) (bool, error) { return true, nil }
+func (a *boundaryAttach) IsAlive(context.Context, ports.RuntimeHandle) (bool, error) {
+	return true, nil
+}
 
 type boundaryStream struct {
 	r *io.PipeReader

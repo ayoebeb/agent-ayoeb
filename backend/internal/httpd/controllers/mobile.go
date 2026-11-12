@@ -129,7 +129,9 @@ func (c *MobileController) IssueBrowserProfileTicket(w http.ResponseWriter, r *h
 // HostKey returns this machine's host id and public host key. On the remote
 // listener it needs a connection credential like every other route.
 func (c *MobileController) HostKey(w http.ResponseWriter, r *http.Request) {
-	source, ok := c.Bridge.(interface{ RemoteHostKey() (RemoteHostKeyResponse, error) })
+	source, ok := c.Bridge.(interface {
+		RemoteHostKey() (RemoteHostKeyResponse, error)
+	})
 	if !ok {
 		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "not_implemented", "HOST_KEY_UNAVAILABLE", "the host key is unavailable", nil)
 		return

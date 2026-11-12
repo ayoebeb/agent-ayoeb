@@ -3,7 +3,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { PRODUCT_NAME } from "../../frontend/src/shared/brand";
+
+// Mirrors PRODUCT_NAME in frontend/src/shared/brand.ts. Declared here, not
+// imported: the pod uploads only this spec, its config and boot-real.sh
+// (scripts/ao-e2e-pod-gate.mjs) and fetches no application code, so a relative
+// import of the repo would not resolve. Update it when the product is renamed.
+const PRODUCT_NAME = "Ayo";
 
 // Real-app integration smoke: launch the installed packaged app, prove the GUI
 // window paints AND the bundled daemon (real Go binary + embedded SQLite) reaches

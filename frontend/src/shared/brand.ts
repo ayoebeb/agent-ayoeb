@@ -21,7 +21,8 @@
 //     `node scripts/sync-tray-catalog.mjs`; tray-catalog.test.ts fails on drift)
 //   - defaultValue and other string literals in renderer components, and the
 //     main-process dialogs, errors and sign-in pages
-//   - the tests that assert any of the above
+//   - the tests that assert any of the above, including test/e2e-pod/real-app.spec.ts,
+//     which declares its own copy of the name (the pod fetches no repo code)
 //
 // These stay fixed on purpose, whatever the product is called:
 //   - the Electron appId / Windows AppUserModelID ("dev.agent-orchestrator.desktop")
