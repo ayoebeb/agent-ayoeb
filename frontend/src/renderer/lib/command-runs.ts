@@ -101,7 +101,10 @@ export function runnableCommand(code: string, language: string | undefined): Run
 	if (POSIX_LANGUAGES.has(lang)) return { command: stripUniformPrompt(text), kind: "posix", shellName: POSIX_LANGUAGES.get(lang) };
 	if (SESSION_LANGUAGES.has(lang)) {
 		const prompted = lines.filter((line) => PROMPT.test(line));
-		const command = prompted.length ? prompted.map((line) => line.replace(PROMPT, "")).join("\n") : text;
+		// No prompts: agents label pasted output `console` too, so the block
+		// must pass the same test as an unlabelled one, line by line.
+		if (!prompted.length) return unlabelledCommand(text);
+		const command = prompted.map((line) => line.replace(PROMPT, "")).join("\n");
 		return command.trim() ? { command, kind: kindFromPrompt(prompted[0]) } : null;
 	}
 	if (!UNLABELLED_LANGUAGES.has(lang)) return null;

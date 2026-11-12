@@ -129,7 +129,7 @@ import { aoToolView, mcpToolArguments, mcpToolName, type AOToolView } from "../.
 import { isWebLink, openLinkInSystemBrowser } from "../../lib/external-link-policy";
 import { useComposerTokenRenderer } from "./sentComposerTokens";
 import { ActivityTitle, ChatMarkdown, OriginPreviewMarkdown, SessionLabelLink, SessionLinkedText, UserMarkdown } from "./ChatMarkdown";
-import { CodeRunScope } from "./CodeBlockRun";
+import { CodeRunScope, CodeRunTargetContext } from "./CodeBlockRun";
 import { HighlightedCode } from "./HighlightedCode";
 import { CopyButton } from "./CopyButton";
 import { CollapsibleHumanBody } from "./CollapsibleHumanBody";
@@ -3372,7 +3372,11 @@ export function SteerMessage({
 	const automationBody = (
 		<>
 			{longReport && expanded ? (
-				<ChatMarkdown text={body} muted />
+				// Another session wrote this: its links stay clickable, its code
+				// blocks never offer Run.
+				<CodeRunTargetContext.Provider value={null}>
+					<ChatMarkdown text={body} muted />
+				</CodeRunTargetContext.Provider>
 			) : body ? (
 				<p className={cn("whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground", longReport && "line-clamp-3")}>
 					<SessionLinkedText text={preview} />

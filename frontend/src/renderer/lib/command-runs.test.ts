@@ -96,6 +96,14 @@ describe("runnableCommand: which blocks get Run", () => {
 		expect(runnableCommand("PS C:\\repo> Get-Date\nWednesday", "console")).toMatchObject({ command: "Get-Date", kind: "powershell" });
 	});
 
+	it("treats a transcript without prompts like an unlabelled block", () => {
+		// Pasted output must never run as commands.
+		for (const language of ["console", "terminal", "shellsession"]) {
+			expect(runnableCommand("added 312 packages in 4s\nError: Cannot find module 'x'", language)).toBeNull();
+		}
+		expect(runnableCommand("npm ci\nnpm test", "console")).toMatchObject({ command: "npm ci\nnpm test" });
+	});
+
 	it("treats PowerShell-looking unlabelled blocks as PowerShell", () => {
 		expect(runnableCommand("npm test", "text")?.kind).toBe(undefined);
 		expect(runnableCommand("Get-Date", "text")?.kind).toBe("powershell");

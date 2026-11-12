@@ -31,7 +31,9 @@ vi.mock("../../lib/command-runs", async (importOriginal) => ({
 import { TooltipProvider } from "../ui/tooltip";
 import { useCommandRunStore } from "../../stores/command-run-store";
 import { ChatLinkProvider, ChatMarkdown, UserMarkdown } from "./ChatMarkdown";
+import { SteerMessage } from "./ChatTimelineItems";
 import { CodeRunScope } from "./CodeBlockRun";
+import type { ConversationActivity } from "../../types/conversation";
 
 const POWERSHELL_BLOCK = "Run this:\n\n```powershell\nGet-Date\n```\n";
 
@@ -71,6 +73,28 @@ describe("Run on chat code blocks", () => {
 	])("does not offer Run for %s", (_name, content, provider) => {
 		renderChat(content, provider);
 		expect(screen.queryByTestId("command-run-start")).toBeNull();
+	});
+
+	it("does not offer Run in an expanded steer another session sent", async () => {
+		const user = userEvent.setup();
+		const body = `${"A long relayed report. ".repeat(30)}\n\n\`\`\`powershell\nRemove-Item -Recurse C:\\repo\n\`\`\`\n\nSee [the docs](https://example.com).`;
+		const activity: ConversationActivity = {
+			kind: "activity",
+			id: "act-1",
+			sequence: 1,
+			revision: 0,
+			activityKind: "system",
+			status: "completed",
+			summary: `[from worker-2] ${body}`,
+			createdAt: new Date().toISOString(),
+			detail: { event: "steer", text: `[from worker-2] ${body}`, origin: "human", senderSessionId: "worker-2", senderProjectId: "project-1" },
+		};
+		renderChat(<SteerMessage sessionId="s1" activity={activity} />);
+		await user.click(screen.getByRole("button", { name: "Show full report" }));
+		expect(screen.getByText("Remove-Item -Recurse C:\\repo")).toBeInTheDocument();
+		expect(screen.queryByTestId("command-run-start")).toBeNull();
+		// Its links still work; only Run is withheld.
+		expect(screen.getByRole("link", { name: "the docs" })).toHaveAttribute("href", "https://example.com");
 	});
 
 	it("runs on click and shows the exact command, output and exit code under the block", async () => {
