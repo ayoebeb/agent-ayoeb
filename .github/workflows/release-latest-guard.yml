@@ -11,10 +11,10 @@ on:
 
 jobs:
   latest-release:
-    # Stable /releases/latest only exists on the canonical repo. Forks copy
-    # this workflow (including the hourly schedule) but have no desktop
-    # release, so the check fails red every hour.
-    if: ${{ !github.event.repository.fork }}
+    # Stable /releases/latest only exists on the upstream repo. Copies of this
+    # workflow (forks and standalone copies, including the hourly schedule)
+    # have no desktop release, so the check would fail red every hour.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -82,8 +82,8 @@ jobs:
   package-version:
     # frontend/package.json's version feeds CFBundleShortVersionString and the
     # in-app Settings -> Updates display, so main must not fall behind the
-    # latest stable tag (see #4467).
-    if: ${{ !github.event.repository.fork }}
+    # latest stable tag (see #4467). Upstream repo only, like latest-release.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     permissions:
       contents: read

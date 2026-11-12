@@ -388,9 +388,10 @@ func TestPublishRenderStopsWaitingForAMeasureAtTheTimeout(t *testing.T) {
 	restore := chatsvc.SetRenderMeasureTimeout(50 * time.Millisecond)
 	t.Cleanup(restore)
 	h, _ := steerHarness(t)
-	var deadline time.Time
+	var deadline, began time.Time
 	started := time.Now()
 	_, row := publishMeasured(t, h, func(ctx context.Context, _ domain.SessionID, _ map[string]any) (any, error) {
+		began = time.Now()
 		deadline, _ = ctx.Deadline()
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -398,8 +399,12 @@ func TestPublishRenderStopsWaitingForAMeasureAtTheTimeout(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("publish and measure took %v", elapsed)
 	}
-	if deadline.IsZero() || deadline.Sub(started) > time.Second {
-		t.Fatalf("measure deadline %v after the start, want the 50ms timeout", deadline.Sub(started))
+	// The deadline is set when the measure begins, so compare it with that
+	// moment rather than with the start of the test: setup on a loaded -race
+	// runner can take seconds. Measured this way a missing timeout (the default
+	// is several seconds) still fails, and the 50ms one cannot flake.
+	if deadline.IsZero() || deadline.Sub(began) > 50*time.Millisecond {
+		t.Fatalf("measure deadline %v after the measure began, want the 50ms timeout", deadline.Sub(began))
 	}
 	if strings.Contains(string(row.Detail), "heights") {
 		t.Fatalf("detail = %s, want no heights", row.Detail)
