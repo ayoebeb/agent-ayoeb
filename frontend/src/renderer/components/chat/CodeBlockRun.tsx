@@ -179,6 +179,11 @@ function useNow(active: boolean): number {
 	return now;
 }
 
+/** Output as a terminal would show it: colour codes and overwritten progress resolved, trailing blank lines dropped. */
+function displayOutput(raw: string): string {
+	return stripAnsi(raw).replace(/\s+$/, "");
+}
+
 function formatRunDuration(ms: number): string {
 	return ms < 10_000 ? `${(Math.max(0, ms) / 1000).toFixed(1)}s` : formatScriptDuration(ms);
 }
@@ -266,7 +271,7 @@ function RunSummary({ run }: { run: CommandRun }) {
 
 function RunActions({ run, current, onDismiss }: { run: CodeBlockRun; current: CommandRun; onDismiss: () => void }) {
 	const { t } = useTranslation();
-	const output = useMemo(() => stripAnsi(current.output), [current.output]);
+	const output = useMemo(() => displayOutput(current.output), [current.output]);
 	const openInTerminal = useOpenInTerminal(run, current);
 	return (
 		<div className="flex shrink-0 items-center gap-0.5">
@@ -330,7 +335,7 @@ function RunOutputBody({ run }: { run: CommandRun }) {
 	const { t } = useTranslation();
 	const pre = useRef<HTMLPreElement>(null);
 	const follow = useRef(true);
-	const output = useMemo(() => stripAnsi(run.output), [run.output]);
+	const output = useMemo(() => displayOutput(run.output), [run.output]);
 	useLayoutEffect(() => {
 		const node = pre.current;
 		if (node && follow.current) node.scrollTop = node.scrollHeight;
