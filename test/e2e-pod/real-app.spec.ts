@@ -3,6 +3,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { PRODUCT_NAME } from "../../frontend/src/shared/brand";
 
 // Real-app integration smoke: launch the installed packaged app, prove the GUI
 // window paints AND the bundled daemon (real Go binary + embedded SQLite) reaches
@@ -82,7 +83,7 @@ test("REAL-001 packaged app launches + window paints @T0 @real", async () => {
 	const win = await app.firstWindow();
 	expect(win).toBeTruthy();
 	// Prove the AO renderer SCREEN mounted (INS-002 first-run/home UI) — not just
-	// that some document painted. The product name ("Ayo", PRODUCT_NAME in
+	// that some document painted. The product name (PRODUCT_NAME in
 	// frontend/src/shared/brand.ts) is rendered into the app shell (sidebar) and
 	// the first-run home/welcome ("Welcome to Ayo"), so its presence in VISIBLE
 	// body text is an AO-specific proof the renderer mounted. A Chromium/Electron
@@ -92,10 +93,10 @@ test("REAL-001 packaged app launches + window paints @T0 @real", async () => {
 	await expect
 		.poll(
 			() =>
-				win.evaluate(() => {
+				win.evaluate((name: string) => {
 					const text = document.body?.innerText ?? "";
-					return document.readyState === "complete" && text.includes("Ayo");
-				}),
+					return document.readyState === "complete" && text.includes(name);
+				}, PRODUCT_NAME),
 			{ timeout: 30_000, intervals: [500] },
 		)
 		.toBe(true);

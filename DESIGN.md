@@ -94,7 +94,6 @@ The layout is desktop-first. On constrained widths, preserve task content first,
 
 - **Home:** intentionally minimal. It introduces the next meaningful action, not a fake dashboard.
   - One centered column (`max-w-[640px]`); no decorative upward translate.
-  - "Star us" is a quiet text link with dashed underline on hover — never a filled button, accent pill, or bordered card.
   - Primary actions are a 2×2 grid; standalone agent is a grid cell (Clone to the cloud takes that cell when Developer Mode and Cloud are on), never a full-width extra row. Card labels follow verb + source: Clone a repo, Open a local folder, Open a workspace, Clone to the cloud, Start a standalone agent. Connect Mobile stays in settings — not on home.
   - Recent project rows use shared `NavRowHighlight` (same growing pill as sidebar), not a flat `hover:bg-interactive-hover` wash. On home the pill fills with `bg-card` so a hovered row matches the action cards.
 - **Board:** the operational overview. Each lane has a semantic reason to exist and derived status determines placement.

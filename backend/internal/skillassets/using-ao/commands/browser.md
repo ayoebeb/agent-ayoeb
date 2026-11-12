@@ -222,7 +222,7 @@ silently search the web and does not allow `file://` or local filesystem paths.
 ## Chrome mode: the user's own Chrome
 
 By default `ao browser` drives Orchestrator's Browser panel. A session can instead drive
-the user's own Google Chrome through the Orchestrator Browser Bridge extension, with the
+the user's own Google Chrome through the Ayo Browser Bridge extension, with the
 user's real sign-ins and a genuine Chrome fingerprint. Use it for sites that
 need the user's accounts or that challenge embedded browsers (captchas,
 "browser not supported" sign-in pages). Keep using the panel for `ao preview`,
@@ -238,11 +238,11 @@ ao browser target panel    # switch back
   your Chrome", or `ao browser chrome setup`, then loading the unpacked
   extension in `chrome://extensions`. Do not run `chrome setup` or
   `chrome remove` unless the user asks; `ao browser chrome status` is safe.
-- The first command from a session opens an Orchestrator consent window in Chrome. Wait
+- The first command from a session opens an Ayo consent window in Chrome. Wait
   for the user; a denial fails with `BROWSER_CHROME_CONSENT_DENIED`, no answer
   with `BROWSER_CHROME_CONSENT_TIMEOUT`. Never ask the user to grant consent
   on your behalf through other tools.
-- The session works only in its own Chrome tab group, "Orchestrator · <session>". It
+- The session works only in its own Chrome tab group, "Ayo · <session>". It
   cannot see or act on the user's other tabs. If the user drags a tab out of
   the group, the session loses it.
 - The same commands and output shapes work, with these differences: `devtools`

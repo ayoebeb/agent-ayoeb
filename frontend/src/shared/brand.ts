@@ -1,17 +1,34 @@
-// The one place the product's display name lives. Everything people read as the
-// app's name (window titles, menus, tray, About, installer and shortcut labels,
-// onboarding and update copy) derives from PRODUCT_NAME, so a rename is a
-// one-line change and upstream merges conflict here and nowhere else.
+// The product's display name, and the single constant the TypeScript shell reads
+// it from. This is a DISPLAY name only: never derive an identifier or a path from it.
 //
-// This is a DISPLAY name only. Never derive an identifier or a path from it.
+// Derives from PRODUCT_NAME (change it here):
+//   - window and dev-window titles, the About dialog, the macOS app menu
+//   - the tray tooltip, the sidebar and titlebar brand, the startup loader label
+//   - the Windows installer / shortcut / exe metadata and the AppImage name
+//   - the Chrome protocol handler label
+//
+// Does NOT derive from it. These carry the literal name and must be edited by
+// hand on a rename (search for the old name), so a rename is NOT a one-line
+// change and an upstream merge can conflict at these sites, not only here:
+//   - frontend/index.html (<title>) and assets/mac/en.lproj/InfoPlist.strings
+//     (the Finder/Dock label)
+//   - src/browser-extension: manifest.json, pages/*.html and string literals, and
+//     the Go text that repeats the extension name (backend/internal/cli/
+//     browser_chrome.go, browserchrome/setup.go, skillassets/using-ao/commands/
+//     browser.md): Chrome lists the extension by its manifest name
+//   - src/renderer/i18n/*.json (about 160 keys per locale) and the generated tray
+//     catalog (src/main/tray-catalog.generated.ts, regenerated with
+//     `node scripts/sync-tray-catalog.mjs`; tray-catalog.test.ts fails on drift)
+//   - defaultValue and other string literals in renderer components, and the
+//     main-process dialogs, errors and sign-in pages
+//   - the tests that assert any of the above
+//
 // These stay fixed on purpose, whatever the product is called:
 //   - the Electron appId / Windows AppUserModelID ("dev.agent-orchestrator.desktop")
 //   - the packaged binary name ("agent-orchestrator") and the macOS bundle name
 //     ("Agent Orchestrator.app"), which `ao start` and the updater look for
 //   - Electron's pinned userData dir (~/.ao/electron), the single-instance lock,
 //     the "ao-app" protocol, the `ao` CLI, ~/.ao and the AO_* environment
-// Locale catalogs (src/renderer/i18n/*.json) are plain JSON and carry the name
-// as literal text; keep them in step with this constant.
 export const PRODUCT_NAME = "Ayo";
 
 /** Suffix that keeps an unpackaged dev run from impersonating the installed app. */
