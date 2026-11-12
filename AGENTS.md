@@ -36,6 +36,8 @@ go vet ./...
 go run ./cmd/ao start
 ```
 
+Tests bind `127.0.0.1` or `[::1]`, never a wildcard (`""`, `":0"`, `":<port>"`, `0.0.0.0`, `[::]`), unless the wildcard bind is the point of the test. On Windows every `go test` run is a new executable path, and Windows Defender Firewall raises a hidden "allow network access?" prompt for each new executable that listens on a non-loopback address. They pile up (391 used 5.6 GB in one afternoon). A test whose subject is a wildcard bind must skip on Windows unless `AO_TEST_WILDCARD_BIND=1`; the Windows CI job sets it. In `internal/httpd` use `requireWildcardBind`, `lanPortTest` and `startLANForTest` from `wildcard_bind_test.go`. Do not set the variable on a desktop you also use interactively; see [docs/development.md](docs/development.md#windows-firewall-prompts-from-tests).
+
 Frontend-specific checks:
 
 ```bash

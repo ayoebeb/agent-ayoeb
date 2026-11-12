@@ -115,7 +115,7 @@ func TestLANManagerAuthGatesSharedHandler(t *testing.T) {
 	st := &authState{}
 	st.setHash(mobilebridge.HashPassword("secret12"))
 	m := NewLANManager(inner, st, 0, slog.Default(), nil) // port 0 → ephemeral
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestLANManagerServesHTTP2WithoutTLS(t *testing.T) {
 	st := &authState{}
 	st.setHash(mobilebridge.HashPassword("secret12"))
 	m := NewLANManager(inner, st, 0, slog.Default(), nil)
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -189,6 +189,21 @@ func TestLANManagerTunnelOnlyBindsLoopback(t *testing.T) {
 	}
 	if _, err := m.Start(0); err == nil {
 		t.Fatal("LAN start silently reused a loopback-only listener")
+	}
+}
+
+// Start is the Connect Mobile listener and must keep binding every interface.
+// Most tests start it through startLANForTest, which falls back to loopback
+// where a wildcard bind is not allowed, so this one pins the real mode.
+func TestLANManagerStartBindsEveryInterface(t *testing.T) {
+	requireWildcardBind(t)
+	m := NewMobileLAN(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), "h_test", 0, nil, nil)
+	if _, err := m.Start(0); err != nil {
+		t.Fatal(err)
+	}
+	defer m.Stop(context.Background())
+	if addr := m.ln.Addr().(*net.TCPAddr); !addr.IP.IsUnspecified() {
+		t.Fatalf("LAN listener bound %s, want every interface", addr)
 	}
 }
 
@@ -236,7 +251,7 @@ func TestLANManagerIdentityEndpoint(t *testing.T) {
 	st := &authState{}
 	st.setHash(mobilebridge.HashPassword("secret12"))
 	m := NewLANManager(inner, st, 0, slog.Default(), nil)
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -280,7 +295,7 @@ func TestLANManagerBlocksLoopbackOnlyControlRoutes(t *testing.T) {
 	st := &authState{}
 	st.setHash(mobilebridge.HashPassword("secret12"))
 	m := NewLANManager(inner, st, 0, slog.Default(), nil)
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -455,8 +470,8 @@ func TestLANManagerBlocksLoopbackOnlyControlRoutes(t *testing.T) {
 
 func TestLANManagerStartStopIdempotent(t *testing.T) {
 	m := NewLANManager(http.NotFoundHandler(), &authState{}, 0, slog.Default(), nil)
-	p1, _ := m.Start(0)
-	p2, _ := m.Start(0) // idempotent — same port, no error
+	p1, _ := startLANForTest(m, 0)
+	p2, _ := startLANForTest(m, 0) // idempotent — same port, no error
 	if p1 != p2 {
 		t.Fatalf("second start changed port: %d != %d", p1, p2)
 	}
@@ -482,7 +497,7 @@ func TestLANManagerServesIdentityProbeWithoutAPassword(t *testing.T) {
 	st := &authState{}
 	st.setHash(mobilebridge.HashPassword("secret12"))
 	m := NewLANManager(inner, st, 0, slog.Default(), nil)
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -563,7 +578,7 @@ func TestLANListenerServesCodexModelRoutesFromRealRouter(t *testing.T) {
 	st := &authState{}
 	st.setHash(mobilebridge.HashPassword("secret12"))
 	m := NewLANManager(router, st, 0, slog.Default(), nil)
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}

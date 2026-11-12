@@ -123,6 +123,16 @@ Once one PR merges, prefer rebasing the remaining PR onto current `main`; the no
 3. On Windows, terminate the verified parent tree only. Never use a broad Electron, Node, Go, or port-based kill.
 4. Confirm the captured Electron PID and dev daemon listener are gone. Leave installed AO and other worktrees untouched.
 
+## Keep dev and lab daemons loopback-only
+
+The daemon's primary listener is always `127.0.0.1`, which never raises a Windows Defender Firewall prompt. Only the opt-in Connect Mobile (remote host) listener binds `0.0.0.0`, and the daemon re-arms it at boot from `<AO_DATA_DIR>/mobile/config.json` when that file has `"enabled": true`. The listener's port probes also bind `0.0.0.0`, `[::]` and the loopback addresses, even in tunnel-only mode. On Windows every `npm run dev` builds the dev daemon to a fresh `frontend/daemon/dev-<timestamp>-<pid>/ao.exe`, so each launch is a new executable and a new prompt: a hidden `PickerHost.exe FirewallNotificationDialogServer -Embedding` process that holds RAM until someone answers it. Hundreds of them have filled a desktop's memory.
+
+- **Isolated mode stays loopback-only.** `~/.ao/dev/data` and any scratch `AO_DATA_DIR` start with Connect Mobile off, so nothing listens beyond `127.0.0.1`. Keep it that way: do not enable Connect Mobile or run `ao remote-host enable` in a lab, and never copy a real `mobile/config.json` into a scratch data directory.
+- **Real-data mode inherits the setting.** If the installed app has Connect Mobile on, a dev daemon on the same data directory binds `0.0.0.0` on every launch. Before launching, read `<AO_DATA_DIR>/mobile/config.json` and look for `"enabled": true`. When it is on, prefer isolated mode. Turning Connect Mobile off in the installed app is the user's call: re-enabling it later issues a new pairing password.
+- **Tunnel-only is not prompt-free.** `ao remote-host enable --tunnel-only` binds the authenticated listener to `127.0.0.1` only, but its port probes still touch wildcard addresses, so a new executable can still raise one prompt.
+- **Count prompts before and after a launch** with `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'FirewallNotificationDialogServer' }).Count`. Report a growing count to the user. Do not stop those processes yourself: each pending prompt is the user's decision.
+- Go tests raise the same prompts when they bind a wildcard: see `docs/development.md`, "Windows firewall prompts from tests".
+
 ## Common mistakes
 
 - `ao preview` controls the Orchestrator Browser panel; it does not launch the desktop shell.
