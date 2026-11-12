@@ -233,6 +233,7 @@ import {
 	type BrowserRuntimeLinkHandle,
 } from "./main/browser-runtime-link";
 import { resolveBrowserRuntimeToken } from "./main/browser-runtime-token";
+import { commandRunKey } from "./main/command-run-key";
 import { checkRender, measureRender } from "./main/render-check";
 import {
 	connectBrowserStream,
@@ -2993,6 +2994,14 @@ ipcMain.handle("daemon:restart", async () => {
 	} catch (error) {
 		return reportDaemonRestartFailure(error);
 	}
+});
+// Chat's Run button presents this key to the local daemon. Only the app
+// window's main frame gets it: a subframe (an artifact or preview) must not.
+const chatCommandRunKey = commandRunKey(browserRuntimeToken);
+ipcMain.handle("commandRuns:key", (event) => {
+	const { senderFrame } = event as { senderFrame?: { parent: unknown } | null };
+	if (senderFrame === null || (senderFrame && senderFrame.parent !== null)) return "";
+	return chatCommandRunKey;
 });
 async function captureSideChatState(closedSideId?: string, cancelClose = false, alreadyClosedId?: string): Promise<void> {
 	// Pin known ownership immediately, even while an older restore is in flight.

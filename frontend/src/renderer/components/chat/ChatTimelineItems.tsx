@@ -129,6 +129,7 @@ import { aoToolView, mcpToolArguments, mcpToolName, type AOToolView } from "../.
 import { isWebLink, openLinkInSystemBrowser } from "../../lib/external-link-policy";
 import { useComposerTokenRenderer } from "./sentComposerTokens";
 import { ActivityTitle, ChatMarkdown, OriginPreviewMarkdown, SessionLabelLink, SessionLinkedText, UserMarkdown } from "./ChatMarkdown";
+import { CodeRunScope } from "./CodeBlockRun";
 import { HighlightedCode } from "./HighlightedCode";
 import { CopyButton } from "./CopyButton";
 import { CollapsibleHumanBody } from "./CollapsibleHumanBody";
@@ -1303,7 +1304,11 @@ export function AssistantMessage({
 			data-chat-message-revision={!live && !renderingStreaming ? message.revision : undefined}
 			data-chat-message-role={!live && !renderingStreaming ? message.role : undefined}
 		>
-			<div data-chat-message-body=""><ChatMarkdown text={visibleText} streaming={renderingStreaming} /></div>
+			<div data-chat-message-body="">
+				<CodeRunScope.Provider value={message.id}>
+					<ChatMarkdown text={visibleText} streaming={renderingStreaming} />
+				</CodeRunScope.Provider>
+			</div>
 			{showActions ? (
 				// One action row for the completed answer, not one after every prose
 				// fragment the provider emitted while working. Copy and rollback stay

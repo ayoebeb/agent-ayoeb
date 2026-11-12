@@ -71,6 +71,7 @@ import { HighlightedCode } from "./HighlightedCode";
 import { MermaidBlock } from "./MermaidBlock";
 import { MathFormula } from "./MathFormula";
 import { CopyButton } from "./CopyButton";
+import { CodeRunControls, CodeRunOutput, CodeRunTargetContext, useCodeBlockRun } from "./CodeBlockRun";
 import { ChatImage, ChatImageGallery, ChatImageLinkScope, isImageOnlyParagraph } from "./ChatImage";
 import "./code-theme.css";
 
@@ -157,8 +158,16 @@ export function ChatLinkProvider({
 		() => ({ sessionId, remote: Boolean(remoteHost || sessionLinkHostId || sessionLinkSourceKind === "cloud") }),
 		[sessionId, remoteHost, sessionLinkHostId, sessionLinkSourceKind],
 	);
+	// Run executes on the daemon that owns the session (this machine or a
+	// paired host). A Cloud session's commands would need its sandbox: no Run.
+	const runTarget = useMemo(
+		() => (sessionId && sessionLinkSourceKind !== "cloud" ? { sessionId, hostId: sessionLinkHostId } : null),
+		[sessionId, sessionLinkHostId, sessionLinkSourceKind],
+	);
 	return <ChatPathMenuContext.Provider value={pathMenuValue}>
-		<OpenChatLink.Provider value={value}>{children}</OpenChatLink.Provider>
+		<CodeRunTargetContext.Provider value={runTarget}>
+			<OpenChatLink.Provider value={value}>{children}</OpenChatLink.Provider>
+		</CodeRunTargetContext.Provider>
 	</ChatPathMenuContext.Provider>;
 }
 
@@ -298,10 +307,21 @@ let preferredWrap = false;
  * The toggle is there for the case that argument loses — a single 300-character
  * line, where scrolling means losing the rest of the block.
  */
-function CodeBlock({ code, language }: { code: string; language?: string }) {
+function CodeBlock({ code, language, runnable = false }: {
+	code: string;
+	language?: string;
+	/**
+	 * Offer Run when the block is a command. Only agent prose sets it, and only
+	 * a settled block from the chat's own agent gets it: never one still
+	 * streaming, nor safe-origin content quoted from a third party.
+	 */
+	runnable?: boolean;
+}) {
 	const streaming = useContext(StreamingProse);
+	const safeOrigin = useContext(SafeOriginContent);
 	const grammar = canonicalLanguage(language);
 	const [wrap, setWrap] = useState(preferredWrap);
+	const run = useCodeBlockRun(code, language, runnable && !streaming && !safeOrigin);
 
 	return (
 		<div
@@ -332,12 +352,15 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
 					</Button>
 					<CopyButton text={code} label="Copy code" />
 				</div>
+				{/* Run stays visible: on a command block it is the reason to be here. */}
+				{run ? <CodeRunControls run={run} /> : null}
 			</div>
 			<pre className="scrollbar-none overflow-x-auto px-3 py-2.5">
 				<code className="font-mono text-xs leading-[1.6] text-foreground">
 					<HighlightedCode code={code} language={grammar} streaming={streaming} />
 				</code>
 			</pre>
+			{run ? <CodeRunOutput run={run} /> : null}
 		</div>
 	);
 }
@@ -658,7 +681,7 @@ const COMPONENTS: Components = {
 		// Display formulas (`$$…$$`, `\[…\]`) arrive as `language-math` fences too,
 		// so one check covers them and explicit ```math fences.
 		if (fence.language?.toLowerCase() === "math") return <MathFormula tex={fence.code} display />;
-		return <CodeBlock code={fence.code} language={fence.language} />;
+		return <CodeBlock code={fence.code} language={fence.language} runnable />;
 	},
 	// Only inline code and inline formulas reach here; `pre` above takes every fence.
 	code: InlineCode,

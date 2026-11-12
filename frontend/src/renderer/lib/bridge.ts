@@ -152,6 +152,8 @@ export const aoBridge: AoBridge =
 			},
 			onFrameNavigated: () => () => undefined,
 		},
+		// Outside the desktop app there is no key, so local Run is refused.
+		commandRuns: { key: async () => "" },
 		daemon: {
 			getStatus: async () => ({
 				state: "stopped",

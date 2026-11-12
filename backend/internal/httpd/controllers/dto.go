@@ -2589,6 +2589,49 @@ type TerminalShellCheckResponse struct {
 	Message    string `json:"message,omitempty" description:"Why the path cannot launch."`
 }
 
+// CommandRunIDParam is the {runId} path parameter of a running Chat command.
+type CommandRunIDParam struct {
+	RunID string `path:"runId" description:"Command run identifier from the run's started event."`
+}
+
+// RunCommandRequest is the body of POST /sessions/{sessionId}/command-runs and
+// /sessions/{sessionId}/command-runs/terminal: a command the user clicked Run
+// on in Chat.
+type RunCommandRequest struct {
+	Command string `json:"command" description:"The exact command to run, as shown to the user."`
+	Shell   string `json:"shell,omitempty" description:"Shell to run it with: auto (the user's default shell), an executable path, or on Windows a selector (git-bash, pwsh, powershell, cmd)."`
+}
+
+// CommandRunStarted is the first event of a command run.
+type CommandRunStarted struct {
+	RunID      string    `json:"runId"`
+	Shell      string    `json:"shell" description:"Display name of the shell that runs the command."`
+	ShellPath  string    `json:"shellPath"`
+	WorkingDir string    `json:"workingDir"`
+	StartedAt  time.Time `json:"startedAt"`
+}
+
+// CommandRunExited is the last event of a command run that started.
+type CommandRunExited struct {
+	ExitCode     int   `json:"exitCode" description:"The command's exit code; -1 when it was stopped before reporting one."`
+	DurationMs   int64 `json:"durationMs"`
+	Stopped      bool  `json:"stopped,omitempty" description:"The user stopped the command."`
+	TimedOut     bool  `json:"timedOut,omitempty" description:"The command ran past the daemon's time limit and was stopped."`
+	Truncated    bool  `json:"truncated,omitempty" description:"Output past the daemon's limit was dropped; the command kept running."`
+	DroppedBytes int64 `json:"droppedBytes,omitempty"`
+}
+
+// CommandRunStreamEvent is the data of one server-sent event on
+// POST /sessions/{sessionId}/command-runs. Exactly one field is set: started
+// first, then output chunks in order, then exit (or error when the command
+// could not start).
+type CommandRunStreamEvent struct {
+	Started *CommandRunStarted `json:"started,omitempty"`
+	Output  *string            `json:"output,omitempty" description:"Combined stdout and stderr, UTF-8, possibly with terminal escape sequences."`
+	Exit    *CommandRunExited  `json:"exit,omitempty"`
+	Error   *envelope.APIError `json:"error,omitempty"`
+}
+
 // CueIDParam is the {cueId} path parameter of the /cues/{cueId} routes.
 type CueIDParam struct {
 	CueID string `path:"cueId" description:"Cue identifier."`
