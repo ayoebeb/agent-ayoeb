@@ -12,7 +12,12 @@ export const TRAY_MESSAGE_KEYS = [
 	"tray.show",
 	"tray.quit",
 	"zone.merge",
-	"zone.action"
+	"zone.action",
+	"settings.browserProfiles.sharing.confirmTitle",
+	"settings.browserProfiles.sharing.confirmMessage",
+	"settings.browserProfiles.sharing.confirmDetail",
+	"settings.browserProfiles.sharing.confirm",
+	"confirm.cancel"
 ] as const;
 
 export type TrayMessageKey = (typeof TRAY_MESSAGE_KEYS)[number];
@@ -29,7 +34,12 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.show": "Show Orchestrator",
 		"tray.quit": "Quit Orchestrator Completely",
 		"zone.merge": "Ready to merge",
-		"zone.action": "Needs you"
+		"zone.action": "Needs you",
+		"settings.browserProfiles.sharing.confirmTitle": "Share your browser profiles?",
+		"settings.browserProfiles.sharing.confirmMessage": "Your other machines on this Orchestrator account will be able to copy every browser profile on this machine, including its sign-ins and history.",
+		"settings.browserProfiles.sharing.confirmDetail": "A copy goes only to a machine your account lists, encrypted so only that machine can read it. Turning this off stops new copies; copies already made stay on those machines.",
+		"settings.browserProfiles.sharing.confirm": "Share profiles",
+		"confirm.cancel": "Cancel"
 	},
 	"zh-CN": {
 		"tray.awakeActive": "保持唤醒：正在使此 Mac 保持唤醒",
@@ -42,7 +52,12 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.show": "显示 Orchestrator",
 		"tray.quit": "完全退出 Orchestrator",
 		"zone.merge": "可合并",
-		"zone.action": "需要你处理"
+		"zone.action": "需要你处理",
+		"settings.browserProfiles.sharing.confirmTitle": "共享你的浏览器配置文件？",
+		"settings.browserProfiles.sharing.confirmMessage": "此 Orchestrator 账户中的其他设备将可以复制这台设备上的所有浏览器配置文件，包括登录信息和历史记录。",
+		"settings.browserProfiles.sharing.confirmDetail": "副本只会发送到你的账户中列出的设备，并经过加密，只有该设备能读取。关闭后将不再生成新副本；已生成的副本仍会保留在那些设备上。",
+		"settings.browserProfiles.sharing.confirm": "共享配置文件",
+		"confirm.cancel": "取消"
 	},
 	"ja": {
 		"tray.awakeActive": "スリープ防止：この Mac を起動状態に維持しています",
@@ -55,7 +70,12 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.show": "Orchestrator を表示",
 		"tray.quit": "Orchestrator を完全に終了",
 		"zone.merge": "マージ準備完了",
-		"zone.action": "対応が必要"
+		"zone.action": "対応が必要",
+		"settings.browserProfiles.sharing.confirmTitle": "ブラウザプロファイルを共有しますか？",
+		"settings.browserProfiles.sharing.confirmMessage": "この Orchestrator アカウントの他のマシンが、このマシンのすべてのブラウザプロファイルを、ログイン情報と履歴を含めてコピーできるようになります。",
+		"settings.browserProfiles.sharing.confirmDetail": "コピーはアカウントに登録されたマシンにだけ送られ、そのマシンしか読めないよう暗号化されます。オフにすると新しいコピーは止まりますが、作成済みのコピーはそれらのマシンに残ります。",
+		"settings.browserProfiles.sharing.confirm": "プロファイルを共有",
+		"confirm.cancel": "キャンセル"
 	},
 	"ko": {
 		"tray.awakeActive": "잠자기 방지: 이 Mac을 깨어 있게 유지하는 중",
@@ -68,7 +88,12 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.show": "Orchestrator 표시",
 		"tray.quit": "Orchestrator 완전히 종료",
 		"zone.merge": "병합 준비 완료",
-		"zone.action": "조치 필요"
+		"zone.action": "조치 필요",
+		"settings.browserProfiles.sharing.confirmTitle": "브라우저 프로필을 공유할까요?",
+		"settings.browserProfiles.sharing.confirmMessage": "이 Orchestrator 계정의 다른 컴퓨터에서 이 컴퓨터의 모든 브라우저 프로필을 로그인 정보와 방문 기록까지 포함해 복사할 수 있게 됩니다.",
+		"settings.browserProfiles.sharing.confirmDetail": "복사본은 계정에 등록된 컴퓨터로만 전송되며, 그 컴퓨터만 읽을 수 있도록 암호화됩니다. 끄면 새 복사가 중단되지만, 이미 만든 복사본은 해당 컴퓨터에 남아 있습니다.",
+		"settings.browserProfiles.sharing.confirm": "프로필 공유",
+		"confirm.cancel": "취소"
 	},
 	"es": {
 		"tray.awakeActive": "Mantener despierto: este Mac se mantiene activo",
@@ -82,6 +107,11 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.quit": "Salir completamente de Orchestrator",
 		"zone.merge": "Listo para fusionar",
 		"zone.action": "Te necesita",
+		"settings.browserProfiles.sharing.confirmTitle": "¿Compartir tus perfiles del navegador?",
+		"settings.browserProfiles.sharing.confirmMessage": "Tus otros equipos de esta cuenta de Orchestrator podrán copiar todos los perfiles del navegador de este equipo, incluidos sus inicios de sesión y su historial.",
+		"settings.browserProfiles.sharing.confirmDetail": "Una copia solo va a un equipo que figura en tu cuenta, cifrada para que solo ese equipo pueda leerla. Desactivar esta opción impide nuevas copias; las copias ya hechas siguen en esos equipos.",
+		"settings.browserProfiles.sharing.confirm": "Compartir perfiles",
+		"confirm.cancel": "Cancelar",
 		"tray.attentionTooltip_many": "{{count}} sesiones requieren atención"
 	},
 	"fr": {
@@ -96,6 +126,11 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.quit": "Quitter complètement Orchestrator",
 		"zone.merge": "Prêt à fusionner",
 		"zone.action": "Action requise",
+		"settings.browserProfiles.sharing.confirmTitle": "Partager vos profils de navigateur ?",
+		"settings.browserProfiles.sharing.confirmMessage": "Vos autres machines de ce compte Orchestrator pourront copier tous les profils de navigateur de cette machine, y compris leurs connexions et leur historique.",
+		"settings.browserProfiles.sharing.confirmDetail": "Une copie n’est envoyée qu’à une machine répertoriée dans votre compte, chiffrée pour que seule cette machine puisse la lire. Désactiver cette option empêche de nouvelles copies ; les copies déjà faites restent sur ces machines.",
+		"settings.browserProfiles.sharing.confirm": "Partager les profils",
+		"confirm.cancel": "Annuler",
 		"tray.attentionTooltip_many": "{{count}} sessions nécessitent votre attention"
 	},
 	"de": {
@@ -109,7 +144,12 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.show": "Orchestrator anzeigen",
 		"tray.quit": "Orchestrator vollständig beenden",
 		"zone.merge": "Bereit zum Mergen",
-		"zone.action": "Ihre Aktion nötig"
+		"zone.action": "Ihre Aktion nötig",
+		"settings.browserProfiles.sharing.confirmTitle": "Browserprofile freigeben?",
+		"settings.browserProfiles.sharing.confirmMessage": "Deine anderen Rechner in diesem Orchestrator-Konto können dann jedes Browserprofil auf diesem Rechner kopieren, samt Anmeldungen und Verlauf.",
+		"settings.browserProfiles.sharing.confirmDetail": "Eine Kopie geht nur an einen Rechner, den dein Konto auflistet, und ist so verschlüsselt, dass nur dieser Rechner sie lesen kann. Ausschalten verhindert neue Kopien; bereits erstellte Kopien bleiben auf diesen Rechnern.",
+		"settings.browserProfiles.sharing.confirm": "Profile freigeben",
+		"confirm.cancel": "Abbrechen"
 	},
 	"pt-BR": {
 		"tray.awakeActive": "Manter acordado: este Mac está sendo mantido acordado",
@@ -123,6 +163,11 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.quit": "Sair completamente do Orchestrator",
 		"zone.merge": "Pronto para merge",
 		"zone.action": "Precisa de você",
+		"settings.browserProfiles.sharing.confirmTitle": "Compartilhar seus perfis do navegador?",
+		"settings.browserProfiles.sharing.confirmMessage": "Suas outras máquinas nesta conta do Orchestrator poderão copiar todos os perfis do navegador desta máquina, incluindo logins e histórico.",
+		"settings.browserProfiles.sharing.confirmDetail": "Uma cópia vai só para uma máquina listada na sua conta, criptografada para que só essa máquina possa lê-la. Desativar impede novas cópias; as cópias já feitas continuam nessas máquinas.",
+		"settings.browserProfiles.sharing.confirm": "Compartilhar perfis",
+		"confirm.cancel": "Cancelar",
 		"tray.attentionTooltip_many": "{{count}} sessões precisam de atenção"
 	},
 	"ru": {
@@ -137,6 +182,11 @@ export const trayCatalogs: Record<AppLocale, Record<TrayMessageKey, string> & Pa
 		"tray.quit": "Полностью выйти из Orchestrator",
 		"zone.merge": "Готово к слиянию",
 		"zone.action": "Требуется ваше действие",
+		"settings.browserProfiles.sharing.confirmTitle": "Открыть доступ к профилям браузера?",
+		"settings.browserProfiles.sharing.confirmMessage": "Другие ваши компьютеры в этом аккаунте Orchestrator смогут копировать все профили браузера с этого компьютера вместе со входами на сайты и историей.",
+		"settings.browserProfiles.sharing.confirmDetail": "Копия отправляется только на компьютер, указанный в вашем аккаунте, и шифруется так, что прочитать её может только он. Если выключить доступ, новые копии создаваться не будут; уже сделанные копии останутся на тех компьютерах.",
+		"settings.browserProfiles.sharing.confirm": "Открыть доступ",
+		"confirm.cancel": "Отмена",
 		"tray.attentionTooltip_few": "{{count}} сессии требуют внимания",
 		"tray.attentionTooltip_many": "{{count}} сессий требуют внимания"
 	}

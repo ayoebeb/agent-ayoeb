@@ -288,11 +288,21 @@ func isIdentityProbe(r *http.Request) bool {
 // successful bearer check. Preview-scoped cookies never confer API authority.
 type lanBearerContextKey struct{}
 
+// lanAccountBearerContextKey additionally records that the bearer was the
+// account credential, which AO Cloud lists only to the account's signed-in
+// devices, rather than the pairing password a phone or a direct pairing holds.
+type lanAccountBearerContextKey struct{}
+
 type lanPreviewCookieContextKey struct{}
 
 func authenticatedLANBearer(r *http.Request) bool {
 	authenticated, _ := r.Context().Value(lanBearerContextKey{}).(bool)
 	return authenticated
+}
+
+func authenticatedLANAccountBearer(r *http.Request) bool {
+	authenticated, _ := r.Context().Value(lanAccountBearerContextKey{}).(bool)
+	return authenticated && authenticatedLANBearer(r)
 }
 
 func authMiddleware(state *authState, lock *lockout, connected *mobileConnectReporter) func(http.Handler) http.Handler {
@@ -315,8 +325,8 @@ func authMiddleware(state *authState, lock *lockout, connected *mobileConnectRep
 				conn.owner.mu.Lock()
 			}
 			// Record auth atomically with rotation's connection close.
-			authenticated := mobilebridge.PasswordMatches(state.currentHash(), tok) ||
-				mobilebridge.PasswordMatches(state.accountHash(), tok)
+			accountCredential := mobilebridge.PasswordMatches(state.accountHash(), tok)
+			authenticated := accountCredential || mobilebridge.PasswordMatches(state.currentHash(), tok)
 			if conn != nil {
 				if authenticated {
 					conn.tokenHash = mobilebridge.HashPassword(tok)
@@ -328,7 +338,11 @@ func authMiddleware(state *authState, lock *lockout, connected *mobileConnectRep
 				connected.report(remoteSrc)
 				maybeSetPreviewAuthCookie(w, r, tok)
 				if bearerToken(r) != "" {
-					r = r.WithContext(context.WithValue(r.Context(), lanBearerContextKey{}, true))
+					ctx := context.WithValue(r.Context(), lanBearerContextKey{}, true)
+					if accountCredential {
+						ctx = context.WithValue(ctx, lanAccountBearerContextKey{}, true)
+					}
+					r = r.WithContext(ctx)
 				} else {
 					r = r.WithContext(context.WithValue(r.Context(), lanPreviewCookieContextKey{}, true))
 				}

@@ -12,7 +12,18 @@ import {
 	type BrowserProfileDeleteResult,
 } from "../shared/browser-profiles";
 import type { BrowserImportRequest } from "../shared/browser-profile-import";
+import type {
+	BrowserProfileCopyResult,
+	BrowserProfileSharingConfirmLabels,
+	BrowserProfileSharingState,
+	OtherMachinesResult,
+} from "../shared/browser-profile-share";
+import type { BrowserProfileCopyService } from "./browser-profile-copy";
+import type { BrowserProfileCopyLedger } from "./browser-profile-copy-ledger";
 import type { BrowserProfileImportService } from "./browser-profile-import";
+import type { BrowserProfileSharingSetting } from "./browser-profile-share";
+import { trayCatalogs } from "./tray-catalog.generated";
+import type { AppLocale } from "../shared/ui-locale";
 import { BrowserProfileStore, BrowserProfileStoreError as StoreError } from "./browser-profile-store";
 
 export type BrowserProfileMenuItem = {
@@ -46,9 +57,25 @@ export type BrowserProfileIpcOptions = {
 	store: BrowserProfileStore;
 	host: BrowserProfileIpcHost;
 	importer: BrowserProfileImportService;
+	/** "Share my browser profiles with my linked machines" on this machine. */
+	sharing?: Pick<BrowserProfileSharingSetting, "isEnabled" | "setEnabled">;
+	/** Every profile copied from another machine; sharing answers nothing while it is lost. */
+	copyLedger?: Pick<BrowserProfileCopyLedger, "health" | "setAsideDamaged">;
+	/** Copies profiles that this account's other machines share. */
+	copier?: Pick<BrowserProfileCopyService, "listMachines" | "copy" | "update">;
 	buildMenu: (items: BrowserProfileMenuItem[]) => BrowserProfileMenu;
 	confirmSwitch: (labels: BrowserProfileMenuInput["labels"]) => Promise<boolean>;
 	reportSwitchFailure: (message: string, labels: BrowserProfileMenuInput["labels"]) => void;
+	/**
+	 * Asks the person at this machine, in a native dialog, before sharing is
+	 * turned on. Without it sharing cannot be turned on: a compromised renderer
+	 * must not be able to start sharing sign-in cookies silently. The words come
+	 * from main's own catalog, never from the renderer, so it cannot disguise
+	 * the dialog as something else either.
+	 */
+	confirmSharing?: (labels: BrowserProfileSharingConfirmLabels) => Promise<boolean>;
+	/** The UI language main keeps in its own settings. */
+	uiLocale?: () => Promise<AppLocale>;
 };
 
 export type BrowserProfileIpc = {
@@ -123,6 +150,18 @@ function labelsFromInput(value: unknown): BrowserProfileMenuInput["labels"] {
 		labels[key] = label;
 	}
 	return labels;
+}
+
+/** The sharing confirmation in locale, from main's catalog of the renderer's own strings. */
+export function browserProfileSharingConfirmLabels(locale: AppLocale): BrowserProfileSharingConfirmLabels {
+	const catalog = trayCatalogs[locale] ?? trayCatalogs.en;
+	return {
+		title: catalog["settings.browserProfiles.sharing.confirmTitle"],
+		message: catalog["settings.browserProfiles.sharing.confirmMessage"],
+		detail: catalog["settings.browserProfiles.sharing.confirmDetail"],
+		cancel: catalog["confirm.cancel"],
+		confirm: catalog["settings.browserProfiles.sharing.confirm"],
+	};
 }
 
 function trustedShellSender(event: IpcMainInvokeEvent, shellWebContents: WebContents): boolean {
@@ -232,6 +271,68 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 		return options.importer.import(input as BrowserImportRequest, (progress) => {
 			options.shellWebContents.send("browserProfiles:import:progress", progress);
 		});
+	});
+	/** Sharing as the owner should see it: on but answering nothing while the copy ledger is lost. */
+	const sharingState = async (enabled: boolean): Promise<BrowserProfileSharingState> => {
+		if (!enabled || !options.copyLedger) return { enabled };
+		const health = await options.copyLedger.health().catch(() => "unreadable" as const);
+		return health === "ok" ? { enabled } : { enabled, copyLedgerLost: true };
+	};
+	handle("browserProfiles:sharing:get", async (event): Promise<BrowserProfileSharingState> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.sharing) return { enabled: false };
+		return sharingState(await options.sharing.isEnabled());
+	});
+	handle("browserProfiles:sharing:set", async (event, input: unknown): Promise<BrowserProfileSharingState> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.sharing) {
+			return { enabled: false, error: "Browser profile sharing is unavailable." };
+		}
+		if (!isRecord(input) || typeof input.enabled !== "boolean") throw invalid("Sharing setting is invalid.");
+		const turningOn = input.enabled && !(await options.sharing.isEnabled());
+		if (turningOn) {
+			// Anything else the renderer sent is ignored: main words the dialog.
+			const locale = await (options.uiLocale?.() ?? Promise.resolve<AppLocale>("en")).catch((): AppLocale => "en");
+			const labels = browserProfileSharingConfirmLabels(locale);
+			if (!options.confirmSharing) return { enabled: false, error: "Browser profile sharing is unavailable." };
+			let confirmed = false;
+			try {
+				confirmed = await options.confirmSharing(labels);
+			} catch {
+				confirmed = false;
+			}
+			if (!confirmed) return { enabled: await options.sharing.isEnabled(), cancelled: true };
+		}
+		try {
+			// The owner's confirmed turn-on is the one way past a lost or damaged
+			// copy ledger: the next answer rebuilds it from the profile registry.
+			if (turningOn) await options.copyLedger?.setAsideDamaged();
+			return await sharingState(await options.sharing.setEnabled(input.enabled));
+		} catch {
+			return { enabled: await options.sharing.isEnabled(), error: "Could not save the sharing setting." };
+		}
+	});
+	handle("browserProfiles:machines:list", async (event): Promise<OtherMachinesResult> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.copier) return { signedIn: false, machines: [] };
+		try {
+			return await options.copier.listMachines();
+		} catch {
+			return { signedIn: true, machines: [], error: "Could not read your other machines." };
+		}
+	});
+	handle("browserProfiles:machines:copy", async (event, input: unknown): Promise<BrowserProfileCopyResult> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.copier) {
+			return { error: "Browser profile access was denied.", code: "FAILED" };
+		}
+		if (!isRecord(input)) return { error: "That browser profile is not valid.", code: "INVALID_DATA" };
+		return options.copier.copy(input.hostId, input.profileId, input.name);
+	});
+	handle("browserProfiles:machines:update", async (event, input: unknown): Promise<BrowserProfileCopyResult> => {
+		if (!trustedShellSender(event, options.shellWebContents) || !options.copier) {
+			return { error: "Browser profile access was denied.", code: "FAILED" };
+		}
+		if (!isRecord(input)) return { error: "That browser profile is not valid.", code: "INVALID_DATA" };
+		const result = await options.copier.update(input.id);
+		if (result.profile) options.host.refreshProfileState?.(result.profile.id);
+		return result;
 	});
 	handle("browser:profile:get", (event, rawViewId: unknown) => {
 		const viewId = viewIdFromInput(rawViewId);

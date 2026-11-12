@@ -766,7 +766,10 @@ export class BrowserProfileImportService {
 			for (const [index, group] of groups.entries()) {
 				throwIfImportAborted(signal);
 				onProgress({ requestId: request.requestId, phase: "importing", completed: index, total: groups.length });
-				const profile = await this.options.profileStore.createProfile(group.name, { claimDefault: false });
+				const profile = await this.options.profileStore.createProfile(group.name, {
+					claimDefault: false,
+					source: { kind: "import", browser: source.public.name },
+				});
 				created.push(profile);
 				throwIfImportAborted(signal);
 				const history = group.data.flatMap((data) => data.history);

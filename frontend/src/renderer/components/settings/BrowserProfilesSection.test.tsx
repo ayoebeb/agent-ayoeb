@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserProfileUsage } from "../../../shared/browser-profiles";
 import type { AoBridge } from "../../../preload";
+import { TooltipProvider } from "../ui/tooltip";
 import { BrowserProfilesSection } from "./BrowserProfilesSection";
 
 const profile = {
@@ -31,11 +32,16 @@ describe("BrowserProfilesSection", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [] })),
 			import: vi.fn(async () => ({ sourceName: "", entries: [] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async ({ enabled }: { enabled: boolean }) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		originalBridge = window.ao!.browserProfiles;
 		window.ao!.browserProfiles = bridge;
 
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		expect(await screen.findByText("Work")).toBeInTheDocument();
 		expect(bridge.list).toHaveBeenCalledOnce();
 
@@ -79,7 +85,7 @@ describe("BrowserProfilesSection", () => {
 			delete: vi.fn(async () => ({})),
 		};
 		window.ao!.browserProfiles = bridge;
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		await userEvent.click(await screen.findByRole("button", { name: "Actions for Work" }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: "Delete profile" }));
 		expect(await screen.findByText("idle-worker")).toBeInTheDocument();
@@ -101,7 +107,7 @@ describe("BrowserProfilesSection", () => {
 			delete: vi.fn(async () => { throw new Error("Error invoking remote method 'browserProfiles:delete': Error: private details"); }),
 		};
 		window.ao!.browserProfiles = bridge;
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		const open = async () => {
 			await userEvent.click(await screen.findByRole("button", { name: "Actions for Work" }));
 			await userEvent.click(await screen.findByRole("menuitem", { name: "Delete profile" }));
@@ -123,7 +129,7 @@ describe("BrowserProfilesSection", () => {
 			list: vi.fn(async () => ({ profiles: [profile], defaultProfileId: null })),
 			usage: vi.fn(async () => ({ sessions: [], error: "Could not check browsers." })),
 		};
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		await userEvent.click(await screen.findByRole("button", { name: "Actions for Work" }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: "Delete profile" }));
 		expect(await screen.findByRole("alert")).toHaveTextContent("Could not check browsers.");
@@ -142,11 +148,16 @@ describe("BrowserProfilesSection", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [] })),
 			import: vi.fn(async () => ({ sourceName: "", entries: [] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async ({ enabled }: { enabled: boolean }) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		originalBridge = window.ao!.browserProfiles;
 		window.ao!.browserProfiles = bridge;
 
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		await userEvent.click(await screen.findByRole("button", { name: "Actions for Work" }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: "Set Work as default" }));
 		await waitFor(() => expect(bridge.setDefault).toHaveBeenCalledWith(profile.id));
@@ -170,11 +181,16 @@ describe("BrowserProfilesSection", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [] })),
 			import: vi.fn(async () => ({ sourceName: "", entries: [] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async ({ enabled }: { enabled: boolean }) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		originalBridge = window.ao!.browserProfiles;
 		window.ao!.browserProfiles = bridge;
 
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		const createInput = await screen.findByRole("textbox", { name: "Profile name" });
 		await waitFor(() => expect(createInput).toBeEnabled());
 		await userEvent.type(createInput, "Work");
@@ -204,11 +220,16 @@ describe("BrowserProfilesSection", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [] })),
 			import: vi.fn(async () => ({ sourceName: "", entries: [] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async ({ enabled }: { enabled: boolean }) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		originalBridge = window.ao!.browserProfiles;
 		window.ao!.browserProfiles = bridge;
 
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		await userEvent.click(await screen.findByRole("button", { name: "Actions for Work" }));
 		await userEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
 		const renameInput = await screen.findByRole("textbox", { name: "New name for Work" });
@@ -235,11 +256,16 @@ describe("BrowserProfilesSection", () => {
 			discoverImportSources: vi.fn(async () => ({ sources: [] })),
 			import: vi.fn(async () => ({ sourceName: "", entries: [] })),
 			onImportProgress: vi.fn(() => () => undefined),
+			getSharing: vi.fn(async () => ({ enabled: false })),
+			setSharing: vi.fn(async ({ enabled }: { enabled: boolean }) => ({ enabled })),
+			listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })),
+			copyFromMachine: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+			updateCopy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
 		};
 		originalBridge = window.ao!.browserProfiles;
 		window.ao!.browserProfiles = bridge;
 
-		render(<BrowserProfilesSection />);
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
 		expect(await screen.findByRole("alert")).toHaveTextContent("Registry is corrupt");
 	});
 });

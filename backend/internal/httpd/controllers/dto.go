@@ -2788,6 +2788,39 @@ type LinkPreviewResponse struct {
 	FaviconURL  string `json:"faviconUrl,omitempty"`
 }
 
+// SharedBrowserProfileIDParam names one of this machine's shared browser profiles.
+type SharedBrowserProfileIDParam struct {
+	ProfileID string `path:"profileId" description:"Browser profile identifier on this machine."`
+}
+
+// SharedBrowserProfileExportQuery selects one page of a profile export.
+type SharedBrowserProfileExportQuery struct {
+	Cursor string `query:"cursor,omitempty" description:"Opaque cursor from the previous page's nextCursor; omit for the first page."`
+}
+
+// SharedBrowserProfileReceiverHeaders identify the machine that reads this
+// machine's shared browser profiles. Its own daemon signs the ticket with its
+// host key; this machine's desktop checks the signature and seals the answer
+// to the one-time key the ticket names.
+type SharedBrowserProfileReceiverHeaders struct {
+	Ticket    string `header:"X-AO-Receiver-Ticket" description:"Signed receiver ticket, unpadded base64url, from the receiving machine's POST /api/v1/mobile/browser-profile-ticket."`
+	Signature string `header:"X-AO-Receiver-Signature" description:"The receiving machine's Ed25519 host key signature over the ticket, unpadded base64url."`
+}
+
+// SealedBrowserProfilePayload is an answer only the receiving machine can
+// read: JSON sealed with AES-256-GCM under a key agreed by X25519 between a
+// one-time key of this machine's desktop and the one-time key in the
+// receiver's ticket. This daemon relays it without being able to read it.
+type SealedBrowserProfilePayload struct {
+	Version int `json:"version"`
+	// Key is the sender's one-time X25519 public key, unpadded base64url.
+	Key string `json:"key"`
+	// IV is the 12-byte AES-GCM nonce, unpadded base64url.
+	IV string `json:"iv"`
+	// Data is the ciphertext followed by the 16-byte tag, unpadded base64url.
+	Data string `json:"data"`
+}
+
 // MobileStatusResponse is the body of the Connect Mobile status/enable/disable/
 // regenerate endpoints. Password is populated only transiently, on enable and
 // regenerate responses (empty otherwise) — it is never persisted in plaintext.

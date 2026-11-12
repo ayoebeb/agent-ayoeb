@@ -110,6 +110,8 @@ const SETTINGS_ENTRIES: SettingsEntry[] = [
 	{ id: "browser", section: "browserProfiles", label: "settings.browserProfiles", keywords: [] },
 	{ id: "create-profile", section: "browserProfiles", label: "settings.browserProfiles.create", keywords: ["browser profile"] },
 	{ id: "browser-import", section: "browserProfiles", label: "settings.browserImport.rowLabel", keywords: ["import", "firefox", "safari", "cookies"] },
+	{ id: "browser-profile-sharing", section: "browserProfiles", label: "settings.browserProfiles.sharing.label", keywords: ["share", "cookies", "other machine"] },
+	{ id: "browser-other-machines", section: "browserProfiles", label: "settings.browserProfiles.machines.title", keywords: ["copy profile", "remote host", "linked machine"] },
 	{ id: "downloads", section: "browserProfiles", label: "settings.downloads", keywords: ["download history"] },
 	{ id: "updates", section: "updates", label: "settings.updates", keywords: [] },
 	{ id: "auto-updates", section: "updates", label: "settings.updates.automatic", keywords: ["auto update"] },

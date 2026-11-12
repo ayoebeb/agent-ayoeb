@@ -278,3 +278,56 @@ describe("BrowserProfileStore", () => {
 		expect(store.isProfileOperationInProgress(profile.id)).toBe(false);
 	});
 });
+
+describe("BrowserProfileStore profile sources", () => {
+	it("persists where a profile came from and keeps it across renames", async () => {
+		const stateDir = await makeStateDir();
+		const store = new BrowserProfileStore({ stateDir });
+		const imported = await store.createProfile("Brave", { source: { kind: "import", browser: "Brave" } });
+		const copied = await store.createProfile("Chrome (from Laptop)", {
+			source: {
+				kind: "copy",
+				browser: "Google Chrome",
+				hostId: "h_laptop",
+				machineName: "Laptop",
+				remoteProfileId: "7C9E6679-7425-40DE-944B-E07FC1F90AE7",
+				copiedAt: "2026-11-10T12:00:00.000Z",
+			},
+		});
+		await store.renameProfile(copied.id, "Chrome");
+		const reloaded = new BrowserProfileStore({ stateDir });
+		await reloaded.load();
+		expect(reloaded.getProfile(imported.id)?.source).toEqual({ kind: "import", browser: "Brave" });
+		expect(reloaded.getProfile(copied.id)?.source).toEqual({
+			kind: "copy",
+			browser: "Google Chrome",
+			hostId: "h_laptop",
+			machineName: "Laptop",
+			remoteProfileId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+			copiedAt: "2026-11-10T12:00:00.000Z",
+		});
+		const updated = await reloaded.setProfileSource(copied.id, {
+			kind: "copy", hostId: "h_laptop", machineName: "Laptop", remoteProfileId: "7c9e6679-7425-40de-944b-e07fc1f90ae7", copiedAt: "2026-11-11T08:00:00.000Z",
+		});
+		expect(updated.source).toMatchObject({ copiedAt: "2026-11-11T08:00:00.000Z" });
+	});
+
+	// Dropping an unreadable source would make a damaged copy look like a
+	// local profile, and a local profile is shared: it is kept as "unknown".
+	it("rejects an invalid source on create and keeps an unreadable stored one as unknown without losing the profile", async () => {
+		const stateDir = await makeStateDir();
+		const store = new BrowserProfileStore({ stateDir });
+		await expect(store.createProfile("Bad", { source: { kind: "copy", hostId: "h/../x", machineName: "L", remoteProfileId: "nope", copiedAt: "x" } as never }))
+			.rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+		const registry = registryWithProfiles(1);
+		(registry.profiles[0] as Record<string, unknown>).source = { kind: "copy", hostId: 7 };
+		await writeFile(path.join(stateDir, "browser-profiles.json"), JSON.stringify(registry));
+		const reloaded = new BrowserProfileStore({ stateDir });
+		const state = await reloaded.load();
+		expect(state.error).toBeUndefined();
+		expect(state.profiles[0]?.source).toEqual({ kind: "unknown" });
+		// The marker survives the next write and reload.
+		await reloaded.renameProfile(state.profiles[0]!.id, "Renamed");
+		expect((await new BrowserProfileStore({ stateDir }).load()).profiles[0]?.source).toEqual({ kind: "unknown" });
+	});
+});

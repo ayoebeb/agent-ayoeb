@@ -332,6 +332,11 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 					discoverImportSources: async () => ({ sources: [] }),
 					import: async () => ({ sourceName: "", entries: [] }),
 					onImportProgress: () => () => undefined,
+					getSharing: async () => ({ enabled: false }),
+					setSharing: async ({ enabled }: { enabled: boolean }) => ({ enabled }),
+					listOtherMachines: async () => ({ signedIn: false, machines: [] }),
+					copyFromMachine: async () => ({ error: "Unavailable", code: "FAILED" as const }),
+					updateCopy: async () => ({ error: "Unavailable", code: "FAILED" as const }),
 				},
 				notifications: {
 					show: async () => undefined,
@@ -1283,6 +1288,11 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 					discoverImportSources: async () => ({ sources: [] }),
 					import: async () => ({ sourceName: "", entries: [] }),
 					onImportProgress: () => () => undefined,
+					getSharing: async () => ({ enabled: false }),
+					setSharing: async ({ enabled }: { enabled: boolean }) => ({ enabled }),
+					listOtherMachines: async () => ({ signedIn: false, machines: [] }),
+					copyFromMachine: async () => ({ error: "Unavailable", code: "FAILED" as const }),
+					updateCopy: async () => ({ error: "Unavailable", code: "FAILED" as const }),
 				},
 				notifications: {
 					show: async () => undefined,

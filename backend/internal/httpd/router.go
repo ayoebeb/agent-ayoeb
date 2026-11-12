@@ -208,6 +208,8 @@ func mountMobile(r chi.Router, c *controllers.MobileController) {
 	r.Post("/api/v1/mobile/secure-pairing", c.SecurePairing)
 	r.Post("/api/v1/mobile/keep-awake", c.KeepAwake)
 	r.Post("/api/v1/remote-host/account-token", c.IssueAccountToken)
+	r.Get("/api/v1/remote-host/host-key", c.HostKey)
+	r.Post("/api/v1/mobile/browser-profile-ticket", c.IssueBrowserProfileTicket)
 	r.Post("/api/v1/mobile/browser-control", c.BrowserRemoteAccess)
 }
 

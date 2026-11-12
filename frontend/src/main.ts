@@ -212,6 +212,11 @@ import { registerAgentLoginIpc } from "./main/agent-login-ipc";
 import { registerChatImageIpc } from "./main/chat-image-ipc";
 import { pruneCloudArtifactFolders, registerCloudArtifactIpc } from "./main/cloud-artifact-ipc";
 import { BrowserProfileImportService } from "./main/browser-profile-import";
+import { BrowserProfileShareSource, BrowserProfileSharingSetting } from "./main/browser-profile-share";
+import { BrowserProfileCopyService } from "./main/browser-profile-copy";
+import { BrowserProfileCopyLedger } from "./main/browser-profile-copy-ledger";
+import { AccountDirectory, type LinkedMachine } from "./main/browser-profile-directory";
+import { BrowserProfileReceiverVerifier } from "./main/browser-profile-receiver";
 import {
 	registerBrowserProfileIpc,
 	type BrowserProfileIpc,
@@ -258,7 +263,7 @@ import { ancestorRepositorySetupWarning, resolveCheckedOutBranch, scanImportFold
 import { parseOpenFolderPathArg } from "./main/open-folder-arg";
 import { registerRemotesIpc, remotesFilePath } from "./main/remotes-main";
 import { sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
-import { createLocalHostIdentity } from "./main/remote-request";
+import { createLocalHostIdentity, readRemoteIdentity } from "./main/remote-request";
 import { RemoteRegistry } from "./main/remote-registry";
 import { startRemoteProxy } from "./main/remote-proxy";
 import { captureMainError, reportDaemonFailure, ExpectedIpcError, installIpcErrorCapture, setMainErrorSink } from "./main/main-error-capture";
@@ -435,6 +440,8 @@ let daemonOutput = "";
 let browserViewHost: BrowserViewHost | null = null;
 let browserProfileIpc: BrowserProfileIpc | null = null;
 let browserProfileImporter: BrowserProfileImportService | null = null;
+// Answers this daemon's __browser-profile-share-* actions for linked machines.
+let browserProfileShareSource: BrowserProfileShareSource | null = null;
 let windowComposition: WindowComposition | null = null;
 const browserCleanupPromises = new Set<Promise<void>>();
 let browserQuitCleanupPromise: Promise<void> | null = null;
@@ -889,6 +896,7 @@ async function disposeBrowserViewHost(): Promise<void> {
 	profileIpc?.dispose();
 	const profileImporter = browserProfileImporter;
 	browserProfileImporter = null;
+	browserProfileShareSource = null;
 	if (!host && !profileImporter) return;
 	const cleanup = Promise.resolve()
 		.then(async () => {
@@ -958,6 +966,24 @@ async function createWindowInternal(): Promise<void> {
 		fromPartition: (partition) => session.fromPartition(partition),
 	});
 	await profileImporter.initialize();
+	const browserProfileSharing = new BrowserProfileSharingSetting(browserProfileStateDir());
+	const browserProfileCopies = new BrowserProfileCopyLedger(browserProfileStateDir(), browserProfileSharing);
+	// Records copies an earlier build made before it kept a ledger, while their
+	// provenance is still readable. Sharing does the same before every answer.
+	void browserProfileStore.load()
+		.then(() => browserProfileCopies.ensure(browserProfileStore.profiles))
+		.catch(() => undefined);
+	const profileShareSource = new BrowserProfileShareSource({
+		store: browserProfileStore,
+		history: browserHistoryStore,
+		sharing: browserProfileSharing,
+		copies: browserProfileCopies,
+		receivers: new BrowserProfileReceiverVerifier({
+			localHostId: localHostIdentity,
+			accountHosts: () => browserProfileAccountDirectory.hosts(),
+		}),
+		cookies: (profileId) => session.fromPartition(browserProfilePartition(profileId)).cookies.get({}),
+	});
 	const windowOptions: Electron.BaseWindowConstructorOptions = {
 		width: 1320,
 		height: 860,
@@ -1212,12 +1238,30 @@ async function createWindowInternal(): Promise<void> {
 		onNativeViewAdded: () => windowComposition?.restackShell(),
 	});
 	browserProfileImporter = profileImporter;
+	browserProfileShareSource = profileShareSource;
+	const profileHost = browserViewHost;
+	const profileCopier = new BrowserProfileCopyService({
+		store: browserProfileStore,
+		history: browserHistoryStore,
+		linkedMachines: linkedMachinesForBrowserProfiles,
+		identity: (url, signal) => readRemoteIdentity({ url }, fetch, signal),
+		localHostId: localHostIdentity,
+		issueTicket: issueBrowserProfileTicket,
+		ledger: browserProfileCopies,
+		setCookie: (partition, details) => session.fromPartition(partition).cookies.set(details),
+		flushCookies: (partition) => session.fromPartition(partition).cookies.flushStore(),
+		clearProfileData: (profileId) => profileHost.clearProfileData(profileId),
+		isProfileLive: (profileId) => profileHost.isProfileLive(profileId),
+	});
 	browserProfileIpc = registerBrowserProfileIpc({
 		ipcMain,
 		shellWebContents,
 		mainWindow,
 		store: browserProfileStore,
 		importer: profileImporter,
+		sharing: browserProfileSharing,
+		copyLedger: browserProfileCopies,
+		copier: profileCopier,
 		host: browserViewHost,
 		buildMenu: (items: BrowserProfileMenuItem[]) => {
 			const menu = Menu.buildFromTemplate(items as Electron.MenuItemConstructorOptions[]);
@@ -1242,6 +1286,27 @@ async function createWindowInternal(): Promise<void> {
 				title: labels.switchTitle,
 				message,
 			}).catch((error) => console.error("browser profile error dialog failed:", error));
+		},
+		uiLocale: async () => {
+			const runFile = runFilePath();
+			return runFile ? (await readUiSettings(path.dirname(runFile))).locale : DEFAULT_UI_SETTINGS.locale;
+		},
+		// A native dialog the renderer cannot answer or word for itself: turning
+		// sharing on takes a click from the person at this machine.
+		confirmSharing: async (labels) => {
+			const options: Electron.MessageBoxOptions = {
+				type: "warning",
+				title: labels.title,
+				message: labels.message,
+				detail: labels.detail,
+				buttons: [labels.cancel, labels.confirm],
+				defaultId: 0,
+				cancelId: 0,
+			};
+			const result = mainWindow && !mainWindow.isDestroyed()
+				? await dialog.showMessageBox(mainWindow, options)
+				: await dialog.showMessageBox(options);
+			return result.response === 1;
 		},
 	});
 	if (daemonStatus.state === "ready") {
@@ -1900,6 +1965,17 @@ function establishBrowserRuntimeLink(): void {
 			}
 			if (command.action === "__render-measure") {
 				return measureRender({ BrowserWindow }, command.args ?? {}, signal);
+			}
+			// The daemon sends these only for a linked machine's bearer-authenticated
+			// remote request; the share source still checks the opt-in itself.
+			if (command.action === "__browser-profile-share-list" || command.action === "__browser-profile-share-export") {
+				const shareSource = browserProfileShareSource;
+				if (!shareSource) {
+					throw Object.assign(new Error("Browser profiles are unavailable"), { code: "BROWSER_TARGET_UNAVAILABLE" });
+				}
+				return command.action === "__browser-profile-share-list"
+					? shareSource.list(command.args ?? {})
+					: shareSource.exportPage(command.args ?? {});
 			}
 			const host = browserViewHost;
 			if (!host) {
@@ -3409,6 +3485,50 @@ setPasswordCipher(() => protectedStorageAvailable() ? {
 void app.whenReady().then(() => sealSavedPasswords(remotesFilePath())).catch((error: unknown) => {
 	console.warn("[remotes] could not encrypt saved host passwords", error);
 });
+// The machine this desktop's daemon answers as; a remote that answers with it is this one.
+const localHostIdentity = createLocalHostIdentity(() => daemonStatus.state === "ready" && daemonStatus.port
+	? { port: daemonStatus.port, pid: daemonStatus.pid, generation: daemonAttachmentGeneration }
+	: null);
+
+/**
+ * The signed-in account's machines, from AO Cloud's directory with this
+ * desktop's session. Browser profile copies read it on both ends: a machine
+ * shares only with machines the account lists, and copies only from them.
+ * Main-only: the account credentials it holds never reach the renderer.
+ */
+const browserProfileAccountDirectory = new AccountDirectory({
+	accountId: async () => (await getCloudSession(cloudDataDir()))?.user.id,
+	request: async (signal) => {
+		const baseUrl = await cloudControlPlaneUrl();
+		if (!baseUrl) throw new Error("No Orchestrator Cloud control plane is configured.");
+		return cloudCpProxy.request({ baseUrl, path: "/api/cloud/v1/me/hosts", method: "GET" }, { hostTokens: true, signal });
+	},
+});
+
+/** The account's other machines a browser profile can be copied from. */
+async function linkedMachinesForBrowserProfiles(): Promise<LinkedMachine[]> {
+	return browserProfileAccountDirectory.linkedMachines(await localHostIdentity());
+}
+
+/**
+ * Has this machine's own daemon sign a browser profile ticket with its host
+ * key. The route is loopback-only: the remote listener never serves it.
+ */
+async function issueBrowserProfileTicket(sourceHostId: string, key: string): Promise<{ ticket: string; signature: string }> {
+	if (daemonStatus.state !== "ready" || !daemonStatus.port) throw new Error("The daemon is not ready.");
+	const response = await fetch(`http://127.0.0.1:${daemonStatus.port}/api/v1/mobile/browser-profile-ticket`, {
+		method: "POST",
+		redirect: "error",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ sourceHostId, key }),
+		signal: AbortSignal.timeout(5_000),
+	});
+	if (!response.ok) throw new Error(`The daemon did not sign a browser profile ticket (${response.status}).`);
+	const body = await response.json() as { ticket?: unknown; signature?: unknown };
+	if (typeof body.ticket !== "string" || typeof body.signature !== "string") throw new Error("The daemon answered without a ticket.");
+	return { ticket: body.ticket, signature: body.signature };
+}
+
 registerRemotesIpc(ipcMain, {
 	file: remotesFilePath(),
 	registry: remoteRegistry,
@@ -3424,9 +3544,7 @@ registerRemotesIpc(ipcMain, {
 			...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
 		}, { hostTokens: true, signal });
 	},
-	localIdentity: createLocalHostIdentity(() => daemonStatus.state === "ready" && daemonStatus.port
-		? { port: daemonStatus.port, pid: daemonStatus.pid, generation: daemonAttachmentGeneration }
-		: null),
+	localIdentity: localHostIdentity,
 });
 
 ipcMain.handle("app:chooseDirectory", async (_event, input?: string | { title?: string; defaultPath?: string }) => {

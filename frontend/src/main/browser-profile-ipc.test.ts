@@ -1,11 +1,14 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserProfileViewState } from "../shared/browser-profiles";
 import type { BrowserImportProgress, BrowserImportRequest } from "../shared/browser-profile-import";
 import { BrowserProfileStore } from "./browser-profile-store";
-import { registerBrowserProfileIpc, type BrowserProfileMenuItem } from "./browser-profile-ipc";
+import type { AppLocale } from "../shared/ui-locale";
+import { browserProfileSharingConfirmLabels, registerBrowserProfileIpc, type BrowserProfileMenuItem } from "./browser-profile-ipc";
+import { BROWSER_PROFILE_COPIES_FILE_NAME, BrowserProfileCopyLedger } from "./browser-profile-copy-ledger";
+import { BrowserProfileSharingSetting } from "./browser-profile-share";
 
 type Handler = (event: { sender: object }, ...args: unknown[]) => unknown;
 
@@ -25,7 +28,9 @@ afterEach(async () => {
 	await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function setup(confirmSwitch = vi.fn(async () => true)) {
+type SharingOverrides = Pick<Parameters<typeof registerBrowserProfileIpc>[0], "sharing" | "copyLedger">;
+
+async function setup(confirmSwitch = vi.fn(async () => true), overrides: (stateDir: string) => SharingOverrides = () => ({})) {
 	const stateDir = await mkdtemp(path.join(os.tmpdir(), "ao-browser-profile-ipc-"));
 	tempDirectories.push(stateDir);
 	const store = new BrowserProfileStore({ stateDir });
@@ -62,12 +67,27 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 			return { sourceName: "Chrome", entries: [] };
 		}),
 	};
+	let sharingEnabled = false;
+	const sharing = {
+		isEnabled: vi.fn(async () => sharingEnabled),
+		setEnabled: vi.fn(async (enabled: boolean) => { sharingEnabled = enabled; return enabled; }),
+	};
+	let sharingConfirmed = true;
+	const confirmSharing = vi.fn(async (_labels: unknown) => sharingConfirmed);
+	let uiLocale: AppLocale = "en";
+	const copier = {
+		listMachines: vi.fn(async () => ({ signedIn: true, machines: [] })),
+		copy: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+		update: vi.fn(async () => ({ error: "Unavailable", code: "FAILED" as const })),
+	};
 	const ipc = registerBrowserProfileIpc({
 		ipcMain: ipcMain as never,
 		shellWebContents: shell as never,
 		mainWindow: {},
 		store,
 		importer: importer as never,
+		sharing,
+		copier,
 		host,
 		buildMenu: (items) => {
 			menuItems = items;
@@ -75,12 +95,109 @@ async function setup(confirmSwitch = vi.fn(async () => true)) {
 		},
 		confirmSwitch,
 		reportSwitchFailure,
+		confirmSharing,
+		uiLocale: async () => uiLocale,
+		...overrides(stateDir),
 	});
-	const invoke = (channel: string, sender: object, ...args: unknown[]) => handlers.get(channel)!({ sender }, ...args);
-	return { host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, shell, state: () => state, store };
+	const invoke =(channel: string, sender: object, ...args: unknown[]) => handlers.get(channel)!({ sender }, ...args);
+	const declineSharing = (declined = true) => { sharingConfirmed = !declined; };
+	const setUiLocale = (locale: AppLocale) => { uiLocale = locale; };
+	return { confirmSharing, copier, declineSharing, setUiLocale, host, importer, invoke, ipc, menuItems: () => menuItems, menuPopup, renderer, reportSwitchFailure, sharing, shell, state: () => state, stateDir, store };
 }
 
+// What a compromised renderer might send to disguise the dialog.
+const DISGUISE = {
+	title: "Update ready",
+	message: "Restart Orchestrator to finish updating?",
+	detail: "It only takes a moment.",
+	cancel: "Later",
+	confirm: "Restart",
+};
+
 describe("browser profile IPC", () => {
+	it("serves profile sharing and other machines only to the app shell", async () => {
+		const { invoke, renderer, shell, sharing, copier } = await setup();
+		expect(await invoke("browserProfiles:sharing:get", renderer)).toEqual({ enabled: false });
+		expect(await invoke("browserProfiles:sharing:set", renderer, { enabled: true })).toMatchObject({ enabled: false });
+		expect(await invoke("browserProfiles:machines:list", renderer)).toEqual({ signedIn: false, machines: [] });
+		expect(await invoke("browserProfiles:machines:copy", renderer, { hostId: "h_a", profileId: "x" })).toMatchObject({ code: "FAILED" });
+		expect(await invoke("browserProfiles:machines:update", renderer, { id: "x" })).toMatchObject({ code: "FAILED" });
+		expect(sharing.setEnabled).not.toHaveBeenCalled();
+		expect(copier.listMachines).not.toHaveBeenCalled();
+		expect(copier.copy).not.toHaveBeenCalled();
+		expect(copier.update).not.toHaveBeenCalled();
+
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: true });
+		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true });
+		await expect(invoke("browserProfiles:sharing:set", shell, { enabled: "yes" })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+		await invoke("browserProfiles:machines:copy", shell, { hostId: "h_a", profileId: "p", name: "Brave (from A)" });
+		expect(copier.copy).toHaveBeenCalledWith("h_a", "p", "Brave (from A)");
+	});
+
+	// Turning sharing on shares sign-in cookies, so it takes a click in a
+	// native dialog: the renderer alone, even the app shell, cannot do it.
+	// Review finding N1: main words that dialog itself, in its own saved UI
+	// language, whatever the renderer sends.
+	it("turns sharing on only after a native confirmation worded by main", async () => {
+		const { confirmSharing, declineSharing, invoke, setUiLocale, shell, sharing } = await setup();
+		declineSharing();
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: DISGUISE })).toEqual({ enabled: false, cancelled: true });
+		expect(confirmSharing).toHaveBeenCalledWith(browserProfileSharingConfirmLabels("en"));
+		expect(confirmSharing.mock.calls[0]?.[0]).toMatchObject({ title: "Share your browser profiles?", confirm: "Share profiles", cancel: "Cancel" });
+		expect(JSON.stringify(confirmSharing.mock.calls)).not.toMatch(/Update ready|Restart/);
+		expect(sharing.setEnabled).not.toHaveBeenCalled();
+
+		setUiLocale("de");
+		await invoke("browserProfiles:sharing:set", shell, { enabled: true, labels: DISGUISE });
+		expect(confirmSharing).toHaveBeenLastCalledWith(browserProfileSharingConfirmLabels("de"));
+		expect(confirmSharing.mock.lastCall?.[0]).toMatchObject({ title: "Browserprofile freigeben?", confirm: "Profile freigeben" });
+
+		// Turning it off never asks.
+		confirmSharing.mockClear();
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: false })).toEqual({ enabled: false });
+		expect(confirmSharing).not.toHaveBeenCalled();
+	});
+
+	// Sharing answers nothing while the copy ledger is lost or damaged (N2);
+	// the owner is told, and a confirmed turn-on is the way past it.
+	it("tells the owner when a lost or damaged copy ledger pauses sharing, until a confirmed turn-on rebuilds it", async () => {
+		let setting!: BrowserProfileSharingSetting;
+		let ledger!: BrowserProfileCopyLedger;
+		const { declineSharing, invoke, shell, stateDir } = await setup(undefined, (dir) => {
+			setting = new BrowserProfileSharingSetting(dir);
+			ledger = new BrowserProfileCopyLedger(dir, setting);
+			return { sharing: setting, copyLedger: ledger };
+		});
+		const ledgerFile = path.join(stateDir, BROWSER_PROFILE_COPIES_FILE_NAME);
+		await setting.setEnabled(true);
+		await ledger.ensure([]);
+		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true });
+
+		await rm(ledgerFile);
+		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true, copyLedgerLost: true });
+		// "On" while already on is not the owner's turn-on: still paused.
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: true, copyLedgerLost: true });
+		// Off has nothing to tell.
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: false })).toEqual({ enabled: false });
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: true });
+		expect((await ledger.ensure([])).ids.size).toBe(0);
+
+		// A damaged ledger: kept while the owner declines, set aside once they confirm.
+		await writeFile(ledgerFile, "{ damaged");
+		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true, copyLedgerLost: true });
+		await invoke("browserProfiles:sharing:set", shell, { enabled: false });
+		declineSharing();
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: false, cancelled: true });
+		expect(await readFile(ledgerFile, "utf8")).toBe("{ damaged");
+		declineSharing(false);
+		expect(await invoke("browserProfiles:sharing:set", shell, { enabled: true })).toEqual({ enabled: true });
+		const asideFiles = (await readdir(stateDir)).filter((name) => name.startsWith(`${BROWSER_PROFILE_COPIES_FILE_NAME}.damaged-`));
+		expect(asideFiles).toHaveLength(1);
+		expect(await readFile(path.join(stateDir, asideFiles[0]!), "utf8")).toBe("{ damaged");
+		expect((await ledger.ensure([])).ids.size).toBe(0);
+		expect(await invoke("browserProfiles:sharing:get", shell)).toEqual({ enabled: true });
+	});
+
 	it("rejects untrusted profile management and invalid renderer ownership", async () => {
 		const { invoke, renderer, host } = await setup();
 

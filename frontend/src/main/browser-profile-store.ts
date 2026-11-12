@@ -10,11 +10,13 @@ import {
 	isBrowserProfileId,
 	isValidBrowserProfileSessionId,
 	normalizeBrowserProfileName,
+	normalizeBrowserProfileSource,
 	type BrowserProfile,
 	type BrowserProfileBinding,
 	type BrowserProfileId,
 	type BrowserProfileListState,
 	type BrowserProfileRegistry,
+	type BrowserProfileSource,
 	type BrowserProfileStoreError as BrowserProfileStoreErrorInfo,
 } from "../shared/browser-profiles";
 
@@ -99,9 +101,13 @@ function parseRegistry(raw: unknown): BrowserProfileRegistry {
 		if (profileIds.has(id) || profileNames.has(normalizedName)) {
 			throw invalidRegistry("The browser profile registry contains duplicate profile IDs or names.");
 		}
+		// Provenance is never a reason to lose the profile, but a record this
+		// build cannot read is kept as "unknown" rather than dropped: without
+		// it a copied profile would look local and be shared onward.
+		const source = value.source === undefined ? null : normalizeBrowserProfileSource(value.source) ?? { kind: "unknown" as const };
 		profileIds.add(id);
 		profileNames.add(normalizedName);
-		profiles.push({ id, name, createdAt, updatedAt });
+		profiles.push({ id, name, createdAt, updatedAt, ...(source ? { source } : {}) });
 	}
 
 	const bindings: Record<string, BrowserProfileBinding> = {};
@@ -138,10 +144,14 @@ function parseRegistry(raw: unknown): BrowserProfileRegistry {
 	return { version: BROWSER_PROFILE_REGISTRY_VERSION, profiles, bindings, defaultProfileId, defaultProfileSeeded: true };
 }
 
+function cloneProfile(profile: BrowserProfile): BrowserProfile {
+	return { ...profile, ...(profile.source ? { source: { ...profile.source } } : {}) };
+}
+
 function cloneRegistry(registry: BrowserProfileRegistry): BrowserProfileRegistry {
 	return {
 		version: registry.version,
-		profiles: registry.profiles.map((profile) => ({ ...profile })),
+		profiles: registry.profiles.map(cloneProfile),
 		bindings: Object.fromEntries(
 			Object.entries(registry.bindings).map(([sessionId, binding]) => [sessionId, { ...binding }]),
 		),
@@ -202,7 +212,7 @@ export class BrowserProfileStore {
 
 	private listState(): BrowserProfileListState {
 		return {
-			profiles: this.loadError ? [] : this.registry.profiles.map((profile) => ({ ...profile })),
+			profiles: this.loadError ? [] : this.registry.profiles.map(cloneProfile),
 			defaultProfileId: this.loadError ? null : this.registry.defaultProfileId,
 			...(this.loadError ? { error: { ...this.loadError } } : {}),
 		};
@@ -213,13 +223,13 @@ export class BrowserProfileStore {
 	}
 
 	get profiles(): BrowserProfile[] {
-		return this.loadError ? [] : this.registry.profiles.map((profile) => ({ ...profile }));
+		return this.loadError ? [] : this.registry.profiles.map(cloneProfile);
 	}
 
 	getProfile(profileId: string): BrowserProfile | undefined {
 		if (this.loadError) return undefined;
 		const profile = this.registry.profiles.find((candidate) => candidate.id === profileId);
-		return profile ? { ...profile } : undefined;
+		return profile ? cloneProfile(profile) : undefined;
 	}
 
 	/**
@@ -288,9 +298,14 @@ export class BrowserProfileStore {
 	 * `claimDefault: false` and calls `claimDefaultIfFirst` after it commits,
 	 * so no unbound worker opens a half-imported or rolled-back profile.
 	 */
-	async createProfile(rawName: unknown, { claimDefault = true }: { claimDefault?: boolean } = {}): Promise<BrowserProfile> {
+	async createProfile(
+		rawName: unknown,
+		{ claimDefault = true, source }: { claimDefault?: boolean; source?: BrowserProfileSource } = {},
+	): Promise<BrowserProfile> {
 		const name = normalizeBrowserProfileName(rawName);
 		if (!name) throw new BrowserProfileStoreError("INVALID_ARGUMENT", "Profile name is invalid.");
+		const normalizedSource = source === undefined ? undefined : normalizeBrowserProfileSource(source);
+		if (normalizedSource === null) throw new BrowserProfileStoreError("INVALID_ARGUMENT", "Profile source is invalid.");
 		return this.enqueueMutation((current) => {
 			if (current.profiles.length >= BROWSER_PROFILE_MAX_COUNT) {
 				throw new BrowserProfileStoreError("BROWSER_PROFILE_LIMIT", "The browser profile limit has been reached.");
@@ -299,10 +314,32 @@ export class BrowserProfileStore {
 				throw new BrowserProfileStoreError("BROWSER_PROFILE_NAME_TAKEN", "A browser profile with that name already exists.");
 			}
 			const now = this.now().toISOString();
-			const profile: BrowserProfile = { id: randomUUID(), name, createdAt: now, updatedAt: now };
+			const profile: BrowserProfile = {
+				id: randomUUID(),
+				name,
+				createdAt: now,
+				updatedAt: now,
+				...(normalizedSource ? { source: normalizedSource } : {}),
+			};
 			current.profiles.push(profile);
 			if (claimDefault && current.profiles.length === 1) current.defaultProfileId = profile.id;
-			return { registry: current, result: { ...profile } };
+			return { registry: current, result: cloneProfile(profile) };
+		});
+	}
+
+	/** Records fresh provenance after a copied profile is updated from its machine. */
+	async setProfileSource(profileId: string, source: BrowserProfileSource): Promise<BrowserProfile> {
+		if (!isBrowserProfileId(profileId)) {
+			throw new BrowserProfileStoreError("INVALID_ARGUMENT", "Profile ID is invalid.");
+		}
+		const normalizedSource = normalizeBrowserProfileSource(source);
+		if (!normalizedSource) throw new BrowserProfileStoreError("INVALID_ARGUMENT", "Profile source is invalid.");
+		return this.enqueueMutation((current) => {
+			const profile = current.profiles.find((candidate) => candidate.id === profileId);
+			if (!profile) throw new BrowserProfileStoreError("BROWSER_PROFILE_NOT_FOUND", "Browser profile was not found.");
+			profile.source = normalizedSource;
+			profile.updatedAt = this.now().toISOString();
+			return { registry: current, result: cloneProfile(profile) };
 		});
 	}
 
@@ -334,7 +371,7 @@ export class BrowserProfileStore {
 			}
 			profile.name = name;
 			profile.updatedAt = this.now().toISOString();
-			return { registry: current, result: { ...profile } };
+			return { registry: current, result: cloneProfile(profile) };
 		});
 	}
 

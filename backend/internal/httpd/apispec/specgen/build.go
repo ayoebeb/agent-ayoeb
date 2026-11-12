@@ -655,6 +655,14 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersMobileDevicesResponse":         "MobileDevicesResponse",
 	"ControllersInstallIDParam":                "InstallIDParam",
 	"ControllersPushPairingIDParam":            "PushPairingIDParam",
+	// httpd/controllers: browser profiles shared with linked machines
+	"ControllersSharedBrowserProfileIDParam":        "SharedBrowserProfileIDParam",
+	"ControllersSharedBrowserProfileExportQuery":    "SharedBrowserProfileExportQuery",
+	"ControllersSharedBrowserProfileReceiverHeaders": "SharedBrowserProfileReceiverHeaders",
+	"ControllersSealedBrowserProfilePayload":         "SealedBrowserProfilePayload",
+	"ControllersBrowserProfileTicketRequest":         "BrowserProfileTicketRequest",
+	"ControllersBrowserProfileTicketResponse":        "BrowserProfileTicketResponse",
+	"ControllersRemoteHostKeyResponse":               "RemoteHostKeyResponse",
 	// devimport report
 	"DevimportReport":   "DevImportProjectsReport",
 	"DevimportConflict": "DevImportProjectsConflict",
@@ -802,7 +810,44 @@ func operations() []operation {
 	ops = append(ops, endpointsOperations()...)
 	ops = append(ops, telemetryIdentityOperations()...)
 	ops = append(ops, linkPreviewOperations()...)
+	ops = append(ops, sharedBrowserProfileOperations()...)
 	return ops
+}
+
+// sharedBrowserProfileOperations declares the browser profiles this machine
+// shares with its linked machines. They answer 403 REMOTE_LINK_REQUIRED on the
+// unauthenticated loopback listener: only a bearer-authenticated request on the
+// remote listener reaches them. Must stay 1:1 with the routes
+// SharedBrowserProfilesController.Register mounts (enforced by the parity test).
+func sharedBrowserProfileOperations() []operation {
+	failures := []respUnit{
+		{http.StatusForbidden, envelope.APIError{}},
+		{http.StatusNotImplemented, envelope.APIError{}},
+		{http.StatusBadGateway, envelope.APIError{}},
+		{http.StatusServiceUnavailable, envelope.APIError{}},
+		{http.StatusGatewayTimeout, envelope.APIError{}},
+	}
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/shared-browser-profiles", id: "listSharedBrowserProfiles", tag: "browser",
+			summary:    "List the browser profiles this machine shares, sealed to the linked machine whose ticket the request carries",
+			pathParams: []any{controllers.SharedBrowserProfileReceiverHeaders{}},
+			resps: append([]respUnit{
+				{http.StatusOK, controllers.SealedBrowserProfilePayload{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+			}, failures...),
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/shared-browser-profiles/{profileId}/export", id: "exportSharedBrowserProfile", tag: "browser",
+			summary:    "Read one page of a shared browser profile's cookies and history, sealed to the linked machine whose ticket the request carries",
+			pathParams: []any{controllers.SharedBrowserProfileIDParam{}, controllers.SharedBrowserProfileExportQuery{}, controllers.SharedBrowserProfileReceiverHeaders{}},
+			resps: append([]respUnit{
+				{http.StatusOK, controllers.SealedBrowserProfilePayload{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+			}, failures...),
+		},
+	}
 }
 
 func automationOperations() []operation {
@@ -2407,6 +2452,27 @@ func mobileOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.RemoteHostAccountTokenResponse{}},
 				{http.StatusForbidden, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/remote-host/host-key", id: "getRemoteHostKey", tag: "mobile",
+			summary: "Read this machine's host id and public host key",
+			resps: []respUnit{
+				{http.StatusOK, controllers.RemoteHostKeyResponse{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+				{http.StatusServiceUnavailable, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/mobile/browser-profile-ticket", id: "issueBrowserProfileTicket", tag: "mobile",
+			summary: "Sign a ticket with this machine's host key to read another machine's shared browser profiles",
+			reqBody: controllers.BrowserProfileTicketRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.BrowserProfileTicketResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusForbidden, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+				{http.StatusServiceUnavailable, envelope.APIError{}},
 			},
 		},
 		{

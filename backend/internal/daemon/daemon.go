@@ -1214,6 +1214,7 @@ func Run(buildVersion string) error {
 		}),
 		Browser:                  browserService,
 		BrowserChrome:            browserChrome,
+		SharedBrowserProfiles:    newSharedBrowserProfilesViaDesktop(browserBroker, log),
 		LinkPreview:              linkpreviewsvc.New(nil),
 		PreviewServer:            managedPreview,
 		SessionCapabilities:      browserAuthority,
