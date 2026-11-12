@@ -18,6 +18,7 @@ import (
 // listener refuses the second bind, which protects it from builds that do not
 // probe first.
 func TestLANListenerRefusesALoopbackShadowOnWindows(t *testing.T) {
+	requireWildcardBind(t) // the 0.0.0.0 listener is the subject
 	m := NewMobileLAN(http.NotFoundHandler(), "", 0, nil, nil)
 	stopLANOnCleanup(t, m)
 	port, err := m.Start(freeLANPorts(t, 1))
@@ -36,13 +37,15 @@ func TestLANListenerRefusesALoopbackShadowOnWindows(t *testing.T) {
 
 func TestLANListenerSetsExclusiveAddrUseOnWindows(t *testing.T) {
 	for _, mode := range []struct {
-		name  string
-		start func(*LANManager, int) (int, error)
+		name     string
+		start    func(*LANManager, int) (int, error)
+		wildcard bool
 	}{
-		{"lan", (*LANManager).Start},
-		{"tunnel-only", (*LANManager).StartLoopback},
+		{"lan", (*LANManager).Start, true},
+		{"tunnel-only", (*LANManager).StartLoopback, false},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
+			lanPortTest(t, mode.wildcard)
 			m := NewMobileLAN(http.NotFoundHandler(), "", 0, nil, nil)
 			stopLANOnCleanup(t, m)
 			if _, err := mode.start(m, freeLANPorts(t, 1)); err != nil {

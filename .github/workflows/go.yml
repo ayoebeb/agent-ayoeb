@@ -131,7 +131,14 @@ jobs:
       # Linux refuses 127.0.0.1:p beside a listening 0.0.0.0:p by itself, so
       # only Windows shows whether the listener's port probe and
       # SO_EXCLUSIVEADDRUSE keep another process off its port.
+      #
+      # These cases bind 0.0.0.0 and [::] on purpose. On a developer's Windows
+      # desktop every new test binary raises a Defender Firewall prompt, so the
+      # tests skip there unless AO_TEST_WILDCARD_BIND is set. A runner has no
+      # interactive firewall, so CI sets it and keeps the full coverage.
       - name: Test Windows remote listener port selection
+        env:
+          AO_TEST_WILDCARD_BIND: "1"
         run: go test -race -count=1 -run '^(TestLANManagerSkipsAPortHeldOnAnyAddress|TestLANManagerKeepsAFreePreferredPort|TestLANManagerFailsWhenEverySearchedPortIsInUse|TestBridgeEnableReusesLastPortAndMovesPastAHeldOne|TestBridgeReEnableKeepsItsPortWithALingeringConnection|TestLANListenerRefusesALoopbackShadowOnWindows|TestLANListenerSetsExclusiveAddrUseOnWindows)$' ./internal/httpd/
 
       - name: Test Windows PowerShell installers

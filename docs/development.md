@@ -257,6 +257,37 @@ go run ./cmd/ao --help
 - After changing API types, run `npm run api` from root to regenerate
   `frontend/src/api/schema.ts`.
 
+### Windows firewall prompts from tests
+
+On Windows, Defender Firewall asks "allow network access?" the first time an
+executable listens on a non-loopback address. `go test` builds a new executable
+at a new temp path on every run, so a test that binds `0.0.0.0`, `[::]`, `":0"`
+or `":<port>"` raises a fresh prompt per run. Each prompt is a hidden
+`PickerHost.exe FirewallNotificationDialogServer -Embedding` process that stays
+until someone answers it. Hundreds of them can hold gigabytes of RAM.
+
+- Tests bind `127.0.0.1` or `[::1]`. `httptest.NewServer` already does.
+- The remote listener's port-conflict tests in `internal/httpd` bind wildcards
+  on purpose: that is what they verify (on Windows a `127.0.0.1` listener
+  beside a `0.0.0.0` one takes its loopback traffic). The product also probes
+  `0.0.0.0`, `[::]` and `127.0.0.1` on a candidate port before it binds, even
+  in tunnel-only mode. On Windows those cases skip, and the loopback-only cases
+  limit the probes to loopback, unless `AO_TEST_WILDCARD_BIND=1` is set. Linux,
+  macOS and the Windows CI job (`.github/workflows/go.yml` sets it, as a runner
+  has no interactive firewall) run the full set.
+- New tests whose subject is a wildcard bind call `requireWildcardBind`; tests
+  that only need a running listener call `startLANForTest`; tests that select a
+  listener port call `lanPortTest` (all in `internal/httpd/wildcard_bind_test.go`).
+- To run the full set on a Windows machine anyway:
+  `$env:AO_TEST_WILDCARD_BIND = "1"; go test ./internal/httpd/`. Expect a prompt
+  for every run, and prefer a VM or CI over a desktop you use.
+- To check that a change added no prompts, count the processes before and
+  after a run:
+  `(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'FirewallNotificationDialogServer' }).Count`.
+
+Dev and lab daemons can bind a wildcard too. See "Keep dev and lab daemons
+loopback-only" in `.agents/skills/ao-desktop-dev/SKILL.md`.
+
 ## Troubleshooting
 
 ### Backend build / test failures

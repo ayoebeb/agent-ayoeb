@@ -66,19 +66,26 @@ func stopLANOnCleanup(t *testing.T, m *LANManager) {
 }
 
 func TestLANManagerSkipsAPortHeldOnAnyAddress(t *testing.T) {
-	holders := []struct{ name, network, host string }{
-		{"ipv4 wildcard", "tcp4", "0.0.0.0"},
-		{"ipv4 loopback", "tcp4", "127.0.0.1"},
-		{"ipv6 wildcard", "tcp6", "::"},
-		{"ipv6 loopback", "tcp6", "::1"},
-		{"dual-stack wildcard", "tcp", ""},
+	// wildcard marks a holder or mode that binds 0.0.0.0, [::] or both. Those
+	// cases are the point of this test and run wherever a wildcard bind is
+	// allowed; the loopback-only pairs run everywhere.
+	holders := []struct {
+		name, network, host string
+		wildcard            bool
+	}{
+		{"ipv4 wildcard", "tcp4", "0.0.0.0", true},
+		{"ipv4 loopback", "tcp4", "127.0.0.1", false},
+		{"ipv6 wildcard", "tcp6", "::", true},
+		{"ipv6 loopback", "tcp6", "::1", false},
+		{"dual-stack wildcard", "tcp", "", true},
 	}
 	modes := []struct {
-		name  string
-		start func(*LANManager, int) (int, error)
+		name     string
+		start    func(*LANManager, int) (int, error)
+		wildcard bool
 	}{
-		{"lan", (*LANManager).Start},
-		{"tunnel-only", (*LANManager).StartLoopback},
+		{"lan", (*LANManager).Start, true},
+		{"tunnel-only", (*LANManager).StartLoopback, false},
 	}
 	for _, h := range holders {
 		for _, mode := range modes {
@@ -86,6 +93,7 @@ func TestLANManagerSkipsAPortHeldOnAnyAddress(t *testing.T) {
 			// instance bound 127.0.0.1 next to the installed AO's 0.0.0.0 and
 			// took its loopback traffic.
 			t.Run(mode.name+" beside "+h.name, func(t *testing.T) {
+				lanPortTest(t, h.wildcard || mode.wildcard)
 				base := freeLANPorts(t, 2)
 				holdPort(t, h.network, h.host, base)
 				m := NewMobileLAN(http.NotFoundHandler(), "", 0, nil, nil)
@@ -105,6 +113,7 @@ func TestLANManagerSkipsAPortHeldOnAnyAddress(t *testing.T) {
 }
 
 func TestLANManagerKeepsAFreePreferredPort(t *testing.T) {
+	lanPortTest(t, false)
 	base := freeLANPorts(t, 1)
 	m := NewMobileLAN(http.NotFoundHandler(), "", base, nil, nil)
 	stopLANOnCleanup(t, m)
@@ -118,6 +127,7 @@ func TestLANManagerKeepsAFreePreferredPort(t *testing.T) {
 }
 
 func TestLANManagerFailsWhenEverySearchedPortIsInUse(t *testing.T) {
+	lanPortTest(t, false)
 	base := freeLANPorts(t, lanPortSearchSpan)
 	for port := base; port < base+lanPortSearchSpan; port++ {
 		holdPort(t, "tcp4", "127.0.0.1", port)
@@ -125,7 +135,7 @@ func TestLANManagerFailsWhenEverySearchedPortIsInUse(t *testing.T) {
 	m := NewMobileLAN(http.NotFoundHandler(), "", 0, nil, nil)
 	stopLANOnCleanup(t, m)
 
-	_, err := m.Start(base)
+	_, err := startLANForTest(m, base)
 	if err == nil {
 		t.Fatal("Start bound a port inside a fully held range")
 	}
@@ -162,12 +172,17 @@ func TestBridgeEnableReusesLastPortAndMovesPastAHeldOne(t *testing.T) {
 		enable func(*controllers.BridgeService) (controllers.MobileStatusResponse, error)
 		// The other instance's bind that would shadow this mode's listener.
 		otherNetwork, otherHost string
+		// wildcard: this mode binds 0.0.0.0, or the other instance holds a
+		// wildcard address. The last case is its loopback-only twin.
+		wildcard bool
 	}{
-		{"lan", (*controllers.BridgeService).Enable, "tcp4", "127.0.0.1"},
-		{"lan only", (*controllers.BridgeService).EnableLANOnly, "tcp4", "127.0.0.1"},
-		{"tunnel only", (*controllers.BridgeService).EnableTunnelOnly, "tcp4", "0.0.0.0"},
+		{"lan", (*controllers.BridgeService).Enable, "tcp4", "127.0.0.1", true},
+		{"lan only", (*controllers.BridgeService).EnableLANOnly, "tcp4", "127.0.0.1", true},
+		{"tunnel only", (*controllers.BridgeService).EnableTunnelOnly, "tcp4", "0.0.0.0", true},
+		{"tunnel only beside loopback", (*controllers.BridgeService).EnableTunnelOnly, "tcp4", "127.0.0.1", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			lanPortTest(t, tc.wildcard)
 			last := freeLANPorts(t, 2)
 			// Never the real default: if Enable ignored lastPort it would bind
 			// this free port instead, and the assertions below would catch it.
@@ -243,14 +258,16 @@ func openServedConn(t *testing.T, port int) net.Conn {
 // another process and move the port, which would strand paired devices.
 func TestBridgeReEnableKeepsItsPortWithALingeringConnection(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		enable func(*controllers.BridgeService) (controllers.MobileStatusResponse, error)
+		name     string
+		enable   func(*controllers.BridgeService) (controllers.MobileStatusResponse, error)
+		wildcard bool // binds 0.0.0.0
 	}{
-		{"lan", (*controllers.BridgeService).Enable},
-		{"tunnel only", (*controllers.BridgeService).EnableTunnelOnly},
+		{"lan", (*controllers.BridgeService).Enable, true},
+		{"tunnel only", (*controllers.BridgeService).EnableTunnelOnly, false},
 	} {
 		for _, client := range []string{"client still connected", "client closed"} {
 			t.Run(tc.name+"/"+client, func(t *testing.T) {
+				lanPortTest(t, tc.wildcard)
 				port := freeLANPorts(t, 2)
 				path := filepath.Join(t.TempDir(), "mobile", "config.json")
 				m := NewMobileLAN(http.NotFoundHandler(), "", port, nil, nil)

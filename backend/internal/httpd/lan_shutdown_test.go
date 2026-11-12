@@ -26,7 +26,7 @@ func startShutdownTestLAN(t *testing.T, handler http.Handler) (*LANManager, stri
 	t.Helper()
 	m := NewMobileLAN(handler, "", 0, nil, nil)
 	m.SetPasswordHash(mobilebridge.HashPassword("secret12"))
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestLANManagerStopCancelsStreamAndAllowsRestart(t *testing.T) {
 	if m.Running() || m.BoundPort() != 0 {
 		t.Fatal("stopped listener still advertised")
 	}
-	port, err := m.Start(0)
+	port, err := startLANForTest(m, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestLANManagerStartWaitsForPreviousStop(t *testing.T) {
 	}
 	startDone := make(chan error, 1)
 	go func() {
-		_, err := m.Start(0)
+		_, err := startLANForTest(m, 0)
 		startDone <- err
 	}()
 	select {
@@ -349,6 +349,9 @@ func TestLANManagerAccountRotationClosesOnlyRetiredTokenWebSockets(t *testing.T)
 }
 
 func TestFailedPasswordRotationPreservesExistingWebSocket(t *testing.T) {
+	// Enable rotates a listener bound in LAN mode. A loopback-bound one would
+	// refuse it as a mode change before ever reaching the failed save.
+	requireWildcardBind(t)
 	m, base := startShutdownTestLAN(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -395,15 +398,24 @@ func TestFailedPasswordRotationPreservesExistingWebSocket(t *testing.T) {
 }
 
 func TestRotatedPasswordStaysOutOfLockoutAfterDaemonRestart(t *testing.T) {
+	// The retired hash survives a restart in either mode. Where a wildcard bind
+	// is not allowed, run the loopback-only mode: Regenerate rotates it and
+	// RestoreOnBoot re-arms it through the same persisted-state code.
+	loopbackOnly := !wildcardBindAllowed()
+	lanPortTest(t, false)
 	first, _ := startShutdownTestLAN(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	configPath := filepath.Join(t.TempDir(), "mobile.json")
-	if err := mobilebridge.Save(configPath, mobilebridge.State{Enabled: true, Password: "secret12", LastPort: first.BoundPort()}); err != nil {
+	if err := mobilebridge.Save(configPath, mobilebridge.State{Enabled: true, Password: "secret12", LastPort: first.BoundPort(), LoopbackOnly: loopbackOnly}); err != nil {
 		t.Fatal(err)
 	}
 	bridge := &controllers.BridgeService{LAN: first, ConfigPath: configPath, DefaultPort: first.BoundPort()}
-	if _, err := bridge.Enable(); err != nil {
+	rotate := bridge.Enable
+	if loopbackOnly {
+		rotate = bridge.Regenerate
+	}
+	if _, err := rotate(); err != nil {
 		t.Fatal(err)
 	}
 	state, err := mobilebridge.Load(configPath)
