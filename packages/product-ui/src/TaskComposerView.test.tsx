@@ -149,6 +149,17 @@ describe("TaskComposerView", () => {
 		expect(container.querySelector("form")?.firstElementChild).toBe(context);
 	});
 
+	it("draws the interface control with the controls the task runs with, after model and effort", () => {
+		render(<TaskComposerView {...viewProps({ interfaceControl: <div role="radiogroup" aria-label="Interface" /> })} />);
+
+		const runsWith = screen.getByRole("group", { name: "Runs with" });
+		const choice = screen.getByRole("radiogroup", { name: "Interface" });
+		expect(runsWith).toContainElement(choice);
+		expect(runsWith.lastElementChild).toContainElement(choice);
+		// The model and effort keep their own tracks.
+		expect(runsWith.querySelectorAll(".composer-toolbar-slot")).toHaveLength(3);
+	});
+
 	it("omits effort when the selected model does not advertise it", () => {
 		render(<TaskComposerView {...viewProps({ showEffort: false })} />);
 

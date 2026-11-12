@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { sessionUiKey } from "../../lib/hosts";
 import type { ApprovalMode, ChatConfigOption, ChatModel, TurnSettings } from "../../types/conversation";
 import { TurnSettingsBar } from "./TurnSettingsBar";
@@ -63,7 +64,8 @@ const ignorePending = () => undefined;
 
 // The new chat page's settings bar, held still while the task starts. The
 // session's own bar replaces it, in the same place, once its agent is ready.
-export function LaunchSettingsBar({ harness, projectId, hostId, models, settings, configOptions, showApprovalMode, unsetModelLabel, approvalModes }: LaunchSettings) {
+// `afterPicker` holds still with it, such as the interface the task starts in.
+export function LaunchSettingsBar({ harness, projectId, hostId, models, settings, configOptions, showApprovalMode, unsetModelLabel, approvalModes, afterPicker }: LaunchSettings & { afterPicker?: ReactNode }) {
 	const providerMode = Boolean(configOptions?.length);
 	return (
 		<div className="contents [&_button:disabled]:cursor-default [&_button:disabled]:opacity-100">
@@ -78,6 +80,7 @@ export function LaunchSettingsBar({ harness, projectId, hostId, models, settings
 				unsetModelLabel={unsetModelLabel}
 				approvalModes={approvalModes}
 				agentSwitch={{ projectId, hostId, disabled: true, onPendingChange: ignorePending }}
+				afterPicker={afterPicker}
 				disabled
 			/>
 		</div>

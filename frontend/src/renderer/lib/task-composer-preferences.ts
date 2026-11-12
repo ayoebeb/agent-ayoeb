@@ -11,9 +11,22 @@ export type TaskComposerAgentPreference = {
 	effortChosen?: true;
 };
 
+export type TaskComposerInterface = "chat" | "tui";
+
+/**
+ * The interface (Chat or Terminal) a task was last started in, when the user
+ * picked it over the Settings default. It applies only while Settings still
+ * default to `defaultMode`, so changing the default there is never overridden.
+ */
+export type TaskComposerInterfacePreference = {
+	mode: TaskComposerInterface;
+	defaultMode: TaskComposerInterface;
+};
+
 export type TaskComposerContextPreferences = {
 	lastAgent: string;
 	agents: Record<string, TaskComposerAgentPreference>;
+	sessionInterface?: TaskComposerInterfacePreference;
 };
 
 type TaskComposerPreferences = Record<string, TaskComposerContextPreferences>;
@@ -34,7 +47,7 @@ function readAll(): TaskComposerPreferences {
 		const preferences: TaskComposerPreferences = {};
 		for (const [context, value] of Object.entries(parsed)) {
 			if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-			const candidate = value as { lastAgent?: unknown; agents?: unknown };
+			const candidate = value as { lastAgent?: unknown; agents?: unknown; sessionInterface?: unknown };
 			if (
 				typeof candidate.lastAgent !== "string" ||
 				!candidate.agents ||
@@ -56,11 +69,30 @@ function readAll(): TaskComposerPreferences {
 					...(typeof fields.effort === "string" && fields.effortChosen === true ? { effortChosen: true as const } : {}),
 				};
 			}
-			preferences[context] = { lastAgent: candidate.lastAgent, agents };
+			const sessionInterface = interfacePreference(candidate.sessionInterface);
+			preferences[context] = { lastAgent: candidate.lastAgent, agents, ...(sessionInterface ? { sessionInterface } : {}) };
 		}
 		return preferences;
 	} catch {
 		return {};
+	}
+}
+
+function isInterface(value: unknown): value is TaskComposerInterface {
+	return value === "chat" || value === "tui";
+}
+
+function interfacePreference(value: unknown): TaskComposerInterfacePreference | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const { mode, defaultMode } = value as { mode?: unknown; defaultMode?: unknown };
+	return isInterface(mode) && isInterface(defaultMode) && mode !== defaultMode ? { mode, defaultMode } : undefined;
+}
+
+function writeAll(preferences: TaskComposerPreferences): void {
+	try {
+		storage()?.setItem(TASK_COMPOSER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+	} catch {
+		// Remembering composer choices is optional; spawning must still succeed.
 	}
 }
 
@@ -76,12 +108,22 @@ export function rememberTaskComposerPreference(
 	const preferences = readAll();
 	const current = preferences[context];
 	preferences[context] = {
+		...current,
 		lastAgent: agent,
 		agents: { ...current?.agents, [agent]: config },
 	};
-	try {
-		storage()?.setItem(TASK_COMPOSER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
-	} catch {
-		// Remembering composer choices is optional; spawning must still succeed.
-	}
+	writeAll(preferences);
+}
+
+/** Remembers the interface picked over the Settings default; undefined forgets it. */
+export function rememberTaskComposerInterface(
+	context: string,
+	preference: TaskComposerInterfacePreference | undefined,
+): void {
+	const preferences = readAll();
+	const { sessionInterface: _previous, ...current } = preferences[context] ?? { lastAgent: "", agents: {} };
+	preferences[context] = preference && preference.mode !== preference.defaultMode
+		? { ...current, sessionInterface: preference }
+		: current;
+	writeAll(preferences);
 }
