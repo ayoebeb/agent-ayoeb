@@ -112,6 +112,40 @@ export class BrowserProfileCopyLedger {
 		});
 	}
 
+	/**
+	 * Whether sharing can use the ledger, without changing anything: "lost"
+	 * when it is gone after this machine started keeping one, "unreadable" when
+	 * it cannot be read. Either way nothing is shared, and the owner is told.
+	 */
+	health(): Promise<"ok" | "lost" | "unreadable"> {
+		return this.serialized(async () => {
+			let missing: boolean;
+			try {
+				({ missing } = await this.read());
+			} catch {
+				return "unreadable";
+			}
+			return missing && await this.marker?.expectsCopyLedger() ? "lost" : "ok";
+		});
+	}
+
+	/**
+	 * Moves an unreadable ledger aside, kept for inspection, so the next
+	 * answer rebuilds it from the profile registry as it does a lost one. Only
+	 * when the owner turns sharing on again, through the native confirmation.
+	 */
+	setAsideDamaged(): Promise<void> {
+		return this.serialized(async () => {
+			try {
+				await this.read();
+				return;
+			} catch {
+				// Damaged: set aside below.
+			}
+			await rename(this.file, path.join(path.dirname(this.file), `${BROWSER_PROFILE_COPIES_FILE_NAME}.damaged-${Date.now()}`));
+		});
+	}
+
 	/** Records profileId as a copy of source, dropping entries for profiles no longer in keep. */
 	record(profileId: string, source: BrowserProfileCopySource, keep: Iterable<string>): Promise<void> {
 		return this.change((ids, sources) => {

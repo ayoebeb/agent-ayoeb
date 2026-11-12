@@ -1499,6 +1499,7 @@
 	"settings.browserProfiles.saveDefaultFailed": "Could not set default browser profile.",
 	"settings.browserProfiles.sharing.label": "Share my browser profiles with my linked machines",
 	"settings.browserProfiles.sharing.description": "Machines your Orchestrator account lists can copy these profiles, including their sign-ins. Each copy is encrypted for the machine that asked for it. Profiles copied from another machine are never shared on.",
+	"settings.browserProfiles.sharing.copyLedgerLost": "Sharing is paused: this machine's list of profiles copied from other machines is missing or damaged, so copies can't be told apart from your own profiles. Turn sharing off and on again to rebuild the list.",
 	"settings.browserProfiles.sharing.saveFailed": "Could not save the sharing setting.",
 	"settings.browserProfiles.sharing.confirmTitle": "Share your browser profiles?",
 	"settings.browserProfiles.sharing.confirmMessage": "Your other machines on this Orchestrator account will be able to copy every browser profile on this machine, including its sign-ins and history.",

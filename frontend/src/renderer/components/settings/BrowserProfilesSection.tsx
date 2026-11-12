@@ -49,6 +49,8 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 	const [sharing, setSharing] = useState<boolean | null>(null);
 	const [sharingError, setSharingError] = useState("");
 	const [sharingBusy, setSharingBusy] = useState(false);
+	// On, but answering nothing until the owner turns it off and on again.
+	const [copyLedgerLost, setCopyLedgerLost] = useState(false);
 
 	const refresh = async () => {
 		if (!bridge) return;
@@ -76,7 +78,11 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 		if (!bridge) return;
 		let cancelled = false;
 		void bridge.getSharing()
-			.then((state) => { if (!cancelled) setSharing(state.enabled); })
+			.then((state) => {
+				if (cancelled) return;
+				setSharing(state.enabled);
+				setCopyLedgerLost(state.copyLedgerLost === true);
+			})
 			.catch(() => { if (!cancelled) setSharing(false); });
 		return () => { cancelled = true; };
 	}, [bridge]);
@@ -89,6 +95,7 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 			// Turning sharing on asks in a native dialog main shows and words.
 			const state = await bridge.setSharing({ enabled });
 			setSharing(state.enabled);
+			setCopyLedgerLost(state.copyLedgerLost === true);
 			if (state.error) setSharingError(t("settings.browserProfiles.sharing.saveFailed"));
 		} catch {
 			setSharingError(t("settings.browserProfiles.sharing.saveFailed"));
@@ -221,7 +228,14 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 					label={t("settings.browserProfiles.sharing.label")}
 					description={sharingError
 						? <span className="text-error" role="alert">{sharingError}</span>
-						: t("settings.browserProfiles.sharing.description")}
+						: (
+							<>
+								{t("settings.browserProfiles.sharing.description")}
+								{sharing === true && copyLedgerLost
+									? <span className="mt-0.5 block text-pretty text-warning" role="status">{t("settings.browserProfiles.sharing.copyLedgerLost")}</span>
+									: null}
+							</>
+						)}
 				>
 					<Switch
 						aria-label={t("settings.browserProfiles.sharing.label")}

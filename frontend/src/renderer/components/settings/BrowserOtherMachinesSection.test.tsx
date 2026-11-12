@@ -118,6 +118,13 @@ describe("Browser settings: other machines", () => {
 		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
+	it("tells the owner when sharing is paused because the copy list is lost", async () => {
+		install(makeBridge({ getSharing: vi.fn(async () => ({ enabled: true, copyLedgerLost: true })) }));
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
+		expect(await screen.findByText(/^Sharing is paused: this machine's list of profiles copied from other machines is missing or damaged/)).toBeInTheDocument();
+		expect(screen.getByText(/Turn sharing off and on again to rebuild the list\.$/)).toBeInTheDocument();
+	});
+
 	it("lists each machine with its profiles or the reason it cannot", async () => {
 		install(makeBridge());
 		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
@@ -175,6 +182,13 @@ describe("Browser settings: other machines", () => {
 		expect(within(confirm).getByText("Delete Chrome (from Work laptop)?")).toBeInTheDocument();
 		await userEvent.click(await within(confirm).findByRole("button", { name: "Delete profile" }));
 		await waitFor(() => expect(bridge.delete).toHaveBeenCalledWith(COPY_ID, []));
+	});
+
+	it("shows its own localized message when main cannot list the machines", async () => {
+		install(makeBridge({ listOtherMachines: vi.fn(async () => ({ signedIn: true, machines: [], error: "Raw English text from main." })) }));
+		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
+		expect(await screen.findByRole("alert")).toHaveTextContent("Could not read your other machines.");
+		expect(screen.queryByText("Raw English text from main.")).not.toBeInTheDocument();
 	});
 
 	it("says when no account is signed in", async () => {

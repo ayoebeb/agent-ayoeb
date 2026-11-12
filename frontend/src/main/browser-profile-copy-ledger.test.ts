@@ -69,6 +69,24 @@ describe("BrowserProfileCopyLedger", () => {
 		expect((await ledger.load()).ids.size).toBe(0);
 	});
 
+	it("reports whether sharing can use it, and sets aside only a damaged file", async () => {
+		const dir = await stateDir();
+		const file = path.join(dir, BROWSER_PROFILE_COPIES_FILE_NAME);
+		const kept = { expects: false };
+		const ledger = new BrowserProfileCopyLedger(dir, { expectsCopyLedger: async () => kept.expects, markCopyLedger: async () => { kept.expects = true; } });
+		expect(await ledger.health()).toBe("ok"); // never kept one
+		await ledger.record(A, SOURCE, [A]);
+		await ledger.setAsideDamaged();
+		expect([...(await ledger.load()).ids]).toEqual([A]); // a readable ledger stays
+		expect(await ledger.health()).toBe("ok");
+		await rm(file);
+		expect(await ledger.health()).toBe("lost");
+		await writeFile(file, "{ damaged");
+		expect(await ledger.health()).toBe("unreadable");
+		await ledger.setAsideDamaged();
+		await expect(readFile(file, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
 	describe("ensure", () => {
 		function marker(expects = false) {
 			const state = { expects, marked: 0 };

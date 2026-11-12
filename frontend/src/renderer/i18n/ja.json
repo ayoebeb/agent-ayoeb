@@ -2497,6 +2497,7 @@
 	"settings.browserProfiles.saveDefaultFailed": "デフォルトのブラウザプロファイルを設定できませんでした。",
 	"settings.browserProfiles.sharing.label": "リンクしたマシンとブラウザプロファイルを共有",
 	"settings.browserProfiles.sharing.description": "Orchestrator アカウントに登録されたマシンが、ログイン情報を含むこれらのプロファイルをコピーできます。コピーはそれぞれ、要求したマシンだけが読めるよう暗号化されます。別のマシンからコピーしたプロファイルが再共有されることはありません。",
+	"settings.browserProfiles.sharing.copyLedgerLost": "共有は一時停止中です。このマシンにある、別のマシンからコピーしたプロファイルの一覧が見つからないか破損しているため、コピーと自分のプロファイルを区別できません。共有をオフにしてから再度オンにすると、一覧が作り直されます。",
 	"settings.browserProfiles.sharing.saveFailed": "共有設定を保存できませんでした。",
 	"settings.browserProfiles.sharing.confirmTitle": "ブラウザプロファイルを共有しますか？",
 	"settings.browserProfiles.sharing.confirmMessage": "この Orchestrator アカウントの他のマシンが、このマシンのすべてのブラウザプロファイルを、ログイン情報と履歴を含めてコピーできるようになります。",

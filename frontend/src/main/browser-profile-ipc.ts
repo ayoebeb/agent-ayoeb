@@ -19,6 +19,7 @@ import type {
 	OtherMachinesResult,
 } from "../shared/browser-profile-share";
 import type { BrowserProfileCopyService } from "./browser-profile-copy";
+import type { BrowserProfileCopyLedger } from "./browser-profile-copy-ledger";
 import type { BrowserProfileImportService } from "./browser-profile-import";
 import type { BrowserProfileSharingSetting } from "./browser-profile-share";
 import { trayCatalogs } from "./tray-catalog.generated";
@@ -58,6 +59,8 @@ export type BrowserProfileIpcOptions = {
 	importer: BrowserProfileImportService;
 	/** "Share my browser profiles with my linked machines" on this machine. */
 	sharing?: Pick<BrowserProfileSharingSetting, "isEnabled" | "setEnabled">;
+	/** Every profile copied from another machine; sharing answers nothing while it is lost. */
+	copyLedger?: Pick<BrowserProfileCopyLedger, "health" | "setAsideDamaged">;
 	/** Copies profiles that this account's other machines share. */
 	copier?: Pick<BrowserProfileCopyService, "listMachines" | "copy" | "update">;
 	buildMenu: (items: BrowserProfileMenuItem[]) => BrowserProfileMenu;
@@ -269,16 +272,23 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 			options.shellWebContents.send("browserProfiles:import:progress", progress);
 		});
 	});
+	/** Sharing as the owner should see it: on but answering nothing while the copy ledger is lost. */
+	const sharingState = async (enabled: boolean): Promise<BrowserProfileSharingState> => {
+		if (!enabled || !options.copyLedger) return { enabled };
+		const health = await options.copyLedger.health().catch(() => "unreadable" as const);
+		return health === "ok" ? { enabled } : { enabled, copyLedgerLost: true };
+	};
 	handle("browserProfiles:sharing:get", async (event): Promise<BrowserProfileSharingState> => {
 		if (!trustedShellSender(event, options.shellWebContents) || !options.sharing) return { enabled: false };
-		return { enabled: await options.sharing.isEnabled() };
+		return sharingState(await options.sharing.isEnabled());
 	});
 	handle("browserProfiles:sharing:set", async (event, input: unknown): Promise<BrowserProfileSharingState> => {
 		if (!trustedShellSender(event, options.shellWebContents) || !options.sharing) {
 			return { enabled: false, error: "Browser profile sharing is unavailable." };
 		}
 		if (!isRecord(input) || typeof input.enabled !== "boolean") throw invalid("Sharing setting is invalid.");
-		if (input.enabled && !(await options.sharing.isEnabled())) {
+		const turningOn = input.enabled && !(await options.sharing.isEnabled());
+		if (turningOn) {
 			// Anything else the renderer sent is ignored: main words the dialog.
 			const locale = await (options.uiLocale?.() ?? Promise.resolve<AppLocale>("en")).catch((): AppLocale => "en");
 			const labels = browserProfileSharingConfirmLabels(locale);
@@ -292,7 +302,10 @@ export function registerBrowserProfileIpc(options: BrowserProfileIpcOptions): Br
 			if (!confirmed) return { enabled: await options.sharing.isEnabled(), cancelled: true };
 		}
 		try {
-			return { enabled: await options.sharing.setEnabled(input.enabled) };
+			// The owner's confirmed turn-on is the one way past a lost or damaged
+			// copy ledger: the next answer rebuilds it from the profile registry.
+			if (turningOn) await options.copyLedger?.setAsideDamaged();
+			return await sharingState(await options.sharing.setEnabled(input.enabled));
 		} catch {
 			return { enabled: await options.sharing.isEnabled(), error: "Could not save the sharing setting." };
 		}

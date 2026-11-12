@@ -166,7 +166,8 @@ export function BrowserOtherMachinesSection({
 				{loading && !result ? (
 					<div className="settings-row-bar text-sm text-settings-muted" role="status">{t("settings.browserProfiles.machines.loading")}</div>
 				) : result?.error ? (
-					<div className="settings-row-bar text-sm text-error" role="alert">{result.error}</div>
+					// Main's text is English; it only marks the failure.
+					<div className="settings-row-bar text-sm text-error" role="alert">{t("settings.browserProfiles.machines.loadFailed")}</div>
 				) : !result?.signedIn ? (
 					<div className="settings-row-bar text-sm text-settings-muted">{t("settings.browserProfiles.machines.signedOut")}</div>
 				) : machines.length === 0 ? (

@@ -81,6 +81,11 @@ export type BrowserProfileSharingState = {
 	error?: string;
 	/** The person at this machine declined the confirmation; nothing changed. */
 	cancelled?: boolean;
+	/**
+	 * Sharing is on but answers nothing: the list of profiles copied from other
+	 * machines is missing or damaged. Turning sharing off and on rebuilds it.
+	 */
+	copyLedgerLost?: boolean;
 };
 
 /** The native confirmation main shows before sharing is turned on, worded from main's own catalog. */

@@ -1260,6 +1260,7 @@ async function createWindowInternal(): Promise<void> {
 		store: browserProfileStore,
 		importer: profileImporter,
 		sharing: browserProfileSharing,
+		copyLedger: browserProfileCopies,
 		copier: profileCopier,
 		host: browserViewHost,
 		buildMenu: (items: BrowserProfileMenuItem[]) => {

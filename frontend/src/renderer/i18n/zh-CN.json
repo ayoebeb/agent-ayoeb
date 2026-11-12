@@ -2567,6 +2567,7 @@
 	"settings.browserProfiles.saveDefaultFailed": "无法设置默认浏览器配置文件。",
 	"settings.browserProfiles.sharing.label": "与我关联的设备共享我的浏览器配置文件",
 	"settings.browserProfiles.sharing.description": "你的 Orchestrator 账户中列出的设备可以复制这些配置文件，包括其中的登录信息。每份副本都会针对请求它的设备加密。从其他设备复制的配置文件不会再被共享。",
+	"settings.browserProfiles.sharing.copyLedgerLost": "共享已暂停：这台设备上从其他设备复制的配置文件列表缺失或已损坏，因此无法将副本与你自己的配置文件区分开。关闭共享后再重新开启即可重建该列表。",
 	"settings.browserProfiles.sharing.saveFailed": "无法保存共享设置。",
 	"settings.browserProfiles.sharing.confirmTitle": "共享你的浏览器配置文件？",
 	"settings.browserProfiles.sharing.confirmMessage": "此 Orchestrator 账户中的其他设备将可以复制这台设备上的所有浏览器配置文件，包括登录信息和历史记录。",

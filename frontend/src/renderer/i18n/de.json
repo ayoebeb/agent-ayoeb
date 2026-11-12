@@ -2497,6 +2497,7 @@
 	"settings.browserProfiles.saveDefaultFailed": "Standard-Browserprofil konnte nicht festgelegt werden.",
 	"settings.browserProfiles.sharing.label": "Meine Browserprofile mit meinen verknüpften Rechnern teilen",
 	"settings.browserProfiles.sharing.description": "Rechner, die dein Orchestrator-Konto auflistet, können diese Profile samt Anmeldungen kopieren. Jede Kopie wird für den Rechner verschlüsselt, der sie angefordert hat. Von einem anderen Rechner kopierte Profile werden nie weitergegeben.",
+	"settings.browserProfiles.sharing.copyLedgerLost": "Das Teilen ist pausiert: Die Liste der von anderen Rechnern kopierten Profile auf diesem Rechner fehlt oder ist beschädigt, daher lassen sich Kopien nicht von deinen eigenen Profilen unterscheiden. Schalte das Teilen aus und wieder ein, um die Liste neu aufzubauen.",
 	"settings.browserProfiles.sharing.saveFailed": "Die Freigabeeinstellung konnte nicht gespeichert werden.",
 	"settings.browserProfiles.sharing.confirmTitle": "Browserprofile freigeben?",
 	"settings.browserProfiles.sharing.confirmMessage": "Deine anderen Rechner in diesem Orchestrator-Konto können dann jedes Browserprofil auf diesem Rechner kopieren, samt Anmeldungen und Verlauf.",

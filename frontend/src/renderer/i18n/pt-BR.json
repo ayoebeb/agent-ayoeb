@@ -2537,6 +2537,7 @@
 	"settings.browserProfiles.saveDefaultFailed": "Não foi possível definir o perfil de navegador padrão.",
 	"settings.browserProfiles.sharing.label": "Compartilhar meus perfis do navegador com minhas máquinas vinculadas",
 	"settings.browserProfiles.sharing.description": "As máquinas listadas na sua conta do Orchestrator podem copiar esses perfis, incluindo os logins. Cada cópia é criptografada para a máquina que a pediu. Perfis copiados de outra máquina nunca são compartilhados de novo.",
+	"settings.browserProfiles.sharing.copyLedgerLost": "O compartilhamento está pausado: a lista de perfis copiados de outras máquinas está ausente ou danificada nesta máquina, então as cópias não podem ser diferenciadas dos seus próprios perfis. Desative e ative o compartilhamento de novo para recriar a lista.",
 	"settings.browserProfiles.sharing.saveFailed": "Não foi possível salvar a configuração de compartilhamento.",
 	"settings.browserProfiles.sharing.confirmTitle": "Compartilhar seus perfis do navegador?",
 	"settings.browserProfiles.sharing.confirmMessage": "Suas outras máquinas nesta conta do Orchestrator poderão copiar todos os perfis do navegador desta máquina, incluindo logins e histórico.",
