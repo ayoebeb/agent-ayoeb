@@ -174,7 +174,7 @@ export function NewTerminalMenu({ hostId, onOpen, failure, failureKey }: NewTerm
 					</TooltipTrigger>
 					<TooltipContent side="bottom">{t("terminal.new")}</TooltipContent>
 				</Tooltip>
-				<DropdownMenuContent align="end" className="min-w-56" data-testid="new-terminal-menu">
+				<DropdownMenuContent align="start" className="min-w-56" data-testid="new-terminal-menu">
 					{model.shells.length === 0 ? (
 						<DropdownMenuItem onSelect={() => onOpen({})}>
 							<SquareTerminal aria-hidden="true" />
@@ -226,7 +226,7 @@ export function NewTerminalMenu({ hostId, onOpen, failure, failureKey }: NewTerm
 					)}
 				</DropdownMenuContent>
 			</DropdownMenu>
-			<PopoverContent align="end" className="max-w-72 px-3 py-2 text-sm" role="status" side="bottom">
+			<PopoverContent align="start" className="max-w-72 px-3 py-2 text-sm" role="status" side="bottom">
 				{failure}
 			</PopoverContent>
 		</Popover>
