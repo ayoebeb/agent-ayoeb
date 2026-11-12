@@ -2560,6 +2560,8 @@ function ChatHeader({
 	const sessionIsOrchestrator = session
 		? isOrchestratorSession(session)
 		: sessionRole === "orchestrator";
+	// A worker's chat tab is its title alone. The orchestrator's tab names a
+	// role, not a task, so it keeps its agent's logo to say who runs it.
 	const label = sessionIsOrchestrator
 		? t("shell.orchestrator")
 		: (sessionTitle || session?.title || snapshot.title || snapshot.sessionId);
@@ -2620,7 +2622,7 @@ function ChatHeader({
 											label={label}
 											onSelect={timelineActive ? undefined : onSelectChat}
 											onRenamed={onSessionRenamed}
-											providerIcon={false}
+											providerIcon={sessionIsOrchestrator}
 											session={session}
 											tabAction={sessionTabAction}
 											tabActionPinned={sessionTabActionPinned}
@@ -2631,7 +2633,7 @@ function ChatHeader({
 											label={label}
 											onSelect={timelineActive ? undefined : onSelectChat}
 											provider={snapshot.harness}
-											providerIcon={false}
+											providerIcon={sessionIsOrchestrator}
 											title={label}
 										/>
 									)}

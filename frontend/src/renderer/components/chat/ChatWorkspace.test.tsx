@@ -908,7 +908,9 @@ describe("ChatWorkspace timeline", () => {
 		const actionRegion = screen.getByTestId("session-action-region");
 		expect(actionRegion).toHaveClass("session-topbar-actions");
 		expect(actionRegion).not.toHaveClass("px-3");
-		expect(screen.getByRole("tab", { name: "Orchestrator · Codex · Working" })).toBeInTheDocument();
+		const orchestratorTab = screen.getByRole("tab", { name: "Orchestrator · Codex · Working" });
+		// The orchestrator's tab names a role, not a task, so it keeps its agent's logo.
+		expect(orchestratorTab.querySelector('img[aria-hidden="true"], [style*="mask"][aria-hidden="true"]')).not.toBeNull();
 
 		view.rerender(
 			<ChatWorkspace
@@ -6035,6 +6037,26 @@ describe("ChatWorkspace shell tabs", () => {
 			title: shell.title,
 		};
 	};
+
+	// The orchestrator's tab keeps its agent's logo beside an open terminal tab,
+	// as it does in terminal mode; a worker's chat tab stays title-only.
+	it("keeps the orchestrator tab's agent logo beside an open terminal tab", () => {
+		render(
+			<ChatWorkspace
+				snapshot={idleSnapshot()}
+				session={{ ...chatSession, id: "ao-demo-orchestrator", kind: "orchestrator" }}
+				sessionRole="orchestrator"
+				shellTerminals={shells}
+				shellTarget={shellTarget("shell-1")}
+				onSelectChat={vi.fn()}
+			/>,
+		);
+		const orchestratorTab = screen.getByRole("tab", { name: /^Orchestrator · Codex/ });
+		expect(orchestratorTab.querySelector('img[aria-hidden="true"], [style*="mask"][aria-hidden="true"]')).not.toBeNull();
+		const shellTab = screen.getByRole("tab", { name: "chat worktree shell" });
+		expect(shellTab).toHaveAttribute("aria-selected", "true");
+		expect(shellTab.parentElement?.querySelector(".icon-square-terminal")).not.toBeNull();
+	});
 
 	// Shells are tabs inside the chat surface (#4033): opening one must not cost
 	// the conversation — the conversation panel hides instead of unmounting,
