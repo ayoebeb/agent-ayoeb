@@ -509,7 +509,7 @@ func incompleteUTF8Suffix(data []byte) int {
 		if b < 0x80 {
 			return 0
 		}
-		need := 0
+		var need int
 		switch {
 		case b&0xE0 == 0xC0:
 			need = 2
