@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +101,14 @@ type Service struct {
 
 	// commandRuns tracks Chat Run commands in flight so Stop can find them.
 	commandRuns commandRunRegistry
+	// desktopElevationSecret is the local desktop app's per-run credential for
+	// administrator terminals; empty keeps them unavailable (see elevation.go).
+	desktopElevationSecret string
+	// elevationSupported is whether this platform has administrator terminals.
+	elevationSupported bool
+	// detectShells lists the shells an administrator terminal may launch;
+	// injectable so tests do not depend on what this machine has installed.
+	detectShells func() ShellCatalog
 }
 
 // AgentTracker follows the agent, if any, running in a user shell.
@@ -118,7 +127,7 @@ func (s *Service) SetAgentTracker(ctx context.Context, tracker AgentTracker) {
 		return
 	}
 	for _, rec := range recs {
-		if !rec.Transient {
+		if !rec.Transient && !IsElevatedHandleID(rec.HandleID) {
 			tracker.TrackShellTerminal(rec.HandleID)
 		}
 	}
@@ -232,6 +241,8 @@ func NewService(shellRuntime ShellRuntime, store Store, projects ProjectRootLoca
 		executable:          agentlaunch.Executable,
 		initialInputTimeout: initialInputTimeout,
 		gates:               map[domain.SessionID]*sessionGate{},
+		elevationSupported:  goruntime.GOOS == "windows",
+		detectShells:        DetectShells,
 	}
 }
 
@@ -322,6 +333,17 @@ func (s *Service) OpenShellTerminal(ctx context.Context, in OpenShellTerminalInp
 	}
 	// Clients that already show a tab pass its numbered default here.
 	titleExplicit := title != "" && !defaultShellTerminalTitle.MatchString(title)
+	// Refuse before any lookup or gate: only the local desktop app may ask,
+	// and only for a shell this daemon detected.
+	if in.Elevated {
+		if access := s.ElevationAccess(ctx); !access.Available {
+			return ShellTerminal{}, elevationDenied(access)
+		}
+		if !s.elevatedShellAllowed(in.Shell) {
+			return ShellTerminal{}, apierr.Invalid("ELEVATED_TERMINAL_SHELL_NOT_ALLOWED",
+				"Administrator terminals open only the shells AO detected on this computer", nil)
+		}
+	}
 	if in.SessionID != "" {
 		if s.sessions == nil {
 			return ShellTerminal{}, apierr.Internal("SHELL_TERMINAL_NO_SESSION_LOOKUP", "Session lookup is unavailable")
@@ -347,7 +369,8 @@ func (s *Service) OpenShellTerminal(ctx context.Context, in OpenShellTerminalInp
 		return ShellTerminal{}, err
 	}
 	var projectEnv map[string]string
-	if projectID != "" {
+	// An administrator shell gets none of the project's environment either.
+	if projectID != "" && !in.Elevated {
 		projectEnv, err = s.projects.ProjectEnv(ctx, projectID)
 		if err != nil {
 			return ShellTerminal{}, fmt.Errorf("open shell terminal: resolve project environment: %w", err)
@@ -368,6 +391,20 @@ func (s *Service) OpenShellTerminal(ctx context.Context, in OpenShellTerminalInp
 	if len(argv) == 0 {
 		return ShellTerminal{}, apierr.Internal("SHELL_TERMINAL_NO_SHELL",
 			"Could not determine a shell to launch. Set SHELL (macOS/Linux) or ComSpec (Windows).")
+	}
+	if in.Elevated {
+		// No env at all: the elevated host builds its own clean environment, so
+		// no session id, preview capability or pinned AO PATH reaches an
+		// administrator shell.
+		handleID, err := newElevatedShellTerminalHandleID()
+		if err != nil {
+			return ShellTerminal{}, fmt.Errorf("open administrator terminal: handle id: %w", err)
+		}
+		return s.openTerminal(ctx, openTerminalConfig{
+			handleID: handleID, argv: argv, projectID: projectID, sessionID: in.SessionID,
+			workingDir: workingDir, title: title, titleExplicit: titleExplicit, elevated: true,
+			startOnAttach: in.StartOnAttach, cols: in.Cols, rows: in.Rows,
+		})
 	}
 	env := s.pinnedEnv(projectEnv)
 	if env == nil {
@@ -704,6 +741,7 @@ type openTerminalConfig struct {
 	previewVerifier          string
 	startOnAttach            bool
 	cols, rows               int
+	elevated                 bool
 }
 
 // openTerminal creates and persists a terminal, rolling the runtime back on
@@ -738,10 +776,19 @@ func (s *Service) openTerminal(ctx context.Context, cfg openTerminalConfig) (She
 		InitialRows:             clampGridDimension(cfg.rows),
 		// Only agent terminals are probed for their rendered screen.
 		LazyStyledOutput: true,
+		Elevated:         cfg.elevated,
 	})
 	if err != nil {
 		if cfg.cleanupWorkingDirOnError {
 			s.cleanupAuthWorkspace(cfg.workingDir, handleID)
+		}
+		switch {
+		case errors.Is(err, ports.ErrElevationCancelled):
+			s.log.Info("administrator terminal declined at the UAC prompt", "handleId", handleID)
+			return ShellTerminal{}, apierr.Forbidden("ELEVATION_DECLINED",
+				"Administrator access was declined, so no terminal was opened")
+		case errors.Is(err, ports.ErrElevationUnsupported):
+			return ShellTerminal{}, elevationDenied(ElevationAccess{Reason: ElevationUnsupported})
 		}
 		return ShellTerminal{}, fmt.Errorf("open shell terminal %s: runtime: %w", handleID, agentlaunch.RedactError(err, cfg.projectEnv))
 	}
@@ -774,8 +821,9 @@ func (s *Service) openTerminal(ctx context.Context, cfg openTerminalConfig) (She
 		return ShellTerminal{}, fmt.Errorf("open shell terminal %s: persist: %w", handle.ID, err)
 	}
 	s.log.Info("shell terminal opened", "handleId", handle.ID, "workingDir", cfg.workingDir)
-	// Login terminals run an agent CLI on purpose; only user shells are tracked.
-	if s.agents != nil && !cfg.transient {
+	// Login terminals run an agent CLI on purpose; only user shells are
+	// tracked, and never an administrator shell.
+	if s.agents != nil && !cfg.transient && !cfg.elevated {
 		s.agents.TrackShellTerminal(handle.ID)
 	}
 	return shellTerminalFromRecord(rec), nil
@@ -838,6 +886,9 @@ func (s *Service) RenameShellTerminal(ctx context.Context, handleID, title strin
 	if handleID == "" {
 		return ShellTerminal{}, apierr.Invalid("SHELL_TERMINAL_ID_REQUIRED", "A shell terminal id is required", nil)
 	}
+	if err := s.requireElevationAccess(ctx, handleID); err != nil {
+		return ShellTerminal{}, err
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return ShellTerminal{}, apierr.Invalid("SHELL_TERMINAL_TITLE_REQUIRED", "A shell terminal title is required", nil)
@@ -874,6 +925,9 @@ func (s *Service) RenameShellTerminal(ctx context.Context, handleID, title strin
 func (s *Service) CloseShellTerminal(ctx context.Context, handleID string) error {
 	if handleID == "" {
 		return apierr.Invalid("SHELL_TERMINAL_ID_REQUIRED", "A shell terminal id is required", nil)
+	}
+	if err := s.requireElevationAccess(ctx, handleID); err != nil {
+		return err
 	}
 	rec, found, err := s.store.SelectShellTerminalByHandleID(ctx, handleID)
 	if err != nil {
@@ -914,8 +968,14 @@ func (s *Service) ListShellTerminalsForCurrentAppRun(ctx context.Context) ([]She
 	if err != nil {
 		return nil, fmt.Errorf("list shell terminals: %w", err)
 	}
+	// Administrator terminals are listed only to the desktop app that may use
+	// them; a remote client or an agent does not learn they exist.
+	showElevated := s.ElevationAccess(ctx).Available
 	out := make([]ShellTerminal, 0, len(recs))
 	for _, rec := range recs {
+		if IsElevatedHandleID(rec.HandleID) && !showElevated {
+			continue
+		}
 		alive, err := s.runtime.IsChildAlive(ctx, ports.RuntimeHandle{ID: rec.HandleID})
 		if err != nil {
 			s.log.Warn("shell terminal liveness probe failed; keeping row",
@@ -1184,6 +1244,16 @@ func newShellTerminalHandleID() (string, error) {
 	return "shellterm-" + hex.EncodeToString(buf), nil
 }
 
+// newElevatedShellTerminalHandleID mints an administrator terminal's handle;
+// its prefix is what every gate checks (see IsElevatedHandleID).
+func newElevatedShellTerminalHandleID() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return elevatedHandlePrefix + hex.EncodeToString(buf), nil
+}
+
 func shellTerminalFromRecord(rec ShellTerminalRecord) ShellTerminal {
 	terminalTitle := ""
 	if !rec.TitleExplicit {
@@ -1197,6 +1267,7 @@ func shellTerminalFromRecord(rec ShellTerminalRecord) ShellTerminal {
 		WorkingDir:    rec.WorkingDir,
 		Title:         rec.Title,
 		CreatedAt:     rec.CreatedAt,
+		Elevated:      IsElevatedHandleID(rec.HandleID),
 	}
 }
 

@@ -29,12 +29,18 @@ const (
 	isAliveTimeout   = 2 * time.Second
 )
 
-// dialHost opens a TCP connection to addr with a deadline. Callers close it.
+// dialHost opens a connection to addr with a deadline. Callers close it.
 func dialHost(addr string, timeout time.Duration) (net.Conn, error) {
-	return net.DialTimeout("tcp", addr, timeout)
+	return dialHostContext(context.Background(), addr, timeout)
 }
 
+// dialHostContext dials a loopback host over TCP, or an elevated host over
+// its authenticated pipe (see elevated.go). Either way the caller gets a
+// connection that speaks the same frame protocol.
 func dialHostContext(ctx context.Context, addr string, timeout time.Duration) (net.Conn, error) {
+	if elevated, ok := parseElevatedAddr(addr); ok {
+		return dialElevatedHost(ctx, elevated, timeout)
+	}
 	dialer := net.Dialer{Timeout: timeout}
 	return dialer.DialContext(ctx, "tcp", addr)
 }

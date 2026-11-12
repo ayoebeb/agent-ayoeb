@@ -124,7 +124,9 @@ func (m *Manager) reconcile(ctx context.Context) {
 		}
 	}
 	for _, rec := range shells {
-		if !rec.Transient {
+		// An administrator shell's title can name the command it runs; it is
+		// not recorded where anything but the desktop app could read it.
+		if !rec.Transient && !shellterm.IsElevatedHandleID(rec.HandleID) {
 			want[terminalKey{shell: rec.HandleID}] = rec.HandleID
 		}
 	}

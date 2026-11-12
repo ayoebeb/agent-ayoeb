@@ -342,6 +342,9 @@ func New(opts Options) *Runtime {
 // Create starts a new tmux session in the workspace, running the agent's
 // launch command with a keep-alive shell, and returns a handle to it.
 func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
+	if cfg.Elevated {
+		return ports.RuntimeHandle{}, tmuxCreateFailure(ports.ErrElevationUnsupported)
+	}
 	id, err := tmuxSessionName(cfg.SessionID)
 	if err != nil {
 		return ports.RuntimeHandle{}, tmuxCreateFailure(err)

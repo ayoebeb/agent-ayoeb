@@ -12,6 +12,7 @@ import (
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	shelltermsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/shellterm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
+	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
 )
 
 // startShellTerminals restores durable user shells and cleans up expired command
@@ -41,6 +42,19 @@ func startShellTerminals(
 		log.Warn("reaping shell terminals from previous app runs failed", "err", err)
 	}
 	return svc
+}
+
+// configureShellTerminalElevation makes administrator terminals available
+// only to the local desktop app that spawned this daemon: elevationSecret is
+// the per-app-run secret that app handed over the private stdin pipe (see
+// desktop_handoff.go). It is deliberately not derived from anything on disk,
+// such as browser-runtime.key, which every process of this user can read. A
+// daemon the app adopted rather than spawned has no secret, so its
+// administrator terminals stay unavailable until it restarts. The terminal
+// mux refuses to attach an administrator terminal for anyone else.
+func configureShellTerminalElevation(svc *shelltermsvc.Service, mux *terminal.Manager, elevationSecret string) {
+	svc.SetDesktopElevationSecret(elevationSecret)
+	mux.SetAttachGuard(svc.AuthorizeTerminalAttach)
 }
 
 // projectRootLocator adapts the project service to the narrow lookup the shell

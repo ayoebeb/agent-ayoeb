@@ -29,6 +29,7 @@ import (
 // the assigned port. A per-session random token handshake is the upgrade path
 // if multi-user isolation is needed.
 func RunHost(args []string, stdout io.Writer) int {
+	elevated, args := splitElevatedArgs(args)
 	opts, args := splitHostOptionArgs(args)
 	if len(args) < 3 {
 		fmt.Fprintf(os.Stderr, "usage: ao pty-host [--start=attach] [--surface=lazy] [--size=COLSxROWS] <sessionId> <cwd> <shellCmd> [shellArg...]\n")
@@ -42,6 +43,10 @@ func RunHost(args []string, stdout io.Writer) int {
 	if err := os.Chdir(cwd); err != nil {
 		fmt.Fprintf(os.Stderr, "pty-host [%s]: chdir %s: %v\n", sessionID, cwd, err)
 		return 1
+	}
+
+	if elevated.enabled() {
+		return runElevatedHost(elevated, opts, sessionID, cwd, shellCmd, shellArgs)
 	}
 
 	// Bind before creating the PTY so we can report READY atomically.
@@ -104,6 +109,51 @@ func RunHost(args []string, stdout io.Writer) int {
 		LazySurface: opts.LazySurface,
 	}
 
+	if err := Serve(ctx, cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "pty-host [%s]: serve: %v\n", sessionID, err)
+		return 1
+	}
+	return 0
+}
+
+// runElevatedHost serves an administrator shell on its authenticated pipe
+// (see elevated.go). Nothing reads its stdout: UAC launches it detached from
+// the daemon, which finds it by dialing the pipe.
+func runElevatedHost(elevated elevatedHostConfig, opts HostOptions, sessionID, cwd, shellCmd string, shellArgs []string) int {
+	ln, err := listenElevatedHost(elevated)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pty-host [%s]: elevated listen: %v\n", sessionID, err)
+		return 1
+	}
+	// Whatever environment UAC handed us, the shell gets no AO credential and
+	// the same terminal capabilities as any other AO terminal.
+	for _, key := range elevatedChildEnvCleared {
+		_ = os.Unsetenv(key)
+	}
+	_ = os.Setenv("TERM", "xterm-256color")
+	_ = os.Setenv("COLORTERM", "truecolor")
+
+	var pty ptyConn
+	cols, rows, deferred := hostStartGrid(opts)
+	if deferred {
+		pty = newDeferredPTY(func(cols, rows uint16) (ptyConn, error) {
+			return newConPTY(cwd, shellCmd, shellArgs, cols, rows)
+		})
+	} else {
+		pty, err = newConPTY(cwd, shellCmd, shellArgs, cols, rows)
+		if err != nil {
+			_ = ln.Close()
+			fmt.Fprintf(os.Stderr, "pty-host [%s]: newConPTY: %v\n", sessionID, err)
+			return 1
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	watchElevatedParent(ctx.Done(), elevated.ParentPID, cancel)
+	superviseElevatedHost(ctx.Done(), ln, cancel)
+
+	cfg := ServeConfig{SessionID: sessionID, Listener: ln, PTY: pty, Ring: NewRing(), LazySurface: opts.LazySurface}
 	if err := Serve(ctx, cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "pty-host [%s]: serve: %v\n", sessionID, err)
 		return 1

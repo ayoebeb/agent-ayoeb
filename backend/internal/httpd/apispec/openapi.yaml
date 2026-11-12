@@ -13530,6 +13530,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
         "404":
           content:
             application/json:
@@ -13571,6 +13577,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
         "404":
           content:
             application/json:
@@ -13621,6 +13633,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
         "404":
           content:
             application/json:
@@ -20076,6 +20094,13 @@ components:
             at this grid instead of waiting for the client to attach (startOnAttach
             is then ignored).
           type: integer
+        elevated:
+          description: 'Open the shell as administrator behind a UAC prompt on this
+            computer (Windows only). Refused with 403 unless the request comes from
+            the AO desktop app on this computer: never over the remote listener, a
+            tunnel, or from the ao CLI. A declined prompt answers 403 ELEVATION_DECLINED
+            and opens nothing.'
+          type: boolean
         projectId:
           description: Project whose root the shell starts in. Omitted opens the shell
             in the daemon data dir.
@@ -22315,6 +22340,8 @@ components:
         createdAt:
           format: date-time
           type: string
+        elevated:
+          type: boolean
         handleId:
           type: string
         projectId:
@@ -23333,6 +23360,22 @@ components:
       - distinctId
       - optedOut
       type: object
+    TerminalElevationResponse:
+      properties:
+        available:
+          type: boolean
+        reason:
+          description: 'Why administrator terminals are unavailable: unsupported (not
+            Windows), remote (the request reached this computer over the network),
+            desktop-only (not the AO desktop app on this computer).'
+          enum:
+          - unsupported
+          - remote
+          - desktop-only
+          type: string
+      required:
+      - available
+      type: object
     TerminalShellCheckResponse:
       properties:
         executable:
@@ -23367,6 +23410,9 @@ components:
         default:
           $ref: '#/components/schemas/TerminalShellResponse'
           description: The shell auto resolves to.
+        elevation:
+          $ref: '#/components/schemas/TerminalElevationResponse'
+          description: Whether this request may open administrator terminals.
         shells:
           description: Installed shells, one per real binary.
           items:
@@ -23375,6 +23421,7 @@ components:
       required:
       - default
       - shells
+      - elevation
       type: object
     TrackerIntakeConfig:
       properties:

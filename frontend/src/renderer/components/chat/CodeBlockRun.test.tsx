@@ -14,6 +14,7 @@ vi.mock("../../lib/command-runs", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../lib/command-runs")>()),
 	fetchTerminalShells: async (): Promise<TerminalShellCatalog> => ({
 		default: { id: "auto", name: "PowerShell", path: "C:\\pwsh.exe" },
+		elevation: { available: false },
 		shells: [
 			{ id: "pwsh", name: "PowerShell", path: "C:\\pwsh.exe" },
 			{ id: "cmd", name: "Command Prompt", path: "C:\\cmd.exe" },

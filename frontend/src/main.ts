@@ -234,6 +234,7 @@ import {
 } from "./main/browser-runtime-link";
 import { resolveBrowserRuntimeToken } from "./main/browser-runtime-token";
 import { commandRunKey } from "./main/command-run-key";
+import { createDesktopElevationSecret, installDesktopElevationHeader } from "./main/desktop-elevation";
 import { checkRender, measureRender } from "./main/render-check";
 import {
 	connectBrowserStream,
@@ -1111,6 +1112,14 @@ async function createWindowInternal(): Promise<void> {
 	// nearest agent page around its frame; the app's own pass untouched. Pages
 	// cannot start workers (their CSP has worker-src 'none'), whose requests
 	// carry no frame.
+	// Administrator terminals: this window's own requests to its daemon's
+	// terminal routes carry the desktop credential (see desktop-elevation.ts).
+	installDesktopElevationHeader(shellWebContents.session, {
+		webContentsId: shellWebContents.id,
+		mainFrame: () => shellWebContents.mainFrame,
+		daemonPort: () => (daemonStatus.state === "ready" ? daemonStatus.port : undefined),
+		token: desktopElevationSecret,
+	});
 	const blockedPageHosts = new Set<string>();
 	shellWebContents.session.webRequest.onBeforeRequest((details, callback) => {
 		// Loading an agent page into a frame is always allowed: the page's own
@@ -1733,6 +1742,9 @@ const browserRuntimeToken = (() => {
 		return randomBytes(32).toString("base64url");
 	}
 })();
+// Administrator terminals' credential: random per app run, kept in memory and
+// handed only to daemons this app spawns, after the runtime token on stdin.
+const desktopElevationSecret = createDesktopElevationSecret();
 let stagedBundledTmuxBinary: string | null = null;
 
 async function ensureBundledTmuxStaged(): Promise<void> {
@@ -2593,7 +2605,7 @@ async function startDaemonInner(startEpoch: number, autoRestartIntent?: DaemonAu
 	// worker processes when it spawns them.
 	if (child.stdin) {
 		child.stdin.on("error", () => undefined);
-		child.stdin.end(`${browserRuntimeToken}\n`);
+		child.stdin.end(`${browserRuntimeToken}\n${desktopElevationSecret}\n`);
 	} else {
 		console.warn("AO: browser runtime token handoff pipe was unavailable");
 	}

@@ -157,12 +157,13 @@ func Run(buildVersion string) error {
 	ignoreBrokenPipeSignal()
 
 	log := newLogger()
-	var browserRuntimeToken string
+	var browserRuntimeToken, elevationSecret string
 	if os.Getenv(browserruntime.RuntimeTokenStdinEnv) == "1" {
-		browserRuntimeToken, err = browserruntime.ReadRuntimeToken(os.Stdin)
-		if err != nil {
-			return err
+		handoff, handoffErr := readDesktopHandoff(os.Stdin)
+		if handoffErr != nil {
+			return handoffErr
 		}
+		browserRuntimeToken, elevationSecret = handoff.browserRuntimeToken, handoff.elevationSecret
 	}
 	if browserRuntimeToken == "" {
 		browserRuntimeToken, err = browserruntime.NewToken()
@@ -867,6 +868,7 @@ func Run(buildVersion string) error {
 	// terminal mux) as session panes, but keep their own ids, storage, and
 	// lifetime — see internal/service/shellterm.
 	shellTermSvc := startShellTerminals(ctx, cfg, runtimeAdapter, store, projectSvc, sessionSvc, log)
+	configureShellTerminalElevation(shellTermSvc, termMgr, elevationSecret)
 	// Agents started by hand in a shell give its tab their logo and status.
 	if rt, ok := runtimeAdapter.(shellagent.Runtime); ok {
 		shellAgents := shellagent.NewManager(ctx, rt, agents, log)

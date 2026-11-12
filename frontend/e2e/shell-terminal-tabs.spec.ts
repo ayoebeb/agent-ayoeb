@@ -12,9 +12,11 @@ test("opens, selects, and closes standalone shell terminals from the tab strip",
 	const closeButtons = page.getByRole("button", { name: /^Close terminal / });
 	const initialCount = await closeButtons.count();
 
-	// The button at the end of the tab strip opens a shell and makes it the
-	// active pane. It creates a terminal directly — no menu, no session picker.
+	// The button at the end of the tab strip opens the new-terminal menu (the
+	// daemon's shells, the default first); its first row opens the default
+	// shell, makes it the active pane, and closes the menu. No session picker.
 	await page.getByRole("button", { name: "New terminal" }).click();
+	await page.getByRole("menu").getByRole("menuitem").first().click();
 	await expect(page.getByRole("menu")).toHaveCount(0);
 	await expect(closeButtons).toHaveCount(initialCount + 1);
 

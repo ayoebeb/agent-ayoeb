@@ -114,6 +114,7 @@ describe("runnableCommand: which blocks get Run", () => {
 
 const windowsCatalog: TerminalShellCatalog = {
 	default: { id: "auto", name: "PowerShell", path: "C:\\pwsh.exe" },
+	elevation: { available: false },
 	shells: [
 		{ id: "pwsh", name: "PowerShell", path: "C:\\pwsh.exe" },
 		{ id: "powershell", name: "Windows PowerShell", path: "C:\\powershell.exe" },
@@ -124,6 +125,7 @@ const windowsCatalog: TerminalShellCatalog = {
 };
 const macCatalog: TerminalShellCatalog = {
 	default: { id: "auto", name: "zsh", path: "/bin/zsh" },
+	elevation: { available: false },
 	shells: [
 		{ id: "/bin/bash", name: "bash", path: "/bin/bash" },
 		{ id: "/bin/zsh", name: "zsh", path: "/bin/zsh" },
