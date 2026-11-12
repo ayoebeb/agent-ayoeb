@@ -1080,6 +1080,13 @@ func (s *Service) BeginSessionTeardown(ctx context.Context, sessionID domain.Ses
 		return nil, err
 	}
 
+	// Chat Run commands execute in the worktree too. The gate keeps new ones
+	// from starting; stop the running ones and wait until they are gone.
+	if err := s.stopSessionCommandRuns(ctx, sessionID); err != nil {
+		release()
+		return nil, err
+	}
+
 	recs, err := s.store.SelectShellTerminalsBySessionID(ctx, sessionID)
 	if err != nil {
 		release()

@@ -263,6 +263,61 @@ func TestRunCommandStopsWhenTheClientLeaves(t *testing.T) {
 	}
 }
 
+func TestSessionTeardownStopsRunningCommandsBeforeReturning(t *testing.T) {
+	cmds := commandRunTestShell(t)
+	svc, _ := newCommandRunTestService(t)
+	started := make(chan struct{})
+	done := make(chan CommandRunExit, 1)
+	go func() {
+		exit, err := svc.RunCommand(context.Background(), RunCommandInput{SessionID: "session", Shell: cmds.shell, Command: cmds.sleep},
+			func(CommandRunStart) { close(started) }, nil)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- exit
+	}()
+	<-started
+	release, err := svc.BeginSessionTeardown(context.Background(), "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	// The worktree is free once teardown returns: the run has already ended.
+	select {
+	case exit := <-done:
+		if !exit.Stopped {
+			t.Fatalf("exit = %+v, want stopped by teardown", exit)
+		}
+	default:
+		t.Fatal("BeginSessionTeardown returned while a command still ran in the worktree")
+	}
+	if runs := svc.commandRuns.forSession("session"); len(runs) != 0 {
+		t.Fatalf("runs still registered: %d", len(runs))
+	}
+}
+
+func TestRunCommandWaitsForASessionTeardownInProgress(t *testing.T) {
+	cmds := commandRunTestShell(t)
+	svc, _ := newCommandRunTestService(t)
+	release, err := svc.BeginSessionTeardown(context.Background(), "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	startedDuringTeardown := false
+	_, err = svc.RunCommand(ctx, RunCommandInput{SessionID: "session", Shell: cmds.shell, Command: cmds.echoExit3},
+		func(CommandRunStart) { startedDuringTeardown = true }, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || startedDuringTeardown {
+		t.Fatalf("err = %v started=%v; want the run held at the session gate", err, startedDuringTeardown)
+	}
+	release()
+	exit, err := svc.RunCommand(context.Background(), RunCommandInput{SessionID: "session", Shell: cmds.shell, Command: cmds.echoExit3}, nil, nil)
+	if err != nil || exit.ExitCode != 3 {
+		t.Fatalf("after teardown: exit = %+v, err = %v", exit, err)
+	}
+}
+
 func TestRunCommandTimesOut(t *testing.T) {
 	previous := commandRunTimeout
 	commandRunTimeout = 500 * time.Millisecond

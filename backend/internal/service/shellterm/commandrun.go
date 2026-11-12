@@ -91,9 +91,23 @@ type OpenCommandInTerminalInput struct {
 type activeCommandRun struct {
 	sessionID domain.SessionID
 	cancel    context.CancelFunc
-	mu        sync.Mutex
-	stopped   bool
+	// done closes once the run has fully ended: its process tree is gone and
+	// its last output was handed on.
+	done    chan struct{}
+	mu      sync.Mutex
+	stopped bool
 }
+
+func (r *activeCommandRun) stop() {
+	r.mu.Lock()
+	r.stopped = true
+	r.mu.Unlock()
+	r.cancel()
+}
+
+// commandRunTeardownWait bounds how long session teardown waits for the
+// session's stopped runs to exit. A var so tests need not wait it out.
+var commandRunTeardownWait = 15 * time.Second
 
 type commandRunRegistry struct {
 	mu   sync.Mutex
@@ -126,6 +140,43 @@ func (r *commandRunRegistry) get(id string) *activeCommandRun {
 	return r.runs[id]
 }
 
+func (r *commandRunRegistry) forSession(sessionID domain.SessionID) []*activeCommandRun {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var runs []*activeCommandRun
+	for _, run := range r.runs {
+		if run.sessionID == sessionID {
+			runs = append(runs, run)
+		}
+	}
+	return runs
+}
+
+// stopSessionCommandRuns stops every run of the session and waits for each to
+// exit, so the session's worktree is no longer in use when it returns. The
+// caller holds the session gate, so no new run can start meanwhile.
+func (s *Service) stopSessionCommandRuns(ctx context.Context, sessionID domain.SessionID) error {
+	runs := s.commandRuns.forSession(sessionID)
+	for _, run := range runs {
+		run.stop()
+	}
+	if len(runs) == 0 {
+		return nil
+	}
+	timer := time.NewTimer(commandRunTeardownWait)
+	defer timer.Stop()
+	for _, run := range runs {
+		select {
+		case <-run.done:
+		case <-ctx.Done():
+			return fmt.Errorf("stop command runs for session %s: %w", sessionID, ctx.Err())
+		case <-timer.C:
+			return fmt.Errorf("stop command runs for session %s: a stopped command did not exit within %s", sessionID, commandRunTeardownWait)
+		}
+	}
+	return nil
+}
+
 // validateRunCommand rejects text that cannot be a command for any shell.
 func validateRunCommand(command string) error {
 	if strings.TrimSpace(command) == "" {
@@ -146,7 +197,8 @@ func validateRunCommand(command string) error {
 // UTF-8 text, in order, never after RunCommand returns. An error means the
 // command never started; a started command always returns its exit.
 //
-// Cancelling ctx (the client went away) stops the command and its children.
+// Cancelling ctx (the client went away) stops the command and its children,
+// and so does tearing the session down (BeginSessionTeardown).
 func (s *Service) RunCommand(ctx context.Context, in RunCommandInput, onStart func(CommandRunStart), onOutput func(string)) (CommandRunExit, error) {
 	if err := validateRunCommand(in.Command); err != nil {
 		return CommandRunExit{}, err
@@ -154,6 +206,22 @@ func (s *Service) RunCommand(ctx context.Context, in RunCommandInput, onStart fu
 	if in.SessionID == "" {
 		return CommandRunExit{}, apierr.Invalid("COMMAND_RUN_SESSION_REQUIRED", "A session is required", nil)
 	}
+	if s.sessions == nil {
+		return CommandRunExit{}, apierr.Internal("SHELL_TERMINAL_NO_SESSION_LOOKUP", "Session lookup is unavailable")
+	}
+	// Validate the session before allocating its gate, as OpenShellTerminal does.
+	if _, _, err := s.sessions.SessionWorkspace(ctx, in.SessionID); err != nil {
+		return CommandRunExit{}, fmt.Errorf("run command: resolve session %s: %w", in.SessionID, err)
+	}
+	// Hold the session's teardown gate from resolving the worktree until the
+	// command is running and registered, like OpenShellTerminal: a run then
+	// either starts before a teardown (which stops it) or waits until the
+	// teardown is done and resolves whatever directory is left.
+	releaseGate, err := s.acquireSessionGate(ctx, in.SessionID)
+	if err != nil {
+		return CommandRunExit{}, err
+	}
+	defer releaseGate()
 	workingDir, projectID, err := s.resolveShellTerminalWorkingDir(ctx, "", in.SessionID)
 	if err != nil {
 		return CommandRunExit{}, err
@@ -194,11 +262,16 @@ func (s *Service) RunCommand(ctx context.Context, in RunCommandInput, onStart fu
 	}
 	runCtx, cancel := context.WithTimeout(ctx, commandRunTimeout)
 	defer cancel()
-	active := &activeCommandRun{sessionID: in.SessionID, cancel: cancel}
+	active := &activeCommandRun{sessionID: in.SessionID, cancel: cancel, done: make(chan struct{})}
 	if err := s.commandRuns.add(runID, active); err != nil {
 		return CommandRunExit{}, err
 	}
-	defer s.commandRuns.remove(runID)
+	// Runs before the process-group cleanup above it: done closes only once
+	// the command, its children and its output are all finished.
+	defer func() {
+		s.commandRuns.remove(runID)
+		close(active.done)
+	}()
 
 	output := newCommandRunOutput(commandRunOutputLimit)
 	cmd := process.CommandContext(runCtx, invocation.path, invocation.args...)
@@ -217,6 +290,8 @@ func (s *Service) RunCommand(ctx context.Context, in RunCommandInput, onStart fu
 	if err := cmd.Start(); err != nil {
 		return CommandRunExit{}, apierr.Internal("COMMAND_RUN_START_FAILED", "Could not start the shell: "+err.Error())
 	}
+	// Running and registered: a teardown from here on finds and stops it.
+	releaseGate()
 	if onStart != nil {
 		onStart(CommandRunStart{
 			RunID:      runID,
@@ -266,10 +341,7 @@ func (s *Service) StopCommandRun(_ context.Context, sessionID domain.SessionID, 
 	if run == nil || run.sessionID != sessionID {
 		return apierr.NotFound("COMMAND_RUN_NOT_FOUND", "No such running command")
 	}
-	run.mu.Lock()
-	run.stopped = true
-	run.mu.Unlock()
-	run.cancel()
+	run.stop()
 	return nil
 }
 
@@ -346,8 +418,11 @@ func commandRunInvocation(shellPath, command string) (commandRunInvocationSpec, 
 }
 
 // cmdRunLine turns a cmd block into one /c line: switch the code page to UTF-8
-// so output is not mojibake, then run each line in turn as a batch file would.
-// A trailing caret continues a line onto the next.
+// so output is not mojibake, then run each line in turn, joined with `&` so a
+// failing line does not stop the next. This is command-line syntax, not a batch
+// file: `%i` (not `%%i`) in for loops, and a block of commands spread over
+// several lines in parentheses does not work. A trailing caret continues a
+// line onto the next.
 func cmdRunLine(command string) string {
 	var lines []string
 	var current strings.Builder
