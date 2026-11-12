@@ -506,6 +506,10 @@ const api = {
 			};
 		},
 	},
+	commandRuns: {
+		/** The key Chat's Run presents to the local daemon; "" outside the app window. */
+		key: () => ipcRenderer.invoke("commandRuns:key") as Promise<string>,
+	},
 	daemon: {
 		getStatus: () => ipcRenderer.invoke("daemon:getStatus") as Promise<DaemonStatus>,
 		start: () => ipcRenderer.invoke("daemon:start") as Promise<DaemonStatus>,
