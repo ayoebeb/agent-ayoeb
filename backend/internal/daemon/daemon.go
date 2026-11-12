@@ -1278,7 +1278,7 @@ func Run(buildVersion string) error {
 	// hash so an already-paired phone keeps working with no new password, and
 	// (via bs.RestoreOnBoot) re-apply the secure-pairing proxy against the
 	// port Start actually bound. Routed through bs, not lan directly, so the
-	// proxy never gets pinned to a dead port after an ephemeral fallback.
+	// proxy never gets pinned to a dead port after Start moves to a free port.
 	// Saved wake ownership is restored even when Connect Mobile is off.
 	// Best-effort: never blocks boot.
 	if err := restoreMobileOnBoot(mobilebridge.Path(cfg.DataDir), bs); err != nil {

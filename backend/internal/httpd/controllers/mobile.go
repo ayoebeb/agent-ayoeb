@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -769,6 +770,13 @@ func (b *BridgeService) enableWithPasswordLocked(pw string, noPublicTunnel, loop
 	prevHash := b.LAN.PasswordHash()
 	wasRunning := b.LAN.Running()
 	prevSt, _ := mobilebridge.Load(b.ConfigPath)
+	// lastPort lives in a file a person can edit. Name that file before arming
+	// anything, rather than report a failed search of ports that cannot exist. A
+	// running listener ignores the requested port, so rotation is unaffected.
+	if !wasRunning && prevSt.LastPort > 65535 {
+		return MobileStatusResponse{}, fmt.Errorf("saved listener port %d in %s is above 65535; set lastPort to a port from 1 to 65535, or remove it to use the default, then enable again",
+			prevSt.LastPort, b.ConfigPath)
+	}
 
 	// A fresh listener must be armed before binding. For an already-running
 	// listener, wait until persistence succeeds before rotating the hash: a
@@ -781,7 +789,14 @@ func (b *BridgeService) enableWithPasswordLocked(pw string, noPublicTunnel, loop
 	if loopbackOnly {
 		start = b.LAN.StartLoopback
 	}
-	port, err := start(b.DefaultPort)
+	// Prefer the port this machine used last, so re-enabling keeps the address
+	// paired devices already know. Start moves past a port another process holds
+	// and returns the one it bound, which is what gets saved and advertised.
+	wantPort := b.DefaultPort
+	if prevSt.LastPort > 0 {
+		wantPort = prevSt.LastPort
+	}
+	port, err := start(wantPort)
 	if err != nil {
 		if !wasRunning {
 			b.LAN.SetPasswordHash(prevHash) // Start failed: undo the hash swap.
@@ -828,7 +843,7 @@ func (b *BridgeService) enableWithPasswordLocked(pw string, noPublicTunnel, loop
 	// Re-point the proxy at the port Start actually bound. This runs on every
 	// listener start driven through this method — enable and password rotation
 	// both funnel through here — which is what keeps the proxy off a dead port
-	// after an ephemeral fallback. A daemon restart does NOT go through this
+	// after Start moves past a held port. A daemon restart does NOT go through this
 	// method (it has no password to rotate); see RestoreOnBoot, which mirrors
 	// this same post-Start apply. A failure is recorded, never fatal: the
 	// bridge stays up in plaintext mode and Status reports serve_failed.
@@ -844,7 +859,7 @@ func (b *BridgeService) startConnectorsLocked(port int, st mobilebridge.State) {
 		b.setServeError(b.applyServe(port))
 	}
 	// Point the connector at the port Start actually bound, not DefaultPort:
-	// Start falls back to an ephemeral port when the default is taken, and a
+	// Start moves to the next free port when the preferred one is taken, and a
 	// connector aimed at the wrong port tunnels nothing. Start is idempotent
 	// and returns immediately — the connector needs tens of seconds to become
 	// advertisable, and Status reports that progress meanwhile.
@@ -861,7 +876,7 @@ func (b *BridgeService) startConnectorsLocked(port int, st mobilebridge.State) {
 // restart, reusing the existing password (no rotation — an already-paired
 // phone keeps working) and re-applying the secure-pairing proxy against the
 // port Start actually bound, never the persisted LastPort. That distinction is
-// the entire point of this method: Start falls back to an ephemeral port when
+// the entire point of this method: Start moves to the next free port when
 // LastPort is taken (e.g. by another AO instance), and a `tailscale serve`
 // config pinned to a stale port would proxy the tailnet at this machine's
 // hostname to whatever now holds that port. A failure to apply is recorded in

@@ -52,7 +52,7 @@ type State struct {
 	// restart (backend/internal/daemon/mobile_restore.go, via
 	// BridgeService.RestoreOnBoot) knows to re-apply the `tailscale serve` proxy
 	// — pointed at whatever port the restarted LAN listener actually bound, not
-	// this struct's LastPort, since Start can fall back to an ephemeral port.
+	// this struct's LastPort, since Start moves past a port another process holds.
 	SecurePairing bool `json:"securePairing"`
 	// ServeCleanupPending survives a failed Tailscale Serve teardown so a later
 	// tunnel-only setup cannot inherit an AO-owned tailnet route.

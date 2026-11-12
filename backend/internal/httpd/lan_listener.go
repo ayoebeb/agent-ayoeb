@@ -210,12 +210,16 @@ func (m *LANManager) PasswordHash() string {
 }
 
 // Start binds the authenticated listener on every interface for Connect Mobile.
+// port (0 means the default) is a preference: when another socket holds it on
+// a wildcard or loopback address, Start binds the next free port instead and
+// returns the port it bound.
 func (m *LANManager) Start(port int) (int, error) {
 	return m.start(port, "0.0.0.0")
 }
 
 // StartLoopback binds the same authenticated handler only where a local tunnel
-// connector can reach it. A running listener cannot silently change bind mode.
+// connector can reach it, choosing its port as Start does. A running listener
+// cannot silently change bind mode.
 func (m *LANManager) StartLoopback(port int) (int, error) {
 	return m.start(port, "127.0.0.1")
 }
@@ -234,18 +238,14 @@ func (m *LANManager) start(port int, host string) (int, error) {
 	if port == 0 {
 		port = m.defaultPort
 	}
-	addr := fmt.Sprintf("%s:%d", host, port)
-	ln, err := net.Listen("tcp", addr)
+	ln, skipped, err := listenLAN(context.Background(), host, port)
 	if err != nil {
-		if !isAddrInUse(err) {
-			m.mu.Unlock()
-			return 0, fmt.Errorf("bind authenticated listener %s: %w", addr, err)
-		}
-		if ln, err = net.Listen("tcp", fmt.Sprintf("%s:0", host)); err != nil {
-			m.mu.Unlock()
-			return 0, fmt.Errorf("bind authenticated listener ephemeral on %s: %w", host, err)
-		}
-		m.log.Warn("LAN port in use; bound ephemeral", "wanted", port, "bound", ln.Addr())
+		m.mu.Unlock()
+		return 0, err
+	}
+	if len(skipped) > 0 {
+		m.log.Warn("authenticated listener port in use by another process; bound the next free port",
+			"wanted", port, "bound", ln.Addr(), "skipped", skipped)
 	}
 	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
 	if !ok {

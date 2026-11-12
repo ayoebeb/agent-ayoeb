@@ -62,7 +62,7 @@ func (m *ManagedTunnel) Nudge() {
 // Idempotent by port. Status polling and repeated enables both call this, and
 // relaunching each time would rotate the hostname continuously so none ever
 // settles long enough to be advertised. A different port does restart it: the
-// LAN listener can come back on an ephemeral port, and a connector aimed at the
+// LAN listener can come back on the next free port, and a connector aimed at the
 // old one tunnels nothing.
 func (m *ManagedTunnel) Start(localPort int) {
 	m.mu.Lock()
