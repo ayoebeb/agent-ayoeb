@@ -77,7 +77,7 @@ it("lists only this agent's chats, preselects the ones not imported and imports 
 	fireEvent.click(screen.getByRole("button", { name: "Import 1 conversation" }));
 	expect(await screen.findByText("1 conversation imported.")).toBeInTheDocument();
 	expect(api.POST).toHaveBeenCalledWith("/api/v1/session-import", { body: { ids: ["older"] } });
-	expect(screen.getByText("Already in Orchestrator")).toBeInTheDocument();
+	expect(screen.getByText("Already in Ayo")).toBeInTheDocument();
 	expect(window.localStorage.getItem("ao.sessionImport.offerClosed")).toBe("true");
 	expect(useUiStore.getState().sessionImportOfferClosed).toBe(true);
 });
@@ -155,7 +155,7 @@ it("reports new, existing and failed imports separately", async () => {
 	});
 	renderPanel();
 	fireEvent.click(await screen.findByRole("button", { name: "Import 2 conversations" }));
-	expect(await screen.findByText("1 already in Orchestrator. 1 could not be imported.")).toBeInTheDocument();
+	expect(await screen.findByText("1 already in Ayo. 1 could not be imported.")).toBeInTheDocument();
 	expect(window.localStorage.getItem("ao.sessionImport.offerClosed")).toBeNull();
 	expect(useUiStore.getState().sessionImportOfferClosed).toBe(false);
 });

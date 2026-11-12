@@ -940,7 +940,7 @@ export function ConnectMobileContent({ active }: { active: boolean }) {
 
 				{qrValue && signInConfigured && !signedIn && !status?.tunnel?.fixed && (
 					<p className="mt-4 text-xs leading-5 text-settings-muted" data-testid="mobile-sign-in-hint" role="status">
-						{t("mobile.signInForFixedAddress", "Sign in to Orchestrator to give this computer an address that stays the same after restarts.")}
+						{t("mobile.signInForFixedAddress", "Sign in to Ayo to give this computer an address that stays the same after restarts.")}
 					</p>
 				)}
 
@@ -1042,7 +1042,7 @@ function KeepAwakeRow({
 	const status = keepAwake.lidActive && keepAwake.enabled
 		? t("mobile.keepAwake.lidActive", "Closed-lid keep awake is armed.")
 		: keepAwake.lidReason || lidUnavailable
-			? t(`mobile.keepAwake.lidReason.${keepAwake.lidReason || "unsupported"}`, "Closed-lid keep awake is unavailable. Update or restart the Orchestrator desktop app to retry.")
+			? t(`mobile.keepAwake.lidReason.${keepAwake.lidReason || "unsupported"}`, "Closed-lid keep awake is unavailable. Update or restart the Ayo desktop app to retry.")
 			: t("mobile.keepAwake.lidIdle", "Closed-lid wake is starting.");
 	return (
 		<SettingsRow

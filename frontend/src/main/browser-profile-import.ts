@@ -303,8 +303,8 @@ function isAccessDenied(error: unknown): boolean {
 
 function safariAccessError(): Error {
 	return Object.assign(new Error(
-		"Orchestrator couldn't access Safari's data. In System Settings, open Privacy & Security > Full Disk Access, "
-		+ "allow Orchestrator, then restart Orchestrator and try the import again.",
+		"Ayo couldn't access Safari's data. In System Settings, open Privacy & Security > Full Disk Access, "
+		+ "allow Ayo, then restart Ayo and try the import again.",
 	), { code: "EACCES" });
 }
 
@@ -1063,7 +1063,7 @@ async function snapshotSQLite(
 			return destination;
 		}
 		if (browserName) throw temporarySnapshotError(browserName);
-		throw new Error("Orchestrator's temporary browser data snapshot disappeared before it could be read. Restart Orchestrator and retry the import.");
+		throw new Error("Ayo's temporary browser data snapshot disappeared before it could be read. Restart Ayo and retry the import.");
 	} catch (error) {
 		await rm(destination, { force: true }).catch(() => undefined);
 		throw error;
@@ -1077,9 +1077,9 @@ async function snapshotSQLite(
 
 function temporarySnapshotError(browserName: string): Error {
 	return new Error(
-		`Orchestrator couldn't create a temporary copy of ${browserName}'s profile database. `
+		`Ayo couldn't create a temporary copy of ${browserName}'s profile database. `
 		+ `Fully close ${browserName}, including background processes, then retry the import. `
-		+ "If this keeps happening, restart Orchestrator and try again.",
+		+ "If this keeps happening, restart Ayo and try again.",
 	);
 }
 

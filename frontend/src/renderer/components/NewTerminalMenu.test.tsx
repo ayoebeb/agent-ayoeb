@@ -126,7 +126,7 @@ describe("new terminal menu", () => {
 		renderMenu();
 		const admin = within(openMenu()).getByRole("menuitem", { name: /Run as administrator/ });
 		expect(admin).toHaveAttribute("aria-disabled", "true");
-		expect(admin).toHaveTextContent("Needs AO started by this app");
+		expect(admin).toHaveTextContent("Needs Ayo started by this app");
 	});
 
 	it("still opens the default shell when the daemon lists none", () => {

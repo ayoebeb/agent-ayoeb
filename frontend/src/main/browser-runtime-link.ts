@@ -346,8 +346,8 @@ export function connectBrowserRuntime(
 				// malformed hello are all refusals, with different causes.
 				const reason = error ? `${error.code}: ${error.message}` : "no reason given";
 				log(
-					`browser-runtime-link: the Orchestrator daemon refused this app's browser runtime (${reason}); ` +
-						"run `ao stop`, then reopen Orchestrator.",
+					`browser-runtime-link: the Ayo daemon refused this app's browser runtime (${reason}); ` +
+						"run `ao stop`, then reopen Ayo.",
 				);
 				setState({ ...REJECTED, rejectionCode: error?.code });
 				// A refused token cannot be retried into acceptance, so the caller may

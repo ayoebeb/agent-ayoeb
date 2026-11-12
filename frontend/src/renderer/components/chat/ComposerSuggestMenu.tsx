@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CornerDownLeft } from "@/components/app-icons";
 import { cn } from "../../lib/utils";
+import { PRODUCT_NAME } from "../../../shared/brand";
 import { Pressable } from "../ui/pressable";
 import { composerFileIcon } from "./composerFileIcon";
 import type { Suggestion, TriggerKind } from "./composerSuggest";
@@ -196,5 +197,5 @@ export function ComposerSuggestMenu({
 
 function displayBadge(badge?: string): string | undefined {
 	if (!badge || badge.toLowerCase() === "agent") return undefined;
-	return badge.toLowerCase() === "ao" ? "Orchestrator" : badge;
+	return badge.toLowerCase() === "ao" ? PRODUCT_NAME : badge;
 }

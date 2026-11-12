@@ -23,7 +23,7 @@ export type SessionTabs = {
 export type ActiveTab = { logicalId: string; tabId: number; tab: Tab };
 
 export function groupTitle(sessionId: string): string {
-	return `Orchestrator · ${sessionId.length > 24 ? `${sessionId.slice(0, 23)}…` : sessionId}`;
+	return `Ayo · ${sessionId.length > 24 ? `${sessionId.slice(0, 23)}…` : sessionId}`;
 }
 
 export function groupColor(sessionId: string): string {
@@ -112,7 +112,7 @@ export class SessionTabRegistry {
 		if (session.groupId !== undefined && tab.groupId !== session.groupId) {
 			delete session.tabs[logicalId];
 			await this.save();
-			throw new BridgeError("BROWSER_TARGET_MISMATCH", `Tab ${logicalId} left this session's Orchestrator tab group`);
+			throw new BridgeError("BROWSER_TARGET_MISMATCH", `Tab ${logicalId} left this session's Ayo tab group`);
 		}
 		return { logicalId, tabId, tab };
 	}

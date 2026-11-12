@@ -1118,7 +1118,7 @@ export function useBrowserView({
 				setNavState((current) => ({
 					...current,
 					url: normalized,
-					title: normalized ? "Orchestrator preview" : "",
+					title: normalized ? "Ayo preview" : "",
 					isLoading: false,
 				}));
 				return Promise.resolve();

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { MachOParseError } from "./makers/macho-archs";
 import MakerNSIS from "./makers/maker-nsis";
 import appPackage from "./package.json";
+import { PRODUCT_NAME } from "./src/shared/brand";
 
 // postMake's dmg/zip branches only need to prove they call the right
 // maker-dmg functions with the right gates; the functions' own behavior
@@ -362,8 +363,10 @@ describe("postMake artifact verification", () => {
 
 describe("Windows app labels", () => {
 	it("matches the installer display name without renaming the executable or bundle", async () => {
-		expect(WINDOWS_DISPLAY_NAME).toBe("Orchestrator.inc");
-		expect(appPackage.author).toBe(WINDOWS_DISPLAY_NAME);
+		expect(WINDOWS_DISPLAY_NAME).toBe(PRODUCT_NAME);
+		// The package author is upstream attribution and the Linux maintainer label;
+		// it is deliberately not the display name.
+		expect(appPackage.author).toBe("Orchestrator.inc");
 		expect(config.packagerConfig?.win32metadata).toEqual({
 			FileDescription: WINDOWS_DISPLAY_NAME,
 			InternalName: WINDOWS_DISPLAY_NAME,
@@ -396,7 +399,7 @@ describe("packaged authentication callback registration", () => {
 	it("declares ao-app in the macOS bundle and Linux package metadata", () => {
 		expect(config.packagerConfig?.protocols).toEqual([
 			{
-				name: "Orchestrator authentication callback",
+				name: `${PRODUCT_NAME} authentication callback`,
 				schemes: ["ao-app"],
 			},
 		]);

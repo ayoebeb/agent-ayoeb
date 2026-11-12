@@ -84,7 +84,7 @@ describe("registerRemotesIpc", () => {
 			registerRemotes(ipc.ipcMain, {
 				file: await tempFile(),
 				registry: new RemoteRegistry(async () => { throw new Error("must not connect"); }),
-				requireAccount: async () => { if (state === "account-gate") throw new ExpectedIpcError("Sign in to Orchestrator Cloud to use remote hosts."); },
+				requireAccount: async () => { if (state === "account-gate") throw new ExpectedIpcError("Sign in to Ayo Cloud to use remote hosts."); },
 				getAccountId: async () => state === "signed-out" ? "" : TEST_ACCOUNT,
 				identity: async () => "h_workbox",
 				probe: async () => {
@@ -97,7 +97,7 @@ describe("registerRemotesIpc", () => {
 				await expect(result).rejects.toBe(unexpected);
 				expect(capture).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ category: "ipc", reason: "handler", error: unexpected }));
 			} else {
-				await expect(result).rejects.toThrow(state === "signed-out" || state === "account-gate" ? "Sign in to Orchestrator Cloud" : `is ${state}`);
+				await expect(result).rejects.toThrow(state === "signed-out" || state === "account-gate" ? "Sign in to Ayo Cloud" : `is ${state}`);
 				expect(capture).not.toHaveBeenCalled();
 			}
 		} finally { resetMainErrorCaptureForTests(); }
@@ -284,12 +284,12 @@ describe("registerRemotesIpc", () => {
 		const file = await tempFile();
 		const registry = new RemoteRegistry(async () => { throw new Error("proxy must not start"); });
 		const ipc = fakeIpc();
-		const requireAccount = vi.fn(async () => { throw new Error("Sign in to Orchestrator Cloud to use remote hosts."); });
+		const requireAccount = vi.fn(async () => { throw new Error("Sign in to Ayo Cloud to use remote hosts."); });
 		registerRemotes(ipc.ipcMain, { file, registry, requireAccount });
-		await expect(ipc.invoke("remotes:list")).rejects.toThrow(/Sign in to Orchestrator Cloud/);
-		await expect(ipc.invoke("remotes:connect", "http://192.0.2.1:1")).rejects.toThrow(/Sign in to Orchestrator Cloud/);
-		await expect(ipc.invoke("remotes:previewUrl", "h_workbox", "s_1", "http://localhost:3000")).rejects.toThrow(/Sign in to Orchestrator Cloud/);
-		await expect(ipc.invoke("remotes:externalUrl", "h_workbox", "https://example.com/")).rejects.toThrow(/Sign in to Orchestrator Cloud/);
+		await expect(ipc.invoke("remotes:list")).rejects.toThrow(/Sign in to Ayo Cloud/);
+		await expect(ipc.invoke("remotes:connect", "http://192.0.2.1:1")).rejects.toThrow(/Sign in to Ayo Cloud/);
+		await expect(ipc.invoke("remotes:previewUrl", "h_workbox", "s_1", "http://localhost:3000")).rejects.toThrow(/Sign in to Ayo Cloud/);
+		await expect(ipc.invoke("remotes:externalUrl", "h_workbox", "https://example.com/")).rejects.toThrow(/Sign in to Ayo Cloud/);
 		expect(requireAccount).toHaveBeenCalledTimes(4);
 	});
 

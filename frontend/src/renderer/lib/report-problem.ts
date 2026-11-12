@@ -83,7 +83,7 @@ export function formatReportProblemDraft(
 
 	if (output === "discord") {
 		return [
-			"**Orchestrator feedback**",
+			"**Ayo feedback**",
 			`Summary: ${fields.summary}`,
 			`Details: ${fields.details}`,
 			"",
@@ -96,14 +96,14 @@ export function formatReportProblemDraft(
 		return [
 			`To: ${SUPPORT_EMAIL}`,
 			`Cc: ${SUPPORT_CC_EMAIL}`,
-			`Subject: Orchestrator feedback: ${fields.summary}`,
+			`Subject: Ayo feedback: ${fields.summary}`,
 			"",
 			formatEmailBody(fields, diagnosticsBlock),
 		].join("\n");
 	}
 
 	return [
-		`# ${fields.summary === "Not provided" ? "Orchestrator feedback" : fields.summary}`,
+		`# ${fields.summary === "Not provided" ? "Ayo feedback" : fields.summary}`,
 		"",
 		"## Summary",
 		fields.summary,
@@ -124,7 +124,7 @@ export function reportProblemDestinationUrl(
 ): string | null {
 	if (output === "discord") return DISCORD_SUPPORT_URL;
 	if (output === "email") {
-		const subject = `Orchestrator feedback: ${reportTitle(input)}`;
+		const subject = `Ayo feedback: ${reportTitle(input)}`;
 		const body = formatEmailBody(normalizeInput(input), formatDiagnostics(diagnostics));
 		if (emailProvider === "gmail") {
 			const url = new URL("https://mail.google.com/mail/");
@@ -172,7 +172,7 @@ function normalizeInput(input: ReportProblemInput) {
 
 function formatEmailBody(fields: ReturnType<typeof normalizeInput>, diagnosticsBlock: string): string {
 	return [
-		"Orchestrator feedback",
+		"Ayo feedback",
 		"",
 		`Summary: ${fields.summary}`,
 		"",
@@ -186,7 +186,7 @@ function formatEmailBody(fields: ReturnType<typeof normalizeInput>, diagnosticsB
 
 function reportTitle(input: ReportProblemInput): string {
 	const summary = valueOrPlaceholder(input.summary);
-	return summary === "Not provided" ? "Orchestrator feedback" : summary;
+	return summary === "Not provided" ? "Ayo feedback" : summary;
 }
 
 function valueOrPlaceholder(value: string): string {
@@ -215,7 +215,7 @@ export function formatReportTimestamp(value: string, timeZone?: string): string 
 
 function formatDiagnostics(diagnostics: ReportProblemDiagnostics): string {
 	const lines = [
-		`Orchestrator version: ${sanitizeReportText(diagnostics.appVersion) || "unknown"}`,
+		`Ayo version: ${sanitizeReportText(diagnostics.appVersion) || "unknown"}`,
 		`Build mode: ${sanitizeReportText(diagnostics.buildMode) || "unknown"}`,
 		`Platform: ${sanitizeReportText(diagnostics.platform) || "unknown"}`,
 		`Route surface: ${sanitizeReportText(diagnostics.routeSurface) || "unknown"}`,

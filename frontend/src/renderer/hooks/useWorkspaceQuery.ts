@@ -276,7 +276,7 @@ type FakeAgentSeam = { snapshot: () => WorkspaceSummary[] };
 
 class DaemonNotReadyError extends Error {
 	constructor() {
-		super("Orchestrator daemon API is not ready");
+		super("Ayo daemon API is not ready");
 		markApiError(this);
 	}
 }

@@ -82,19 +82,19 @@ test("REAL-001 packaged app launches + window paints @T0 @real", async () => {
 	const win = await app.firstWindow();
 	expect(win).toBeTruthy();
 	// Prove the AO renderer SCREEN mounted (INS-002 first-run/home UI) — not just
-	// that some document painted. The AO brand string "Agent Orchestrator" is
-	// rendered into the app shell (sidebar) and the first-run home/welcome
-	// ("Welcome to Agent Orchestrator"), so its presence in VISIBLE body text is an
-	// AO-specific proof the renderer mounted. A Chromium/Electron error page has no
-	// AO brand text (fails), and an unmounted shell (empty #root) has no visible
-	// text (fails). document.title is deliberately NOT used: index.html sets it to
-	// "Agent Orchestrator" statically, so it is present even if React never mounts.
+	// that some document painted. The product name ("Ayo", PRODUCT_NAME in
+	// frontend/src/shared/brand.ts) is rendered into the app shell (sidebar) and
+	// the first-run home/welcome ("Welcome to Ayo"), so its presence in VISIBLE
+	// body text is an AO-specific proof the renderer mounted. A Chromium/Electron
+	// error page has no brand text (fails), and an unmounted shell (empty #root)
+	// has no visible text (fails). document.title is deliberately NOT used:
+	// index.html sets it statically, so it is present even if React never mounts.
 	await expect
 		.poll(
 			() =>
 				win.evaluate(() => {
 					const text = document.body?.innerText ?? "";
-					return document.readyState === "complete" && text.includes("Agent Orchestrator");
+					return document.readyState === "complete" && text.includes("Ayo");
 				}),
 			{ timeout: 30_000, intervals: [500] },
 		)

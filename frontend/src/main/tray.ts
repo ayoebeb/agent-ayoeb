@@ -5,6 +5,7 @@ import { app, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from "e
 // (1.3 MB) into main.js. Regenerate with `node scripts/sync-tray-catalog.mjs`.
 import { trayCatalogs, type TrayMessageKey } from "./tray-catalog.generated";
 import type { AppLocale } from "../shared/ui-locale";
+import { PRODUCT_NAME } from "../shared/brand";
 
 type MessageKey = TrayMessageKey;
 type PluralMessageKey = TrayMessageKey extends infer Key extends string
@@ -92,7 +93,7 @@ export function createTrayController(options: TrayControllerOptions): TrayContro
 		tray.setImage(lastAwake ? awakeIcon : icon);
 		tray.setTitle([lastAwake && awake === null ? "?" : "", count > 0 ? String(count) : ""].filter(Boolean).join(" "));
 		const awakeLabel = awake === true ? t("tray.awakeActive") : awake === null && lastAwake ? t("tray.awakeUnknown") : "";
-		tray.setToolTip([count > 0 ? tPlural("tray.attentionTooltip", count) : "Orchestrator", awakeLabel].filter(Boolean).join(" — "));
+		tray.setToolTip([count > 0 ? tPlural("tray.attentionTooltip", count) : PRODUCT_NAME, awakeLabel].filter(Boolean).join(" — "));
 
 		const items: MenuItemConstructorOptions[] = [];
 		if (awakeLabel) {

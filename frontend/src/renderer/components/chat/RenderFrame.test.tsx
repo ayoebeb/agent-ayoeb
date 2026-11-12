@@ -445,7 +445,7 @@ describe("render activity", () => {
 		const user = userEvent.setup();
 		const onLinkOpen = vi.fn();
 		render(<ChatLinkProvider onLinkOpen={onLinkOpen}><ActivityRow activity={renderActivity()} /></ChatLinkProvider>);
-		await user.click(screen.getByRole("button", { name: "Open in Orchestrator Browser" }));
+		await user.click(screen.getByRole("button", { name: "Open in Ayo Browser" }));
 		expect(onLinkOpen).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^http:\/\/127\.0\.0\.1:3001\/api\/v1\/sessions\/proj-1\/renders\/r1#ao-theme=/));
 	});
 });
@@ -596,7 +596,7 @@ describe("artifact activity", () => {
 				</ChatLinkProvider>
 			</QueryClientProvider>,
 		);
-		await user.click(screen.getByRole("button", { name: "Open in Orchestrator Browser" }));
+		await user.click(screen.getByRole("button", { name: "Open in Ayo Browser" }));
 		expect(onLinkOpen).toHaveBeenCalledExactlyOnceWith(previewUrl);
 	});
 

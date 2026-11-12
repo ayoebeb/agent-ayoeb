@@ -127,17 +127,17 @@ export const aoBridge: AoBridge =
 		cloudShare: {
 			available: async () => false,
 			inspect: async () => {
-				throw new Error("Sharing needs the Orchestrator desktop app.");
+				throw new Error("Sharing needs the Ayo desktop app.");
 			},
 			list: async () => {
-				throw new Error("Sharing needs the Orchestrator desktop app.");
+				throw new Error("Sharing needs the Ayo desktop app.");
 			},
 			publish: async () => {
-				throw new Error("Sharing needs the Orchestrator desktop app.");
+				throw new Error("Sharing needs the Ayo desktop app.");
 			},
 			cancel: async () => undefined,
 			unpublish: async () => {
-				throw new Error("Sharing needs the Orchestrator desktop app.");
+				throw new Error("Sharing needs the Ayo desktop app.");
 			},
 			onProgress: () => () => undefined,
 		},
@@ -451,10 +451,10 @@ export const aoBridge: AoBridge =
 			},
 			localAuthAvailable: async () => false,
 			localRegister: async () => {
-				throw new Error("Orchestrator Cloud sign-in requires the desktop app.");
+				throw new Error("Ayo Cloud sign-in requires the desktop app.");
 			},
 			localLogin: async () => {
-				throw new Error("Orchestrator Cloud sign-in requires the desktop app.");
+				throw new Error("Ayo Cloud sign-in requires the desktop app.");
 			},
 			onSessionChanged: () => () => undefined,
 			onOpenShareLink: () => () => undefined,
@@ -463,14 +463,14 @@ export const aoBridge: AoBridge =
 		},
 		cloudCp: {
 			request: async () => {
-				throw new Error("Orchestrator Cloud requests require the desktop app.");
+				throw new Error("Ayo Cloud requests require the desktop app.");
 			},
 			requestBinary: async () => {
-				throw new Error("Orchestrator Cloud requests require the desktop app.");
+				throw new Error("Ayo Cloud requests require the desktop app.");
 			},
 			cancelBinary: () => undefined,
 			openStream: async () => {
-				throw new Error("Orchestrator Cloud event streams require the desktop app.");
+				throw new Error("Ayo Cloud event streams require the desktop app.");
 			},
 			closeStream: () => undefined,
 			onStreamEvent: () => () => undefined,
