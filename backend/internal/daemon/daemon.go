@@ -1178,6 +1178,8 @@ func Run(buildVersion string) error {
 		SessionImport:      sessionImportSvc,
 		Directories:        fsbrowsersvc.New(),
 		ShellTerminals:     shellTermSvc,
+		CommandRuns:        shellTermSvc,
+		CommandRunKey:      httpd.DeriveCommandRunKey(browserRuntimeToken),
 		Cues:               cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
 		AgentAuth:          agentAuthSvc,
 		GitHub:             newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),

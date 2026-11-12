@@ -7255,6 +7255,183 @@ paths:
       summary: Keep a viewed chat awake or release its view lease
       tags:
       - conversations
+  /api/v1/sessions/{sessionId}/command-runs:
+    post:
+      operationId: runSessionCommand
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCommandRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/CommandRunStreamEvent'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Run a command from Chat in the session's workspace, streaming its output
+        as server-sent events. Only a person's client (the desktop app with its command-run
+        key, or a paired remote client) may call it.
+      tags:
+      - shellTerminals
+  /api/v1/sessions/{sessionId}/command-runs/{runId}:
+    delete:
+      operationId: stopSessionCommand
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Command run identifier from the run's started event.
+        in: path
+        name: runId
+        required: true
+        schema:
+          description: Command run identifier from the run's started event.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop a running Chat command and its child processes
+      tags:
+      - shellTerminals
+  /api/v1/sessions/{sessionId}/command-runs/terminal:
+    post:
+      operationId: openSessionCommandInTerminal
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCommandRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShellTerminalEnvelope'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Open a new session shell terminal and type a Chat command into it,
+        for a command that needs input
+      tags:
+      - shellTerminals
   /api/v1/sessions/{sessionId}/conversation:
     get:
       operationId: getSessionConversation
@@ -16528,6 +16705,68 @@ components:
       required:
       - availableCount
       type: object
+    CommandRunExited:
+      properties:
+        droppedBytes:
+          format: int64
+          type: integer
+        durationMs:
+          format: int64
+          type: integer
+        exitCode:
+          description: The command's exit code; -1 when it was stopped before reporting
+            one.
+          type: integer
+        stopped:
+          description: The user stopped the command.
+          type: boolean
+        timedOut:
+          description: The command ran past the daemon's time limit and was stopped.
+          type: boolean
+        truncated:
+          description: Output past the daemon's limit was dropped; the command kept
+            running.
+          type: boolean
+      required:
+      - exitCode
+      - durationMs
+      type: object
+    CommandRunStarted:
+      properties:
+        runId:
+          type: string
+        shell:
+          description: Display name of the shell that runs the command.
+          type: string
+        shellPath:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        workingDir:
+          type: string
+      required:
+      - runId
+      - shell
+      - shellPath
+      - workingDir
+      - startedAt
+      type: object
+    CommandRunStreamEvent:
+      properties:
+        error:
+          $ref: '#/components/schemas/APIError'
+        exit:
+          $ref: '#/components/schemas/CommandRunExited'
+        output:
+          description: Combined stdout and stderr, UTF-8, possibly with terminal escape
+            sequences.
+          type:
+          - "null"
+          - string
+        started:
+          $ref: '#/components/schemas/CommandRunStarted'
+      type: object
     CompactConversationResponse:
       properties:
         tokensAfter:
@@ -20787,6 +21026,19 @@ components:
       required:
       - ok
       - sessionId
+      type: object
+    RunCommandRequest:
+      properties:
+        command:
+          description: The exact command to run, as shown to the user.
+          type: string
+        shell:
+          description: 'Shell to run it with: auto (the user''s default shell), an
+            executable path, or on Windows a selector (git-bash, pwsh, powershell,
+            cmd).'
+          type: string
+      required:
+      - command
       type: object
     SaveRenderArtifactRequest:
       properties:

@@ -28,6 +28,7 @@ import { useUiStore } from "../stores/ui-store";
 import { BareTopbarDragStrip } from "./BareTopbarDragStrip";
 import { SessionTabsTopbar } from "./PageTopbar";
 import { useTaskLaunch, type LaunchReplay } from "./TaskComposer";
+import { TaskInterfaceControl, type TaskInterface } from "./TaskInterfaceControl";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 
@@ -66,6 +67,8 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 	const [echo, setEcho] = useState<ConversationLocalEcho>();
 	// The settings bar the brief was sent with, held still until the session takes over.
 	const [launched, setLaunched] = useState<LaunchSettings>();
+	// The interface (Chat or Terminal) the brief was sent to start in, held still with the bar.
+	const [launchedInterface, setLaunchedInterface] = useState<TaskInterface>();
 	// A failed fallback start has no composer send to report it, so the page does.
 	const [fallbackFailed, setFallbackFailed] = useState(false);
 	// A load error a send already reported in the composer.
@@ -124,7 +127,9 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 	// A session of this agent already reported its own settings: draw exactly those
 	// controls, holding this chat's choices, so the bar never changes on handoff.
 	const harness = task.agent.value;
-	const template = useMemo(() => readChatSettingsTemplate(harness, hostId), [harness, hostId]);
+	// Those are its Chat controls: a task started in the terminal gets AO's own.
+	const startsInChat = task.sessionInterface.value === "chat";
+	const template = useMemo(() => startsInChat ? readChatSettingsTemplate(harness, hostId) : undefined, [harness, hostId, startsInChat]);
 	const barFor = (settings: TurnSettings): LaunchSettings => {
 		const providerOptions = template ? draftProviderOptions(template.options, harness, task.chatModels, settings, task.approvalModes) : undefined;
 		return {
@@ -254,6 +259,7 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 		setRefusedRetry(undefined);
 		// Held still from Enter; replaced by the loaded bar once the page is ready.
 		setLaunched(saved?.settings ?? barRef.current);
+		setLaunchedInterface(saved?.replay.mode ?? taskRef.current.sessionInterface.value);
 		try {
 			// A saved send belongs to its own project; the page is on its way back there.
 			if (saved && saved.projectId !== target.projectId) throw new Error(t("newTask.unableToStart"));
@@ -274,6 +280,7 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 			const settings = saved?.settings ?? barRef.current;
 			const replay = saved?.replay ?? launch.launchSnapshot();
 			setLaunched(settings);
+			setLaunchedInterface(replay.mode ?? launch.effectiveInterface);
 			writePendingLaunch(hostKey, { clientMessageId, projectId: target.projectId, replay, settings });
 			const sessionId = await launch.launch(text, { clientRequestId: clientMessageId, replay, attachments });
 			resolveLaunch(clientMessageId);
@@ -310,6 +317,7 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 		setFallbackFailed(false);
 		setEcho(brief);
 		setLaunched(settings);
+		setLaunchedInterface(fallback === "tui" ? "tui" : task.effectiveInterface);
 		try {
 			const sessionId = await task.launchFallback(brief.text, clientMessageId, heldAttachments);
 			fallbackRequest.current = undefined;
@@ -330,6 +338,7 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 	const pending = Boolean(echo);
 	const frozen = pending || Boolean(pendingLaunch);
 	const frozenSettings = launched ?? pendingLaunch?.settings;
+	const frozenInterface = launchedInterface ?? pendingLaunch?.replay.mode ?? task.sessionInterface.value;
 	pendingRef.current = pending;
 	const notice = pending ? null : task.error && (task.errorAction || fallbackFailed) ? (
 		<div role="alert" className="flex items-center gap-2 px-1 text-xs text-destructive">
@@ -408,7 +417,7 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 				// The Cloud session started for this task is still coming up.
 				// The session's own composer controls from the start: the same bar, held
 				// still once sent, with the agent at the top of the model menu.
-				draftSettings={frozen ? (frozenSettings ? <LaunchSettingsBar {...frozenSettings} /> : null) : (
+				draftSettings={frozen ? (frozenSettings ? <LaunchSettingsBar {...frozenSettings} afterPicker={<TaskInterfaceControl value={frozenInterface} disabled />} /> : null) : (
 					<>
 						<TurnSettingsBar
 							models={barSettings.models}
@@ -432,6 +441,8 @@ export function NewChatPage({ projectId, hostId }: { projectId: string; hostId?:
 									if (next) task.switchAgent(next.harness, { model: next.model, effort: next.effort ?? next.shownEffort });
 								},
 							}}
+							// Chat or Terminal, beside the agent and model it starts with.
+							afterPicker={<TaskInterfaceControl {...task.sessionInterface} />}
 							autoSelectEffortOnOpen
 						/>
 					</>

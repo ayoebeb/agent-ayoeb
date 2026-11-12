@@ -57,7 +57,11 @@ type APIDeps struct {
 	SessionImport      controllers.SessionImportService
 	Directories        controllers.DirectoryBrowserService
 	ShellTerminals     controllers.ShellTerminalService
-	Cues               controllers.CueService
+	// CommandRuns runs commands from Chat's Run button; CommandRunKey is the
+	// key the local desktop presents for them (see DeriveCommandRunKey).
+	CommandRuns   controllers.CommandRunService
+	CommandRunKey string
+	Cues          controllers.CueService
 	// Conversations is nil until a Chat driver is wired; the controller then
 	// answers 501 rather than panicking, matching the other optional surfaces.
 	Conversations controllers.ConversationService
@@ -157,6 +161,7 @@ type API struct {
 	sessionImport *controllers.SessionImportController
 	fs            *controllers.FSController
 	shellTerms    *controllers.ShellTerminalsController
+	commandRuns   *controllers.CommandRunsController
 	cues          *controllers.CuesController
 	conversations *controllers.ConversationsController
 	settings      *controllers.SettingsController
@@ -224,6 +229,10 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		sessionImport: &controllers.SessionImportController{Svc: deps.SessionImport},
 		fs:            &controllers.FSController{Svc: deps.Directories},
 		shellTerms:    &controllers.ShellTerminalsController{Svc: deps.ShellTerminals},
+		commandRuns: &controllers.CommandRunsController{
+			Svc:            deps.CommandRuns,
+			UserClientGate: commandRunGate(cfg.AllowedOrigins, deps.CommandRunKey),
+		},
 		cues:          &controllers.CuesController{Svc: deps.Cues},
 		conversations: &controllers.ConversationsController{Svc: deps.Conversations, Renders: attachmentstore.New(cfg.DataDir), Search: deps.ConversationSearch, UserMessages: userMessageRecorder(deps.Sessions)},
 		settings:      &controllers.SettingsController{Svc: deps.Settings},
@@ -363,6 +372,7 @@ func (a *API) Register(root chi.Router) {
 			a.sessionImport.Register(r)
 			a.fs.Register(r)
 			a.shellTerms.Register(r)
+			a.commandRuns.Register(r)
 			a.cues.Register(r)
 			a.conversations.Register(r)
 			a.settings.Register(r)
@@ -387,6 +397,9 @@ func (a *API) Register(root chi.Router) {
 		a.notifications.RegisterStream(r)
 		a.codexAccounts.RegisterStreams(r)
 		a.sessions.RegisterStreams(r)
+		// A Chat command streams its output for as long as it runs (the
+		// service applies its own time limit).
+		a.commandRuns.RegisterStream(r)
 		a.events.Register(r)
 	})
 }

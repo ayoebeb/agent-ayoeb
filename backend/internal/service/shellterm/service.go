@@ -99,6 +99,8 @@ type Service struct {
 
 	agents AgentTracker // set once at boot; nil without agent detection
 
+	// commandRuns tracks Chat Run commands in flight so Stop can find them.
+	commandRuns commandRunRegistry
 	// desktopElevationSecret is the local desktop app's per-run credential for
 	// administrator terminals; empty keeps them unavailable (see elevation.go).
 	desktopElevationSecret string
@@ -520,21 +522,31 @@ func (s *Service) RunCueCommand(ctx context.Context, in RunCueCommandInput) (She
 			return ShellTerminal{}, err
 		}
 	}
+	return s.typeCommandInNewShell(ctx, workingDir, projectID, in.SessionID, in.Shell, in.Command)
+}
+
+// typeCommandInNewShell opens a normal shell terminal in workingDir and types
+// command into it once the shell is ready, with the command in its history as
+// if the user had typed it. Session-scoped callers hold the session gate.
+func (s *Service) typeCommandInNewShell(ctx context.Context, workingDir string, projectID domain.ProjectID, sessionID domain.SessionID, shell, command string) (ShellTerminal, error) {
 	records, err := s.store.SelectRestorableShellTerminals(ctx, s.appRunID)
 	if err != nil {
 		return ShellTerminal{}, fmt.Errorf("run cue command: list terminals: %w", err)
 	}
-	argv, usedFallback := resolveUserLoginShell(in.Shell)
+	argv, usedFallback := resolveUserLoginShell(shell)
 	if usedFallback {
 		return ShellTerminal{}, apierr.Invalid("SHELL_TERMINAL_SHELL_UNAVAILABLE",
-			fmt.Sprintf("The selected shell is unavailable: %s. Choose another shell in Settings.", in.Shell), nil)
+			fmt.Sprintf("The selected shell is unavailable: %s. Choose another shell in Settings.", shell), nil)
 	}
 	if len(argv) == 0 {
 		return ShellTerminal{}, apierr.Internal("SHELL_TERMINAL_NO_SHELL", "Could not determine a shell to launch. Set SHELL (macOS/Linux) or ComSpec (Windows).")
 	}
-	projectEnv, err := s.projects.ProjectEnv(ctx, projectID)
-	if err != nil {
-		return ShellTerminal{}, fmt.Errorf("run cue command: resolve project environment: %w", err)
+	var projectEnv map[string]string
+	if projectID != "" {
+		projectEnv, err = s.projects.ProjectEnv(ctx, projectID)
+		if err != nil {
+			return ShellTerminal{}, fmt.Errorf("run cue command: resolve project environment: %w", err)
+		}
 	}
 	env := s.pinnedEnv(projectEnv)
 	readiness, err := prepareCueShellReadiness(s.dataDir, argv, env)
@@ -545,7 +557,7 @@ func (s *Service) RunCueCommand(ctx context.Context, in RunCueCommandInput) (She
 	readiness.env["AO_CUE_COMMAND"] = ""
 	env = agentlaunch.MergeEnv(env, readiness.env)
 	terminal, err := s.openTerminal(ctx, openTerminalConfig{argv: readiness.argv, env: env, projectEnv: projectEnv, projectID: projectID,
-		sessionID: in.SessionID, workingDir: workingDir, title: nextShellTerminalTitle(records)})
+		sessionID: sessionID, workingDir: workingDir, title: nextShellTerminalTitle(records)})
 	if err != nil {
 		return ShellTerminal{}, err
 	}
@@ -555,7 +567,7 @@ func (s *Service) RunCueCommand(ctx context.Context, in RunCueCommandInput) (She
 	if err := s.waitForCueShellReady(ctx, ports.RuntimeHandle{ID: terminal.HandleID}, readiness.file); err != nil {
 		return ShellTerminal{}, err
 	}
-	delivery, err := prepareCueCommand(s.dataDir, argv, in.Command)
+	delivery, err := prepareCueCommand(s.dataDir, argv, command)
 	if err != nil {
 		return ShellTerminal{}, err
 	}
@@ -1125,6 +1137,13 @@ func (s *Service) cleanupAuthWorkspace(workingDir, handleID string) {
 func (s *Service) BeginSessionTeardown(ctx context.Context, sessionID domain.SessionID) (release func(), err error) {
 	release, err = s.acquireSessionGate(ctx, sessionID)
 	if err != nil {
+		return nil, err
+	}
+
+	// Chat Run commands execute in the worktree too. The gate keeps new ones
+	// from starting; stop the running ones and wait until they are gone.
+	if err := s.stopSessionCommandRuns(ctx, sessionID); err != nil {
+		release()
 		return nil, err
 	}
 
