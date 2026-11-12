@@ -169,6 +169,8 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 					openFolder: async () => undefined,
 					onFrameNavigated: () => () => undefined,
 				},
+				// A fixed key: the page's routed daemon decides what a Run does.
+				commandRuns: { key: async () => "e2e-command-run-key" },
 				daemon: {
 					getStatus: async () => status,
 					start: async () => status,
@@ -1124,6 +1126,8 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 					openFolder: async () => undefined,
 					onFrameNavigated: () => () => undefined,
 				},
+				// A fixed key: the page's routed daemon decides what a Run does.
+				commandRuns: { key: async () => "e2e-command-run-key" },
 				daemon: {
 					getStatus: async () => status,
 					start: async () => status,
