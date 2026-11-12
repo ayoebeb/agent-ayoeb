@@ -126,9 +126,7 @@ import { isAbsoluteFileReference, matchWorkspaceFilePath, normalizeWorkspaceFile
 import { markFileViewerPerformance } from "../lib/file-viewer-performance";
 import { filesProjectKind } from "../lib/files-review-selection";
 import { aoBridge } from "../lib/bridge";
-import {
-	chatDraftDialogCopy,
-} from "../lib/chat-draft-boundary";
+import { useChatDraftRiskReport } from "../hooks/useChatDraftRiskReport";
 import {
 	activateSessionFile,
 	closeSessionFile,
@@ -555,10 +553,9 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const remoteHostsEnabled = useUiStore((state) => state.remoteHosts);
 	const setRemoteHosts = useUiStore((state) => state.setRemoteHosts);
 	// One pane of sessions side by side: no inspector or in-session split, and
-	// only the focused pane takes shortcuts and reports drafts at risk.
+	// only the focused pane takes shortcuts. Every pane reports its drafts at risk.
 	const pane = useSessionPane();
 	const paneRoot = useSessionPaneRoot();
-	const reportsDraftRisk = !pane || pane.focused;
 	useBlocker({
 		disabled: chatDraftBoundaries.length === 0,
 		enableBeforeUnload: chatDraftBoundaries.length > 0,
@@ -579,14 +576,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 			return false;
 		},
 	});
-	useEffect(() => {
-		if (!reportsDraftRisk) return;
-		aoBridge.app.setChatDraftRisk?.(chatDraftBoundaries, chatDraftDialogCopy(chatDraftBoundaries));
-	}, [chatDraftBoundaries, reportsDraftRisk, t]);
-	useEffect(
-		() => (reportsDraftRisk ? () => aoBridge.app.setChatDraftRisk?.([]) : undefined),
-		[reportsDraftRisk, sessionId],
-	);
+	useChatDraftRiskReport(chatDraftBoundaries);
 	const { client: cloudCpClient, ready: cloudCpReady, baseUrl: cloudCpBaseUrl, userId: cloudCpUserId } = useCloudCp();
 	// The session's own organization decides whether it can be shared (feature=share).
 	const sessionOffering = useCloudOffering(Boolean(session?.cloud), session?.cloud?.orgId);

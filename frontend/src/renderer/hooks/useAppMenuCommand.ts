@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef } from "react";
-import { SessionPaneContext } from "../components/session-pane-context";
+import { SessionPaneContext, useSessionPaneFocusedGetter } from "../components/session-pane-context";
 import {
 	APP_MENU_COMMAND_IDS,
 	type AppMenuActionId,
@@ -68,4 +68,15 @@ export function useAppMenuAction(id: AppMenuActionId, handler: () => void): void
 			}),
 		[id],
 	);
+}
+
+/**
+ * useAppMenuAction for controls a split mounts once per pane (a session's top
+ * bar): only the focused pane answers, so one menu choice acts once.
+ */
+export function useSessionMenuAction(id: AppMenuActionId, handler: () => void): void {
+	const paneFocused = useSessionPaneFocusedGetter();
+	useAppMenuAction(id, () => {
+		if (paneFocused()) handler();
+	});
 }

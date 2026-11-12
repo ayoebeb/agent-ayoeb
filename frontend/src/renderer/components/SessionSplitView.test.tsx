@@ -154,6 +154,26 @@ describe("SessionSplitView", () => {
 		expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ params: { projectId: "p2", sessionId: "b" }, replace: true }));
 	});
 
+	it("closing the focused pane routes to a remaining pane with a session, not past an empty first pane", () => {
+		// The orchestrator pane with none running comes first, where focus falls by default.
+		useSessionSplitStore.setState({ split: openSplit([empty, a, b], "session:a") });
+		const first = renderSplit("a", "session:a");
+		fireEvent.click(within(pane("session:a")).getByTestId("session-pane-close"));
+		expect(navigate).toHaveBeenCalledTimes(1);
+		expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ params: { projectId: "p2", sessionId: "b" }, replace: true }));
+		expect(Object.keys(useSessionSplitStore.getState().split!.panes)).toEqual(["orchestrator:p3", "session:b"]);
+		expect(useSessionSplitStore.getState().split?.focus).toBe("session:b");
+		first.unmount();
+
+		// With no pane left that has a session, the route goes to that pane's project.
+		navigate.mockReset();
+		useSessionSplitStore.setState({ split: openSplit([empty, a], "session:a") });
+		renderSplit("a", "session:a");
+		fireEvent.click(within(pane("session:a")).getByTestId("session-pane-close"));
+		expect(useSessionSplitStore.getState().split).toBeNull();
+		expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ params: { projectId: "p3" }, replace: true }));
+	});
+
 	it("closes a pane from its close button without focusing or routing to it first", () => {
 		workspaces = [workspace("p1", [session("a", "p1")]), workspace("p2", [session("b", "p2", { isTerminated: true })]), workspace("p3", [])];
 		renderSplit("a", "session:a");

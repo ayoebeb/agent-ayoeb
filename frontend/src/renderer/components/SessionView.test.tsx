@@ -8,6 +8,7 @@ import { SessionView } from "./SessionView";
 import { appShortcutBus } from "../test/app-shortcut-bus";
 import { useFilesTopbarHost } from "./files-topbar-host";
 import { SessionTopbarProvider } from "./SessionTopbarPortal";
+import { SessionPaneContext, type SessionPaneValue } from "./session-pane-context";
 import { PageTopbarSurface } from "./PageTopbar";
 import { TooltipProvider } from "./ui/tooltip";
 import type { SessionInterfaceTransitionStatus } from "../hooks/useSessionInterfaceTransition";
@@ -3720,6 +3721,37 @@ describe("SessionView", () => {
 			], expect.objectContaining({ detail: expect.stringContaining("Attachments are still being saved") })),
 		);
 		expect(publishRisk).not.toHaveBeenCalledWith([]);
+
+		view.unmount();
+		expect(publishRisk).toHaveBeenLastCalledWith([]);
+		publishRisk.mockRestore();
+	});
+
+	it("publishes the drafts at risk across every pane of a split, focused or not", async () => {
+		const publishRisk = vi.spyOn(window.ao!.app, "setChatDraftRisk");
+		const pane = (paneKey: string, focused: boolean): SessionPaneValue => ({ paneKey, focused, rootRef: { current: null }, keepsSplit: () => true });
+		const view = render(
+			<>
+				<SessionPaneContext.Provider value={pane("session:sess-1", true)}>
+					<SessionView sessionId="sess-1" />
+				</SessionPaneContext.Provider>
+				<SessionPaneContext.Provider value={pane("session:sess-2", false)}>
+					<SessionView sessionId="sess-2" />
+				</SessionPaneContext.Provider>
+			</>,
+		);
+
+		// The pane without focus still makes quitting ask.
+		act(() => setChatDraftBoundary("sess-2", "composer", "pending-attachments"));
+		await waitFor(() =>
+			expect(publishRisk).toHaveBeenLastCalledWith(["pending-attachments"], expect.objectContaining({ detail: expect.stringContaining("Attachments are still being saved") })),
+		);
+		act(() => setChatDraftBoundary("sess-1", "composer", "persistence-failed"));
+		await waitFor(() => expect(publishRisk).toHaveBeenLastCalledWith(["persistence-failed", "pending-attachments"], expect.anything()));
+
+		// One pane's draft settling leaves the other's.
+		act(() => setChatDraftBoundary("sess-1", "composer", undefined));
+		await waitFor(() => expect(publishRisk).toHaveBeenLastCalledWith(["pending-attachments"], expect.anything()));
 
 		view.unmount();
 		expect(publishRisk).toHaveBeenLastCalledWith([]);

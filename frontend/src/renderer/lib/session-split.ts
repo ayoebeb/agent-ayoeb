@@ -62,18 +62,22 @@ export type SplitBesideResult = { split: SessionSplit | null; outcome: "split" |
 /**
  * Shows `ref` on `side` of `anchor`, focused. Without a split yet, the anchor
  * is the session on screen and the two form one. A pane already in the split
- * moves; a fifth pane is refused.
+ * moves; a fifth pane is refused. With `sessionOf`, a pane already showing the
+ * session `ref` resolves to counts as `ref`, so one session never fills two
+ * panes (an orchestrator's own row beside its project's orchestrator pane).
  */
 export function splitPaneBeside(
 	split: SessionSplit | null,
 	anchor: SessionPaneRef,
-	ref: SessionPaneRef,
+	dragged: SessionPaneRef,
 	side: SplitSide,
+	sessionOf?: (ref: SessionPaneRef) => string | undefined,
 ): SplitBesideResult {
 	const anchorKey = sessionPaneKey(anchor);
+	const current = split && split.panes[anchorKey] ? split : null;
+	const ref = paneShowingSameSession(current ? Object.values(current.panes) : [anchor], dragged, sessionOf) ?? dragged;
 	const key = sessionPaneKey(ref);
 	if (anchorKey === key) return { split, outcome: "unchanged" };
-	const current = split && split.panes[anchorKey] ? split : null;
 	if (!current) {
 		return {
 			split: { root: insertBeside({ type: "leaf", key: anchorKey }, anchorKey, key, side), panes: { [anchorKey]: anchor, [key]: ref }, focus: key },
@@ -87,6 +91,17 @@ export function splitPaneBeside(
 		split: { root: insertBeside(base, anchorKey, key, side), panes: { ...current.panes, [key]: ref }, focus: key },
 		outcome: "split",
 	};
+}
+
+function paneShowingSameSession(
+	panes: readonly SessionPaneRef[],
+	ref: SessionPaneRef,
+	sessionOf: ((ref: SessionPaneRef) => string | undefined) | undefined,
+): SessionPaneRef | undefined {
+	const sessionId = sessionOf?.(ref);
+	if (!sessionId) return undefined;
+	const key = sessionPaneKey(ref);
+	return panes.find((pane) => sessionPaneKey(pane) !== key && sessionOf?.(pane) === sessionId);
 }
 
 /** The split without one pane; one pane left is no split. */
