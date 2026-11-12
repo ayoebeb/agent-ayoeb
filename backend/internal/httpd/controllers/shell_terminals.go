@@ -13,6 +13,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/requestscope"
 	shelltermsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/shellterm"
 )
 
@@ -23,6 +24,13 @@ type ShellTerminalService interface {
 	ListShellTerminalsForCurrentAppRun(ctx context.Context) ([]shelltermsvc.ShellTerminal, error)
 	RenameShellTerminal(ctx context.Context, handleID, title string) (shelltermsvc.ShellTerminal, error)
 	CloseShellTerminal(ctx context.Context, handleID string) error
+	ElevationAccess(ctx context.Context) shelltermsvc.ElevationAccess
+}
+
+// desktopScoped carries the request's desktop credential to the service,
+// which alone decides what it is worth (see shellterm.ElevationAccess).
+func desktopScoped(r *http.Request) context.Context {
+	return requestscope.WithDesktopCredential(r.Context(), r.Header.Get(requestscope.DesktopCredentialHeader))
 }
 
 // ShellTerminalsController owns the /shell-terminals routes: standalone shells
@@ -42,16 +50,23 @@ func (c *ShellTerminalsController) Register(r chi.Router) {
 }
 
 // listShells reports the shells installed on the daemon's machine, for the
-// Settings shell picker. Detection only reads the filesystem.
-func (c *ShellTerminalsController) listShells(w http.ResponseWriter, _ *http.Request) {
+// Settings shell picker and the new-terminal menu, and whether this request
+// may open them as administrator. Detection only reads the filesystem.
+func (c *ShellTerminalsController) listShells(w http.ResponseWriter, r *http.Request) {
 	catalog := shelltermsvc.DetectShells()
 	shells := make([]TerminalShellResponse, 0, len(catalog.Shells))
 	for _, shell := range catalog.Shells {
 		shells = append(shells, terminalShellResponse(shell))
 	}
+	elevation := TerminalElevationResponse{Reason: shelltermsvc.ElevationDesktopOnly}
+	if c.Svc != nil {
+		access := c.Svc.ElevationAccess(desktopScoped(r))
+		elevation = TerminalElevationResponse{Available: access.Available, Reason: access.Reason}
+	}
 	envelope.WriteJSON(w, http.StatusOK, TerminalShellsResponse{
-		Default: terminalShellResponse(catalog.Default),
-		Shells:  shells,
+		Default:   terminalShellResponse(catalog.Default),
+		Shells:    shells,
+		Elevation: elevation,
 	})
 }
 
@@ -74,7 +89,7 @@ func (c *ShellTerminalsController) list(w http.ResponseWriter, r *http.Request) 
 		apispec.NotImplemented(w, r, "GET", "/api/v1/shell-terminals")
 		return
 	}
-	terminals, err := c.Svc.ListShellTerminalsForCurrentAppRun(r.Context())
+	terminals, err := c.Svc.ListShellTerminalsForCurrentAppRun(desktopScoped(r))
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
@@ -96,7 +111,7 @@ func (c *ShellTerminalsController) open(w http.ResponseWriter, r *http.Request) 
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
-	terminal, err := c.Svc.OpenShellTerminal(r.Context(), shelltermsvc.OpenShellTerminalInput{
+	terminal, err := c.Svc.OpenShellTerminal(desktopScoped(r), shelltermsvc.OpenShellTerminalInput{
 		ProjectID:     domain.ProjectID(req.ProjectID),
 		SessionID:     domain.SessionID(req.SessionID),
 		Shell:         req.Shell,
@@ -104,6 +119,7 @@ func (c *ShellTerminalsController) open(w http.ResponseWriter, r *http.Request) 
 		Title:         req.Title,
 		Cols:          req.Cols,
 		Rows:          req.Rows,
+		Elevated:      req.Elevated,
 	})
 	if err != nil {
 		envelope.WriteError(w, r, err)
@@ -129,7 +145,7 @@ func (c *ShellTerminalsController) rename(w http.ResponseWriter, r *http.Request
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "SHELL_TERMINAL_ID_INVALID", "Invalid shell terminal id", nil)
 		return
 	}
-	terminal, err := c.Svc.RenameShellTerminal(r.Context(), handleID, req.Title)
+	terminal, err := c.Svc.RenameShellTerminal(desktopScoped(r), handleID, req.Title)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
@@ -149,7 +165,7 @@ func (c *ShellTerminalsController) close(w http.ResponseWriter, r *http.Request)
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "SHELL_TERMINAL_ID_INVALID", "Invalid shell terminal id", nil)
 		return
 	}
-	if err := c.Svc.CloseShellTerminal(r.Context(), handleID); err != nil {
+	if err := c.Svc.CloseShellTerminal(desktopScoped(r), handleID); err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
@@ -173,5 +189,6 @@ func shellTerminalResponse(t shelltermsvc.ShellTerminal) ShellTerminalResponse {
 		Title:         t.Title,
 		TerminalTitle: t.TerminalTitle,
 		CreatedAt:     t.CreatedAt,
+		Elevated:      t.Elevated,
 	}
 }

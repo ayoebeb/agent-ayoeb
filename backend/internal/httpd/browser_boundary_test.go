@@ -40,6 +40,10 @@ func (s *boundaryShells) OpenShellTerminal(context.Context, shelltermsvc.OpenShe
 	s.opened.Add(1)
 	return shelltermsvc.ShellTerminal{HandleID: "shellterm-boundary"}, nil
 }
+func (s *boundaryShells) ElevationAccess(context.Context) shelltermsvc.ElevationAccess {
+	return shelltermsvc.ElevationAccess{}
+}
+
 func (s *boundaryShells) ListShellTerminalsForCurrentAppRun(context.Context) ([]shelltermsvc.ShellTerminal, error) {
 	s.otherCalls.Add(1)
 	return nil, nil

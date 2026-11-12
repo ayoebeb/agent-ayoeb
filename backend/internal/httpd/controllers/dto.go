@@ -2536,6 +2536,7 @@ type OpenShellTerminalRequest struct {
 	Title         string `json:"title,omitempty" description:"Tab title for the new shell, for a client that already shows its tab. Trimmed; omitted or empty numbers it after the existing shells (Terminal N)."`
 	Cols          int    `json:"cols,omitempty" description:"Initial terminal columns. With rows, the shell starts immediately at this grid instead of waiting for the client to attach (startOnAttach is then ignored)."`
 	Rows          int    `json:"rows,omitempty" description:"Initial terminal rows. See cols."`
+	Elevated      bool   `json:"elevated,omitempty" description:"Open the shell as administrator behind a UAC prompt on this computer (Windows only). Refused with 403 unless the request comes from the AO desktop app on this computer: never over the remote listener, a tunnel, or from the ao CLI. A declined prompt answers 403 ELEVATION_DECLINED and opens nothing."`
 }
 
 // UpdateShellTerminalRequest is the body of PATCH /api/v1/shell-terminals/{handleId}.
@@ -2555,6 +2556,9 @@ type ShellTerminalResponse struct {
 	// label the tab instead of Title.
 	TerminalTitle string    `json:"terminalTitle,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// Elevated marks an administrator terminal; only the local desktop app
+	// is ever shown one.
+	Elevated bool `json:"elevated,omitempty"`
 }
 
 // ListShellTerminalsResponse is the body of GET /api/v1/shell-terminals.
@@ -2578,8 +2582,16 @@ type TerminalShellResponse struct {
 
 // TerminalShellsResponse is the body of GET /api/v1/terminal-shells.
 type TerminalShellsResponse struct {
-	Default TerminalShellResponse   `json:"default" description:"The shell auto resolves to."`
-	Shells  []TerminalShellResponse `json:"shells" description:"Installed shells, one per real binary."`
+	Default   TerminalShellResponse     `json:"default" description:"The shell auto resolves to."`
+	Shells    []TerminalShellResponse   `json:"shells" description:"Installed shells, one per real binary."`
+	Elevation TerminalElevationResponse `json:"elevation" description:"Whether this request may open administrator terminals."`
+}
+
+// TerminalElevationResponse says whether the requesting client may open
+// administrator terminals, and if not, why.
+type TerminalElevationResponse struct {
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty" enum:"unsupported,remote,desktop-only" description:"Why administrator terminals are unavailable: unsupported (not Windows), remote (the request reached this computer over the network), desktop-only (not the AO desktop app on this computer)."`
 }
 
 // TerminalShellCheckResponse reports whether a custom shell path can launch.

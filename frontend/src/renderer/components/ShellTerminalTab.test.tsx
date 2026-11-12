@@ -321,3 +321,21 @@ describe("ShellTerminalTab agent name", () => {
 		expect(screen.getByRole("textbox", { name: /rename terminal/i })).toHaveValue("Terminal 3");
 	});
 });
+
+describe("ShellTerminalTab administrator marking", () => {
+	it.each(["pill", "connected"] as const)("marks an administrator shell's %s tab with a shield and the word Admin", (appearance) => {
+		renderTab({ appearance, shell: { ...shell, handleId: "shellterm-admin-1", title: "Terminal 2", elevated: true } });
+
+		const tab = screen.getByRole("tab");
+		expect(tab).toHaveAttribute("title", expect.stringContaining("Running as administrator"));
+		expect(document.querySelector("[data-admin-badge]")).toHaveTextContent("Admin");
+		expect(document.querySelector(".icon-shield-check")).not.toBeNull();
+	});
+
+	it("leaves an ordinary shell's tab unmarked", () => {
+		renderTab({ appearance: "connected" });
+
+		expect(document.querySelector("[data-admin-badge]")).toBeNull();
+		expect(screen.getByRole("tab")).not.toHaveAttribute("title", expect.stringContaining("administrator"));
+	});
+});

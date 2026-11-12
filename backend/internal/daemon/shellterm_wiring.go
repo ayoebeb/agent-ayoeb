@@ -12,6 +12,7 @@ import (
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	shelltermsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/shellterm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
+	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
 )
 
 // startShellTerminals restores durable user shells and cleans up expired command
@@ -41,6 +42,16 @@ func startShellTerminals(
 		log.Warn("reaping shell terminals from previous app runs failed", "err", err)
 	}
 	return svc
+}
+
+// configureShellTerminalElevation makes administrator terminals available
+// only to the local desktop app: its credential derives from the browser
+// runtime token the app hands this daemon over stdin (a headless daemon makes
+// up a token nobody else knows, so it never accepts an elevated request), and
+// the terminal mux refuses to attach one for anyone else.
+func configureShellTerminalElevation(svc *shelltermsvc.Service, mux *terminal.Manager, desktopRuntimeToken string) {
+	svc.SetDesktopElevationToken(shelltermsvc.DesktopElevationToken(desktopRuntimeToken))
+	mux.SetAttachGuard(svc.AuthorizeTerminalAttach)
 }
 
 // projectRootLocator adapts the project service to the narrow lookup the shell

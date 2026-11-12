@@ -6882,6 +6882,8 @@ export interface components {
         OpenShellTerminalRequest: {
             /** @description Initial terminal columns. With rows, the shell starts immediately at this grid instead of waiting for the client to attach (startOnAttach is then ignored). */
             cols?: number;
+            /** @description Open the shell as administrator behind a UAC prompt on this computer (Windows only). Refused with 403 unless the request comes from the AO desktop app on this computer: never over the remote listener, a tunnel, or from the ao CLI. A declined prompt answers 403 ELEVATION_DECLINED and opens nothing. */
+            elevated?: boolean;
             /** @description Project whose root the shell starts in. Omitted opens the shell in the daemon data dir. */
             projectId?: string;
             /** @description Initial terminal rows. See cols. */
@@ -7780,6 +7782,7 @@ export interface components {
         ShellTerminalResponse: {
             /** Format: date-time */
             createdAt: string;
+            elevated?: boolean;
             handleId: string;
             projectId?: string;
             sessionId?: string;
@@ -8179,6 +8182,14 @@ export interface components {
             lifetimeSessions?: null | number;
             optedOut: boolean;
         };
+        TerminalElevationResponse: {
+            available: boolean;
+            /**
+             * @description Why administrator terminals are unavailable: unsupported (not Windows), remote (the request reached this computer over the network), desktop-only (not the AO desktop app on this computer).
+             * @enum {string}
+             */
+            reason?: "unsupported" | "remote" | "desktop-only";
+        };
         TerminalShellCheckResponse: {
             executable: boolean;
             /** @description Why the path cannot launch. */
@@ -8197,6 +8208,8 @@ export interface components {
         TerminalShellsResponse: {
             /** @description The shell auto resolves to. */
             default: components["schemas"]["TerminalShellResponse"];
+            /** @description Whether this request may open administrator terminals. */
+            elevation: components["schemas"]["TerminalElevationResponse"];
             /** @description Installed shells, one per real binary. */
             shells: components["schemas"]["TerminalShellResponse"][];
         };
@@ -25038,6 +25051,15 @@ export interface operations {
                     "application/json": components["schemas"]["APIError"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -25088,6 +25110,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25151,6 +25182,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

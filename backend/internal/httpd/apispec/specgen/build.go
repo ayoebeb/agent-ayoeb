@@ -592,6 +592,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersListShellTerminalsResponse":            "ListShellTerminalsResponse",
 	"ControllersTerminalShellResponse":                 "TerminalShellResponse",
 	"ControllersTerminalShellsResponse":                "TerminalShellsResponse",
+	"ControllersTerminalElevationResponse":             "TerminalElevationResponse",
 	"ControllersTerminalShellCheckResponse":            "TerminalShellCheckResponse",
 	"ControllersShellTerminalEnvelope":                 "ShellTerminalEnvelope",
 	"ControllersOpenCodexAccountLoginTerminalResponse": "OpenCodexAccountLoginTerminalResponse",
@@ -1942,6 +1943,7 @@ func shellTerminalOperations() []operation {
 			resps: []respUnit{
 				{http.StatusCreated, controllers.ShellTerminalEnvelope{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusForbidden, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
@@ -1955,6 +1957,7 @@ func shellTerminalOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.ShellTerminalEnvelope{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusForbidden, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
@@ -1982,6 +1985,7 @@ func shellTerminalOperations() []operation {
 			resps: []respUnit{
 				{http.StatusNoContent, nil},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusForbidden, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

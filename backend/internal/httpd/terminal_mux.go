@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/requestscope"
 	previewutil "github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
 )
@@ -52,7 +53,10 @@ func terminalMuxHandler(mgr *terminal.Manager, log *slog.Logger, allowedOrigins 
 			return
 		}
 		c.SetReadLimit(terminalMuxReadLimit)
-		mgr.Serve(r.Context(), &terminalMuxConn{c: c})
+		// The attach guard reads the desktop credential (with the request's LAN
+		// flag and caller) to keep administrator terminals desktop-only.
+		ctx := requestscope.WithDesktopCredential(r.Context(), r.Header.Get(requestscope.DesktopCredentialHeader))
+		mgr.Serve(ctx, &terminalMuxConn{c: c})
 	}
 }
 

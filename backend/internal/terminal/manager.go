@@ -58,6 +58,11 @@ type Manager struct {
 	log       *slog.Logger
 	heartbeat time.Duration
 
+	// attachGuardMu guards attachGuard, which may refuse an attach before any
+	// stream to the terminal exists (see SetAttachGuard).
+	attachGuardMu sync.RWMutex
+	attachGuard   AttachGuard
+
 	// ctx scopes every attachment's PTY lifetime; cancelled by Close.
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -127,6 +132,28 @@ type Option func(*Manager)
 // called with the source's lock held, so it must not block.
 type ShellAgentSource interface {
 	SubscribeShellAgents(fn func(snapshot json.RawMessage)) (unsubscribe func())
+}
+
+// AttachGuard decides whether the connection whose request context is ctx may
+// attach terminalID. A refused attach never opens a stream, so the client can
+// neither read the terminal nor type into it.
+type AttachGuard func(ctx context.Context, terminalID string) error
+
+// SetAttachGuard late-binds the attach guard; nil admits every terminal.
+func (m *Manager) SetAttachGuard(guard AttachGuard) {
+	m.attachGuardMu.Lock()
+	m.attachGuard = guard
+	m.attachGuardMu.Unlock()
+}
+
+func (m *Manager) authorizeAttach(ctx context.Context, terminalID string) error {
+	m.attachGuardMu.RLock()
+	guard := m.attachGuard
+	m.attachGuardMu.RUnlock()
+	if guard == nil {
+		return nil
+	}
+	return guard(ctx, terminalID)
 }
 
 // SetShellAgents late-binds the shell agent source; the manager is built
@@ -670,6 +697,10 @@ func (c *connState) openTerminal(id string, rows, cols uint16, role string) {
 		return // already open on this conn; avoid a duplicate attach
 	}
 	c.mu.Unlock()
+	if err := c.mgr.authorizeAttach(c.ctx, id); err != nil {
+		c.enqueue(serverMsg{Ch: chTerminal, ID: id, Type: msgError, Error: err.Error()})
+		return
+	}
 
 	// a is captured by onExit before assignment; safe because the attach loop —
 	// the only thing that fires onExit — starts after the registration below.

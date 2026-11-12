@@ -25,14 +25,23 @@ type fakeShellTerminalService struct {
 	renamed        shelltermsvc.ShellTerminal
 	listed         []shelltermsvc.ShellTerminal
 	err            error
+	gotOpenCtx     context.Context
+	gotListCtx     context.Context
+	access         shelltermsvc.ElevationAccess
 }
 
-func (f *fakeShellTerminalService) OpenShellTerminal(_ context.Context, in shelltermsvc.OpenShellTerminalInput) (shelltermsvc.ShellTerminal, error) {
+func (f *fakeShellTerminalService) ElevationAccess(context.Context) shelltermsvc.ElevationAccess {
+	return f.access
+}
+
+func (f *fakeShellTerminalService) OpenShellTerminal(ctx context.Context, in shelltermsvc.OpenShellTerminalInput) (shelltermsvc.ShellTerminal, error) {
+	f.gotOpenCtx = ctx
 	f.gotOpenInput = in
 	return f.opened, f.err
 }
 
-func (f *fakeShellTerminalService) ListShellTerminalsForCurrentAppRun(context.Context) ([]shelltermsvc.ShellTerminal, error) {
+func (f *fakeShellTerminalService) ListShellTerminalsForCurrentAppRun(ctx context.Context) ([]shelltermsvc.ShellTerminal, error) {
+	f.gotListCtx = ctx
 	return f.listed, f.err
 }
 

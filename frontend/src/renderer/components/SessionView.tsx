@@ -2,7 +2,7 @@ import { apiErrorException } from "../lib/api-error-exception";
 import { getApiBaseUrl } from "../lib/api-client";
 import { baseUrlForHost } from "../lib/host-clients";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, PanelRight, Plus, SquareTerminal } from "@/components/app-icons";
+import { Loader2, PanelRight, Plus, ShieldCheck, SquareTerminal } from "@/components/app-icons";
 import { useBlocker } from "@tanstack/react-router";
 import { motion } from "motion/react";
 import {
@@ -117,6 +117,7 @@ import { latestScriptRun } from "../lib/cloud-script-runs";
 import { cloudChatEventsQueryKey, recordCloudScriptStepEvents, useCachedQueryData, useCloudScriptRuns } from "../hooks/useCloudScriptRuns";
 import { useTerminalResetStore } from "../stores/terminal-reset-store";
 import { apiErrorCode, apiErrorMessage } from "../lib/api-client";
+import { NewTerminalMenu, shellOpenErrorMessage, type TerminalChoice, terminalChoiceInput } from "./NewTerminalMenu";
 import { clientForSessionHost } from "../lib/host-clients";
 import { useHostConnection } from "../hooks/useHostConnection";
 import { sessionReviewsQueryKey } from "../lib/session-reviews";
@@ -995,8 +996,9 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 
 	const openShellTerminal = useOpenShellTerminal(hostId);
 	// Split panes are a Developer mode preview; off, no split is shown and
-	// turning it off mid-split puts every tab back in the strip.
-	const splitPanes = useSplitPanesEnabled() && !pane;
+	// turning it off mid-split puts every tab back in the strip. A project
+	// orchestrator always has them: its terminals open beside its chat.
+	const splitPanes = (useSplitPanesEnabled() || Boolean(session && isOrchestratorSession(session))) && !pane;
 	const developerMode = useUiStore((state) => state.developerMode);
 	// Tabs can be shown together: they merge into one group tab in the strip and
 	// the screen splits into one pane per member, where any pane can split
@@ -1103,8 +1105,15 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	// Scoped to the session on screen so the daemon roots the shell in that
 	// session's worktree (the project id is only the fallback when the session's
 	// workspace can no longer be resolved).
-	const addShellTerminal = useCallback(() => {
-		const shell = openShellTerminal.open({ projectId: session?.workspaceId, sessionId, cloud: session?.cloud });
+	// A menu row names a shell and whether it runs as administrator; a click or
+	// shortcut passes nothing (or its event) and opens the default shell as user.
+	const addShellTerminal = useCallback((choice?: TerminalChoice) => {
+		const shell = openShellTerminal.open({
+			projectId: session?.workspaceId,
+			sessionId,
+			cloud: session?.cloud,
+			...terminalChoiceInput(choice),
+		});
 		if (!shell) return;
 		setFileTabsBySession((current) => ({
 			...current,
@@ -1539,28 +1548,48 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		],
 	);
 
-	const newTerminalError = openShellTerminal.error ? apiErrorMessage(openShellTerminal.error) : undefined;
-	const newShellTerminalAction = useMemo(() =>
-		session && !isOrchestrator ? (
-			<Tooltip>
-				<TooltipTrigger asChild>
-					<Button size="icon-sm"
-						aria-label={t("shortcut.new-shell-terminal")}
-						data-terminal-focus-handoff="true"
-						onClick={addShellTerminal}
-						type="button"
-						variant="quiet"
-					>
-						<Plus aria-hidden="true" className="size-icon-md" />
-					</Button>
-				</TooltipTrigger>
-				<TooltipContent shortcut={newTerminalError ? undefined : "new-shell-terminal"} side="bottom">
-					{newTerminalError ?? t("terminal.new")}
-				</TooltipContent>
-			</Tooltip>
-		) : null,
-		[addShellTerminal, isOrchestrator, newTerminalError, session, t],
+	const newTerminalError = openShellTerminal.error ? shellOpenErrorMessage(openShellTerminal.error, t) : undefined;
+	const newTerminalFailureKey = openShellTerminal.isError ? openShellTerminal.submittedAt : undefined;
+	// An orchestrator's terminal opens beside its chat; a worker's opens as a tab.
+	const openTerminalFromMenu = useCallback(
+		(choice: TerminalChoice) => {
+			if (isOrchestrator && splitPanes) splitNewTerminalRef.current("right", choice);
+			else addShellTerminal(choice);
+		},
+		[addShellTerminal, isOrchestrator, splitPanes],
 	);
+	const newShellTerminalAction = useMemo(() => {
+		if (!session || (isOrchestrator && session.cloud)) return null;
+		// A Cloud sandbox has one shell to offer, so its "+" stays one click.
+		if (session.cloud) {
+			return (
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<Button size="icon-sm"
+							aria-label={t("shortcut.new-shell-terminal")}
+							data-terminal-focus-handoff="true"
+							onClick={() => addShellTerminal()}
+							type="button"
+							variant="quiet"
+						>
+							<Plus aria-hidden="true" className="size-icon-md" />
+						</Button>
+					</TooltipTrigger>
+					<TooltipContent shortcut={newTerminalError ? undefined : "new-shell-terminal"} side="bottom">
+						{newTerminalError ?? t("terminal.new")}
+					</TooltipContent>
+				</Tooltip>
+			);
+		}
+		return (
+			<NewTerminalMenu
+				failure={newTerminalError}
+				failureKey={newTerminalFailureKey}
+				hostId={hostId}
+				onOpen={openTerminalFromMenu}
+			/>
+		);
+	}, [addShellTerminal, hostId, isOrchestrator, newTerminalError, newTerminalFailureKey, openTerminalFromMenu, session, t]);
 	const sendCloudFileAnnotation = useCallback(async (message: string) => {
 		const orgId = session?.cloud?.orgId;
 		if (!orgId) throw new Error(t("files.feedbackError"));
@@ -1702,8 +1731,9 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		(key: string) => (key === SESSION_TAB_KEY ? selectSessionTerminal() : activateAuxiliaryTab(key)),
 		[activateAuxiliaryTab, selectSessionTerminal],
 	);
-	// ⌘D's action, set further down; tab menus reuse it.
-	const splitNewTerminalRef = useRef<(side: "right" | "bottom") => void>(() => undefined);
+	// ⌘D's action, set further down; tab menus and the orchestrator's new
+	// terminal menu reuse it.
+	const splitNewTerminalRef = useRef<(side: "right" | "bottom", choice?: TerminalChoice) => void>(() => undefined);
 	// Tab menus split their tab beside the one on screen, as dropping it on
 	// that pane's edge does; the tab on screen splits off a new terminal, as
 	// ⌘D does. Only while split panes are on.
@@ -1899,7 +1929,11 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 				onSelect,
 				onClose,
 				label: shell?.title ?? key,
-				icon: <SquareTerminal aria-hidden="true" className="size-icon-sm" />,
+				icon: shell?.elevated ? (
+					<ShieldCheck aria-label={t("terminal.adminTooltip")} className="size-icon-sm text-status-in-review" />
+				) : (
+					<SquareTerminal aria-hidden="true" className="size-icon-sm" />
+				),
 				agentHandleId: tracksAgent ? key : undefined,
 			};
 		};
@@ -1963,10 +1997,17 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 
 	// ⌘D opens a new terminal to the right of the focused pane and ⌘⇧D one
 	// below it, splitting the tab on screen if it is not split yet.
-	splitNewTerminalRef.current = (side) => {
-		if (!session || isOrchestrator || !splitPanes) return;
+	// An orchestrator reaches it only from its new terminal menu: its shortcuts
+	// and tab menus stay off.
+	splitNewTerminalRef.current = (side, choice) => {
+		if (!session || !splitPanes) return;
 		const anchor = splittableKeys.has(selectedTabKey) ? selectedTabKey : SESSION_TAB_KEY;
-		const shell = openShellTerminal.open({ projectId: session.workspaceId, sessionId, cloud: session.cloud });
+		const shell = openShellTerminal.open({
+			projectId: session.workspaceId,
+			sessionId,
+			cloud: session.cloud,
+			...terminalChoiceInput(choice),
+		});
 		if (!shell) return;
 		const key = shell.handleId;
 		updateGroups((current) => splitBeside(current, anchor, key, side));

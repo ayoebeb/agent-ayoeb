@@ -233,6 +233,7 @@ import {
 	type BrowserRuntimeLinkHandle,
 } from "./main/browser-runtime-link";
 import { resolveBrowserRuntimeToken } from "./main/browser-runtime-token";
+import { desktopElevationToken, installDesktopElevationHeader } from "./main/desktop-elevation";
 import { checkRender, measureRender } from "./main/render-check";
 import {
 	connectBrowserStream,
@@ -1110,6 +1111,14 @@ async function createWindowInternal(): Promise<void> {
 	// nearest agent page around its frame; the app's own pass untouched. Pages
 	// cannot start workers (their CSP has worker-src 'none'), whose requests
 	// carry no frame.
+	// Administrator terminals: this window's own requests to its daemon's
+	// terminal routes carry the desktop credential (see desktop-elevation.ts).
+	installDesktopElevationHeader(shellWebContents.session, {
+		webContentsId: shellWebContents.id,
+		mainFrame: () => shellWebContents.mainFrame,
+		daemonPort: () => (daemonStatus.state === "ready" ? daemonStatus.port : undefined),
+		token: desktopElevationToken(browserRuntimeToken),
+	});
 	const blockedPageHosts = new Set<string>();
 	shellWebContents.session.webRequest.onBeforeRequest((details, callback) => {
 		// Loading an agent page into a frame is always allowed: the page's own

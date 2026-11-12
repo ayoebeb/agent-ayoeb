@@ -517,3 +517,43 @@ describe("tabs opened while their shell is being created", () => {
 		expect(adoptedShellHandle(pending.handleId)).toBeUndefined();
 	});
 });
+
+describe("administrator terminals", () => {
+	it("asks the daemon for an elevated shell and marks its tab while the prompt is open", async () => {
+		isWindowsMock.mockReturnValue(true);
+		let answer!: (value: unknown) => void;
+		postMock.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+		const queryClient = queryClientWithShells();
+		const { result } = renderHook(() => useOpenShellTerminal(), { wrapper: wrapper(queryClient) });
+
+		let pending!: ShellTerminal;
+		act(() => { pending = result.current.open({ sessionId: "proj-orchestrator", shell: "pwsh", elevated: true }); });
+		expect(pending).toMatchObject({ elevated: true, optimistic: true });
+		await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/shell-terminals", {
+			body: expect.objectContaining({ sessionId: "proj-orchestrator", shell: "pwsh", elevated: true }),
+		}));
+
+		await act(async () => answer({ data: { shellTerminal: { ...shells[0], handleId: "shellterm-admin-1", elevated: true } } }));
+		await waitFor(() => expect(queryClient.getQueryData<ShellTerminal[]>(shellTerminalsQueryKey)).toEqual(
+			expect.arrayContaining([expect.objectContaining({ handleId: "shellterm-admin-1", elevated: true })]),
+		));
+	});
+
+	it("leaves no tab when the administrator prompt is declined", async () => {
+		isWindowsMock.mockReturnValue(true);
+		postMock.mockResolvedValue({ error: { code: "ELEVATION_DECLINED", message: "Administrator access was declined" } });
+		getMock.mockResolvedValue({ data: { shellTerminals: shells } });
+		const queryClient = queryClientWithShells();
+		const { result } = renderHook(() => useOpenShellTerminal(), { wrapper: wrapper(queryClient) });
+
+		let pending!: ShellTerminal;
+		act(() => { pending = result.current.open({ sessionId: "proj-orchestrator", shell: "pwsh", elevated: true }); });
+		await waitFor(() => expect(result.current.isError).toBe(true));
+
+		expect(result.current.error).toMatchObject({ code: "ELEVATION_DECLINED" });
+		const listed = queryClient.getQueryData<ShellTerminal[]>(shellTerminalsQueryKey) ?? [];
+		expect(listed.some((shell) => shell.handleId === pending.handleId || shell.elevated)).toBe(false);
+		// A declined prompt says nothing about the saved default shell.
+		expect(shellStoreMock.setPreference).not.toHaveBeenCalled();
+	});
+});

@@ -32,6 +32,9 @@ type ShellTerminal struct {
 	// TerminalTitle is present only when the program's title should label the tab.
 	TerminalTitle string    `json:"terminalTitle,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// Elevated marks an administrator terminal. Only the local desktop app
+	// can see or attach one (see ElevationAccess).
+	Elevated bool `json:"elevated,omitempty"`
 }
 
 // OpenShellTerminalInput is the request to open a new shell pane. An empty
@@ -59,6 +62,10 @@ type OpenShellTerminalInput struct {
 	// StartOnAttach waits for (saving that round trip before the first prompt).
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`
+	// Elevated opens the shell as administrator behind a UAC prompt on this
+	// computer (Windows only). The request must come from the local desktop
+	// app; see ElevationAccess.
+	Elevated bool `json:"elevated,omitempty"`
 }
 
 // InitialInputReadyState describes a terminal state relevant to the command's

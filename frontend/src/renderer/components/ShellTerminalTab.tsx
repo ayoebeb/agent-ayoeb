@@ -1,5 +1,5 @@
 import { agentLabel } from "@aoagents/product-ui";
-import { CircleAlert, LoaderCircle, SquareTerminal, X } from "@/components/app-icons";
+import { CircleAlert, LoaderCircle, ShieldCheck, SquareTerminal, X } from "@/components/app-icons";
 import { type KeyboardEvent, type MouseEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTruncatedText } from "../hooks/useTruncatedText";
@@ -70,6 +70,12 @@ export function ShellTerminalTab({
 	// An agent's name is display only, so renaming starts from the real title.
 	const renameBase = terminalTitle ?? shell.title;
 	const { ref, isTruncated } = useTruncatedText<HTMLButtonElement>(title);
+	// An administrator shell is marked by glyph and word, never colour alone,
+	// so it cannot be mistaken for an ordinary one.
+	const elevated = Boolean(shell.elevated);
+	const hoverHint = isTruncated ? title : t("terminal.renameHintDoubleClick", { workingDir: shell.workingDir });
+	const tabHint = elevated ? `${t("terminal.adminTooltip")} · ${hoverHint}` : hoverHint;
+	const adminBadge = elevated ? <AdminBadge /> : undefined;
 	useEffect(() => {
 		if (isActive && unseenDone) markSeen(shell.handleId);
 	}, [isActive, markSeen, shell.handleId, unseenDone]);
@@ -181,9 +187,7 @@ export function ShellTerminalTab({
 						...renameKeyProps,
 						role: "tab",
 						tabIndex: isActive ? 0 : -1,
-						title: isTruncated
-							? title
-							: t("terminal.renameHintDoubleClick", { workingDir: shell.workingDir }),
+						title: tabHint,
 						type: "button",
 					}}
 					buttonRef={ref}
@@ -192,12 +196,14 @@ export function ShellTerminalTab({
 					icon={
 						agent ? (
 							<AgentAvatar className="size-icon-sm!" decorative provider={agent.harness} />
+						) : elevated ? (
+							<ShieldCheck aria-hidden="true" className="size-icon-sm text-status-in-review" />
 						) : (
 							<SquareTerminal aria-hidden="true" className="size-icon-sm" />
 						)
 					}
 					label={title}
-					trailing={agent ? <ShellAgentStatus agent={agent} done={unseenDone && !isActive} /> : undefined}
+					trailing={agent ? <ShellAgentStatus agent={agent} done={unseenDone && !isActive} /> : adminBadge}
 				/>
 			</TabContextMenu>
 		);
@@ -242,15 +248,13 @@ export function ShellTerminalTab({
 					{...renameKeyProps}
 					role="tab"
 					tabIndex={isActive ? 0 : -1}
-					title={
-						isTruncated
-							? title
-							: t("terminal.renameHintDoubleClick", { workingDir: shell.workingDir })
-					}
+					title={tabHint}
 					type="button"
 				>
-					<span className="inline-flex min-w-0 -translate-y-px items-center">
+					<span className="inline-flex min-w-0 -translate-y-px items-center gap-1">
+						{elevated ? <ShieldCheck aria-hidden="true" className="size-icon-sm shrink-0 text-status-in-review" /> : null}
 						<span className="truncate">{title}</span>
+						{adminBadge}
 					</span>
 				</Pressable>
 			)}
@@ -260,6 +264,16 @@ export function ShellTerminalTab({
 			>
 				<X aria-hidden="true" className="size-icon-sm" />
 			</Pressable>
+		</span>
+	);
+}
+
+/** The word that marks an administrator shell's tab, in the caution colour. */
+export function AdminBadge() {
+	const { t } = useTranslation();
+	return (
+		<span className="font-sans text-caption font-medium text-status-in-review" data-admin-badge="">
+			{t("terminal.adminBadge")}
 		</span>
 	);
 }

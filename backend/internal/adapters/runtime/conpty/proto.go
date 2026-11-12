@@ -35,6 +35,13 @@ const (
 	MsgForegroundState    byte = 0x0c // host -> watcher: JSON ForegroundPayload, sent on change
 	MsgWatchTitleReq      byte = 0x0d // client -> host: empty; turns the connection into a title watcher
 	MsgTitleState         byte = 0x0e // host -> watcher: JSON TitlePayload, sent on change
+	// MsgAuthReq opens every connection to an elevated host: its payload is the
+	// host's per-launch token. Ordinary loopback hosts never see it.
+	MsgAuthReq byte = 0x10 // client -> elevated host: token, first frame only
+	// MsgAuthOK acknowledges a valid token. A client writes nothing else until
+	// it arrives, so its bytes only ever reach a pipe instance the host has
+	// connected (a client that writes and hangs up before then loses them).
+	MsgAuthOK byte = 0x11 // elevated host -> client: empty
 )
 
 // JSON payload structs shared with later tasks (kept minimal).

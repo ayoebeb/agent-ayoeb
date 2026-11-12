@@ -5,6 +5,8 @@ import { act, fireEvent, render as rtlRender, renderHook, screen, waitFor, withi
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionView } from "./SessionView";
+import { leafKeys, SESSION_TAB_KEY } from "../lib/pane-split";
+import { useSplitPanesStore } from "../stores/split-panes-store";
 import { appShortcutBus } from "../test/app-shortcut-bus";
 import { useFilesTopbarHost } from "./files-topbar-host";
 import { SessionTopbarProvider } from "./SessionTopbarPortal";
@@ -852,6 +854,28 @@ vi.mock("../hooks/useWorkspaceQuery", () => ({
 }));
 // Standalone shell terminals are orthogonal to the split under test, and their
 // real hooks would need a QueryClientProvider this suite deliberately omits.
+// The "+" menu lists the daemon's shells; this one is a Windows desktop that
+// may open administrator terminals.
+vi.mock("../hooks/useTerminalShells", () => ({
+	useTerminalShells: () => ({
+		data: {
+			default: { id: "auto", name: "PowerShell", path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+			shells: [
+				{ id: "powershell", name: "Windows PowerShell", path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+				{ id: "pwsh", name: "PowerShell", path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+				{ id: "git-bash", name: "Git Bash", path: "C:\\Program Files\\Git\\bin\\bash.exe" },
+			],
+			elevation: { available: true },
+		},
+	}),
+}));
+
+// Opens the "+" menu and picks a row; the default shell's row by default.
+function chooseNewTerminal(row: RegExp = /^PowerShell/) {
+	fireEvent.keyDown(screen.getByRole("button", { name: "New terminal" }), { key: "ArrowDown" });
+	fireEvent.click(screen.getByRole("menuitem", { name: row }));
+}
+
 vi.mock("../hooks/useShellTerminals", () => ({
 	adoptedShellHandle: (handleId: string) => adoptedShellHandles.get(handleId),
 	useShellTerminals: () => ({ data: shellTerminalsState.loaded ? shellTerminalsState.data : undefined, isLoading: !shellTerminalsState.loaded }),
@@ -1813,8 +1837,7 @@ describe("SessionView", () => {
 	it("opens new terminals in the on-screen session's worktree", () => {
 		render(<SessionView sessionId="sess-2" />);
 
-		const newTerminalButton = screen.getByRole("button", { name: "New terminal" });
-		fireEvent.click(newTerminalButton);
+		chooseNewTerminal();
 		expect(openShellTerminalMock).toHaveBeenCalledWith({ projectId: "proj-1", sessionId: "sess-2" });
 		expect(useUiStore.getState().activeShellTerminalHandleId).toBe("pending-shell:test");
 	});
@@ -2685,7 +2708,7 @@ describe("SessionView", () => {
 		fireEvent.click(screen.getByRole("button", { name: "view review file" }));
 		expect(await screen.findByTestId("session-file-workspace")).toHaveTextContent("src/panel.tsx");
 
-		fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+		chooseNewTerminal();
 		expect(screen.getByTestId("session-file-workspace").closest("[inert]")).not.toBeNull();
 		expect(screen.getByTestId("terminal-target")).toHaveTextContent("pending-shell:1");
 		finishCreate(0, shell, view);
@@ -2704,8 +2727,8 @@ describe("SessionView", () => {
 		});
 		const view = render(<SessionView sessionId="sess-1" />);
 
-		fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
-		fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+		chooseNewTerminal();
+		chooseNewTerminal();
 		expect(screen.getByTestId("terminal-target")).toHaveTextContent("pending-shell:2");
 
 		// The first shell arrives while the second tab is selected.
@@ -2729,7 +2752,7 @@ describe("SessionView", () => {
 			createdAt: `2026-08-31T00:00:0${n}Z`,
 		});
 		const view = render(<SessionView sessionId="sess-1" />);
-		for (let i = 0; i < 4; i++) fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+		for (let i = 0; i < 4; i++) chooseNewTerminal();
 		for (let i = 0; i < 3; i++) finishCreate(i, shell(i + 1), view);
 		expect(screen.getByTestId("terminal-target")).toHaveTextContent("pending-shell:4");
 
@@ -2834,10 +2857,32 @@ describe("SessionView", () => {
 		act(() => useUiStore.setState({ chatMessageFocusRequest: null }));
 	});
 
-	it("does not offer a new terminal for orchestrator sessions", () => {
+	// The orchestrator now has the "+" too: a terminal opens beside its chat,
+	// without the Developer mode split preview.
+	it("opens an orchestrator's new terminal split to the right of its chat", () => {
+		useUiStore.setState({ developerMode: false });
+		mockShellCreation();
 		render(<SessionView sessionId="sess-orch" />);
 
-		expect(screen.queryByRole("button", { name: "New terminal" })).not.toBeInTheDocument();
+		chooseNewTerminal(/^Git Bash/);
+
+		expect(openShellTerminalMock).toHaveBeenCalledWith({ projectId: "proj-1", sessionId: "sess-orch", shell: "git-bash" });
+		const groups = Object.values(useSplitPanesStore.getState().groupsBySession).flat();
+		const split = groups.find((group) => leafKeys(group.root).includes("pending-shell:1"));
+		expect(split && leafKeys(split.root)).toEqual([SESSION_TAB_KEY, "pending-shell:1"]);
+		expect(split?.root).toMatchObject({ type: "split", dir: "row" });
+	});
+
+	it("opens an orchestrator's administrator terminal from the menu's administrator rows", () => {
+		mockShellCreation();
+		render(<SessionView sessionId="sess-orch" />);
+
+		fireEvent.keyDown(screen.getByRole("button", { name: "New terminal" }), { key: "ArrowDown" });
+		fireEvent.keyDown(screen.getByRole("menuitem", { name: "Run as administrator" }), { key: "ArrowRight" });
+		fireEvent.click(screen.getByRole("menuitem", { name: "PowerShell as administrator" }));
+
+		// The default row names no shell: the daemon opens the saved default.
+		expect(openShellTerminalMock).toHaveBeenCalledWith({ projectId: "proj-1", sessionId: "sess-orch", elevated: true });
 	});
 
 	// Regression (#3874 then re-added by #4252): the prime top bar carries session
@@ -2847,7 +2892,7 @@ describe("SessionView", () => {
 	it.each([
 		["a terminal worker", "sess-1", "tui", true],
 		["a chat worker", "sess-1", "chat", true],
-		["an orchestrator", "sess-orch", "tui", false],
+		["an orchestrator", "sess-orch", "tui", true],
 	] as const)("keeps the git branch out of %s session's top bar", (_label, sessionId, mode, offersNewTerminal) => {
 		workerSession(sessionId).mode = mode;
 

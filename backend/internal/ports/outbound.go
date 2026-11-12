@@ -239,7 +239,21 @@ type RuntimeConfig struct {
 	// (user and command shells, not agents) need not pay it continuously.
 	// Runtimes that always render ignore it.
 	LazyStyledOutput bool
+	// Elevated runs Argv with administrator rights behind a UAC prompt on the
+	// local desktop (Windows only). Env is not applied: the elevated process
+	// gets its own clean environment, so no AO credential reaches it. Runtimes
+	// without elevation return ErrElevationUnsupported; a declined prompt
+	// returns ErrElevationCancelled with nothing started.
+	Elevated bool
 }
+
+// ErrElevationCancelled reports that the user declined the administrator
+// (UAC) prompt for an elevated runtime. No process was started.
+var ErrElevationCancelled = errors.New("runtime: administrator access was declined")
+
+// ErrElevationUnsupported reports that the runtime cannot start an elevated
+// process on this platform.
+var ErrElevationUnsupported = errors.New("runtime: administrator terminals are not supported on this platform")
 
 // RuntimeHandle identifies a live runtime instance. Its ID is opaque outside
 // the concrete runtime adapter.

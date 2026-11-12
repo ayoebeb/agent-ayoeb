@@ -856,6 +856,7 @@ it("opens a shell tab on Box B without attaching a local or Box A terminal", asy
 	queryClient.setQueryData(shellTerminalsQueryKeyForHost("box-a"), "box-a-sentinel");
 	renderRemoteSession(queryClient, "box-b");
 	await userEvent.click(await screen.findByRole("button", { name: "New terminal" }));
+	await userEvent.click(await screen.findByRole("menuitem", { name: "Default shell" }));
 	await waitFor(() => expect(shellPosts).toEqual(["http://127.0.0.1:4001/api/v1/shell-terminals"]));
 	const shellPane = await screen.findByTestId("chat-shell-terminal");
 	expect(within(shellPane).getByTestId("remote-terminal-base")).toHaveAttribute("data-host-id", "box-b");

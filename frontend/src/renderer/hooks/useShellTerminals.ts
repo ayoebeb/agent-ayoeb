@@ -30,6 +30,8 @@ export type ShellTerminal = {
 	hostId?: HostId;
 	/** Present when the shell lives in a control-plane sandbox, not the local daemon. */
 	cloud?: { orgId: string };
+	/** Runs as administrator; only this computer's desktop app is ever shown one. */
+	elevated?: boolean;
 	/**
 	 * Exists only in the renderer while the daemon is creating the PTY. It lets
 	 * the tab strip respond to the click immediately without ever attempting to
@@ -61,6 +63,7 @@ export function toShellTerminal(t: components["schemas"]["ShellTerminalResponse"
 		...(t.terminalTitle ? { terminalTitle: t.terminalTitle } : {}),
 		createdAt: t.createdAt,
 		...(hostId && hostId !== LOCAL_HOST ? { hostId } : {}),
+		...(t.elevated ? { elevated: true } : {}),
 	};
 }
 
@@ -162,6 +165,11 @@ export type OpenShellTerminalInput = {
 	projectId?: string;
 	sessionId?: string;
 	shell?: string;
+	/**
+	 * Open as administrator behind a UAC prompt on this computer. The daemon
+	 * accepts it only from this app's own window (see main/desktop-elevation.ts).
+	 */
+	elevated?: boolean;
 	cloud?: { orgId: string };
 	/**
 	 * Typed into a Cloud shell once it is up (a command cue's command). It is
@@ -206,7 +214,7 @@ function nextShellTerminalTitle(terminals: ShellTerminal[]): string {
 }
 
 function createOptimisticShellTerminal(
-	{ projectId, sessionId }: OpenShellTerminalInput,
+	{ projectId, sessionId, elevated }: OpenShellTerminalInput,
 	terminals: ShellTerminal[],
 	hostId?: HostId,
 ): ShellTerminal {
@@ -219,6 +227,7 @@ function createOptimisticShellTerminal(
 		title: nextShellTerminalTitle(terminals),
 		createdAt: new Date().toISOString(),
 		...(hostId && hostId !== LOCAL_HOST ? { hostId } : {}),
+		...(elevated ? { elevated: true } : {}),
 		optimistic: true,
 	};
 }
@@ -243,6 +252,7 @@ export function useOpenShellTerminal(hostId?: HostId) {
 		projectId,
 		sessionId,
 		shell,
+		elevated,
 		cloud,
 		initialInput,
 		optimisticShell,
@@ -296,6 +306,7 @@ export function useOpenShellTerminal(hostId?: HostId) {
 		if (optimisticShell) body.title = optimisticShell.title;
 		if (projectId) body.projectId = projectId;
 		if (sessionId) body.sessionId = sessionId;
+		if (elevated) body.elevated = true;
 		if (remote && shell) body.shell = shell;
 		if (!remote) {
 			await useTerminalShellStore.getState().load();
@@ -355,13 +366,15 @@ export function useOpenShellTerminal(hostId?: HostId) {
 			// onSettled refetches the list; a second invalidation here only
 			// cancelled and restarted that same request.
 		},
-		onError: (error, _input, context) => {
+		onError: (error, input, context) => {
 			if (context?.optimisticHandleId) settlePendingShell(context.optimisticHandleId);
 			queryClient.setQueryData<ShellTerminal[]>(queryKey, (current) =>
 				current?.filter((shell) => shell.handleId !== context?.optimisticHandleId),
 			);
 			console.error("Failed to open shell terminal:", error);
-			if (!remote && apiErrorCode(error) === "SHELL_TERMINAL_SHELL_UNAVAILABLE") {
+			// Only the saved default can be stale; a shell picked from the menu
+			// was just detected and says nothing about the setting.
+			if (!remote && !input?.shell && apiErrorCode(error) === "SHELL_TERMINAL_SHELL_UNAVAILABLE") {
 				void useTerminalShellStore.getState().setPreference({ kind: "auto" });
 			}
 		},

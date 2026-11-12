@@ -59,6 +59,9 @@ type hostSession struct {
 	currentOwner     bool
 	protocolVersion  int
 	protocolResolved bool
+	// elevated marks an administrator host. Its address carries a secret, so
+	// it lives only in memory and is never written to the pty registry.
+	elevated bool
 }
 
 // Options configures the Runtime. All fields are optional; zero values use
@@ -67,6 +70,10 @@ type Options struct {
 	// Spawner overrides the default OS-level process spawner. If nil,
 	// defaultSpawnHost is used (Windows-only; returns an error on other OSes).
 	Spawner hostSpawner
+
+	// ElevatedSpawner overrides the UAC launch of an administrator host. Tests
+	// set it so no real prompt ever appears.
+	ElevatedSpawner elevatedSpawner
 
 	// RunFilePath is this daemon instance's running.json path (config.Config.
 	// RunFilePath). It scopes the B2 pty-host registry to the same directory,
@@ -82,14 +89,15 @@ type Options struct {
 
 // Runtime is the conpty runtime adapter.
 type Runtime struct {
-	spawner        hostSpawner
-	killHost       func(string) error
-	pidIsAlive     func(int) bool
-	processFinder  func(int) (processKiller, error)
-	registerHost   func(context.Context, ptyregistry.Entry) error
-	unregisterHost func(context.Context, string) error
-	destroyWait    time.Duration
-	destroyPoll    time.Duration
+	spawner         hostSpawner
+	elevatedSpawner elevatedSpawner
+	killHost        func(string) error
+	pidIsAlive      func(int) bool
+	processFinder   func(int) (processKiller, error)
+	registerHost    func(context.Context, ptyregistry.Entry) error
+	unregisterHost  func(context.Context, string) error
+	destroyWait     time.Duration
+	destroyPoll     time.Duration
 	// processTable reads every process, for RunningWorkloadCommands.
 	processTable func(context.Context) ([]procmem.Process, error)
 
@@ -104,21 +112,26 @@ func New(opts Options) *Runtime {
 	if sp == nil {
 		sp = defaultSpawnHost
 	}
+	elevated := opts.ElevatedSpawner
+	if elevated == nil {
+		elevated = defaultSpawnElevatedHost
+	}
 	unregisterHost := ptyregistry.Unregister
 	if opts.UnregisterHost != nil {
 		unregisterHost = opts.UnregisterHost
 	}
 	return &Runtime{
-		spawner:        sp,
-		killHost:       clientKill,
-		pidIsAlive:     pidAlive,
-		processFinder:  findProcess,
-		registerHost:   ptyregistry.Register,
-		unregisterHost: unregisterHost,
-		destroyWait:    500 * time.Millisecond,
-		destroyPoll:    25 * time.Millisecond,
-		processTable:   snapshotProcesses,
-		sessions:       make(map[string]*hostSession),
+		spawner:         sp,
+		elevatedSpawner: elevated,
+		killHost:        clientKill,
+		pidIsAlive:      pidAlive,
+		processFinder:   findProcess,
+		registerHost:    ptyregistry.Register,
+		unregisterHost:  unregisterHost,
+		destroyWait:     500 * time.Millisecond,
+		destroyPoll:     25 * time.Millisecond,
+		processTable:    snapshotProcesses,
+		sessions:        make(map[string]*hostSession),
 	}
 }
 
@@ -149,6 +162,10 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 	}
 	if existing != nil {
 		return ports.RuntimeHandle{}, conptyCreateFailure(fmt.Errorf("conpty: session %q already exists; destroy before re-creating", id))
+	}
+
+	if cfg.Elevated {
+		return r.createElevated(ctx, id, cfg)
 	}
 
 	r.mu.Lock()
@@ -304,8 +321,10 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 		return errors.Join(gracefulErr, forceErr, fmt.Errorf("conpty: pty-host pid %d is still alive after teardown", sess.pid))
 	}
 
-	if err := r.unregisterHost(ctx, handle.ID); err != nil {
-		return fmt.Errorf("conpty: unregister destroyed session %q: %w", handle.ID, err)
+	if !sess.elevated {
+		if err := r.unregisterHost(ctx, handle.ID); err != nil {
+			return fmt.Errorf("conpty: unregister destroyed session %q: %w", handle.ID, err)
+		}
 	}
 
 	r.mu.Lock()

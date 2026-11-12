@@ -58,6 +58,10 @@ func newHybridRuntime(legacy, direct routedBackend, log *slog.Logger, platform s
 // fails before a handle is returned, tmux remains a compatibility fallback so
 // a host-specific problem does not prevent an agent session from starting.
 func (r *hybridRuntime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
+	// An elevated request must never fall back to an ordinary tmux shell.
+	if cfg.Elevated {
+		return ports.RuntimeHandle{}, ports.ErrElevationUnsupported
+	}
 	handle, err := r.direct.Create(ctx, cfg)
 	if err == nil {
 		handle.ID = directHandlePrefix + handle.ID
