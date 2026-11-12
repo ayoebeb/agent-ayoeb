@@ -44,7 +44,7 @@ type Runtime interface {
 var (
 	screenLines       = 60
 	screenReadTimeout = 3 * time.Second
-	watchRetryMin     = 500 * time.Millisecond
+	watchRetryStart   = 500 * time.Millisecond
 	watchRetryMax     = 30 * time.Second
 )
 
@@ -143,7 +143,7 @@ func (m *Manager) SubscribeShellAgents(fn func(json.RawMessage)) func() {
 func (m *Manager) watch(ctx context.Context, handleID string) {
 	defer m.apply(ctx, handleID, nil)
 	handle := ports.RuntimeHandle{ID: handleID}
-	for backoff := watchRetryMin; ; backoff = min(backoff*2, watchRetryMax) {
+	for backoff := watchRetryStart; ; backoff = min(backoff*2, watchRetryMax) {
 		err := m.rt.WatchTerminalForeground(ctx, handle, func(fg ports.TerminalForeground) {
 			m.observe(ctx, handleID, fg)
 		})
