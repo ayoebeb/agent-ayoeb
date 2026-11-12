@@ -8,6 +8,7 @@
  */
 
 import { create } from "zustand";
+import { stripAnsi } from "../lib/ansi";
 import { apiErrorMessage } from "../lib/api-client";
 import {
 	CommandRunUnavailableError,
@@ -26,7 +27,12 @@ export type CommandRun = {
 	command: string;
 	shell: string;
 	status: CommandRunStatus;
-	output: string;
+	/** Completed output lines, already projected for display (see commandRunText). */
+	screen: string;
+	/** The line still being written, raw: a carriage return may yet overwrite it. */
+	tail: string;
+	/** Characters of output received, toward MAX_STORED_OUTPUT. */
+	received: number;
 	truncated: boolean;
 	startedAt: number;
 	runId?: string;
@@ -59,6 +65,30 @@ export function isCommandRunActive(run: CommandRun | undefined): boolean {
 	return run?.status === "starting" || run?.status === "running";
 }
 
+/**
+ * The run's output as a terminal would show it: colour codes and overwritten
+ * progress resolved, trailing blank lines dropped. Completed lines were
+ * projected once as they arrived, so this only works on the current line.
+ */
+export function commandRunText(run: Pick<CommandRun, "screen" | "tail">): string {
+	return (run.screen + stripAnsi(run.tail)).trimEnd();
+}
+
+/** Appends output, projecting each line once it is complete. */
+function appendOutput(run: CommandRun, text: string): Partial<CommandRun> {
+	const room = MAX_STORED_OUTPUT - run.received;
+	if (room <= 0) return { truncated: true };
+	const accepted = text.length > room ? text.slice(0, room) : text;
+	const pending = run.tail + accepted;
+	const cut = pending.lastIndexOf("\n") + 1;
+	return {
+		received: run.received + accepted.length,
+		screen: cut ? run.screen + stripAnsi(pending.slice(0, cut)) : run.screen,
+		tail: pending.slice(cut),
+		...(accepted.length < text.length ? { truncated: true } : {}),
+	};
+}
+
 export const useCommandRunStore = create<CommandRunStore>((set, get) => {
 	const update = (key: string, controller: AbortController, patch: (run: CommandRun) => Partial<CommandRun>) => {
 		// A later run of the same block replaced this one: drop late events.
@@ -79,7 +109,7 @@ export const useCommandRunStore = create<CommandRunStore>((set, get) => {
 			set((state) => ({
 				runs: {
 					...state.runs,
-					[key]: { target, command, shell, status: "starting", output: "", truncated: false, startedAt: Date.now() },
+					[key]: { target, command, shell, status: "starting", screen: "", tail: "", received: 0, truncated: false, startedAt: Date.now() },
 				},
 			}));
 			void (async () => {
@@ -96,13 +126,7 @@ export const useCommandRunStore = create<CommandRunStore>((set, get) => {
 							}));
 						} else if (typeof event.output === "string") {
 							const text = event.output;
-							update(key, controller, (run) => {
-								const room = MAX_STORED_OUTPUT - run.output.length;
-								if (room <= 0) return { truncated: true };
-								return text.length > room
-									? { output: run.output + text.slice(0, room), truncated: true }
-									: { output: run.output + text };
-							});
+							update(key, controller, (run) => appendOutput(run, text));
 						} else if (event.exit) {
 							ended = true;
 							const exit = event.exit;

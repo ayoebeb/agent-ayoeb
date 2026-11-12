@@ -12,7 +12,6 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronRight, Loader2, Play, Square, SquareTerminal, X } from "@/components/app-icons";
-import { stripAnsi } from "../../lib/ansi";
 import { apiErrorMessage } from "../../lib/api-client";
 import { formatScriptDuration } from "../../lib/cloud-script-runs";
 import {
@@ -29,7 +28,7 @@ import { markTerminalHandleFresh } from "../../lib/fresh-terminal-handles";
 import { LOCAL_HOST } from "../../lib/hosts";
 import { cn } from "../../lib/utils";
 import { shellTerminalsQueryKeyForHost, toShellTerminal, type ShellTerminal } from "../../hooks/useShellTerminals";
-import { isCommandRunActive, useCommandRunStore, type CommandRun } from "../../stores/command-run-store";
+import { commandRunText, isCommandRunActive, useCommandRunStore, type CommandRun } from "../../stores/command-run-store";
 import { terminalShellRequestValue, useTerminalShellStore } from "../../stores/terminal-shell-store";
 import { useUiStore } from "../../stores/ui-store";
 import { Button } from "../ui/button";
@@ -179,11 +178,6 @@ function useNow(active: boolean): number {
 	return now;
 }
 
-/** Output as a terminal would show it: colour codes and overwritten progress resolved, trailing blank lines dropped. */
-function displayOutput(raw: string): string {
-	return stripAnsi(raw).replace(/\s+$/, "");
-}
-
 function formatRunDuration(ms: number): string {
 	return ms < 10_000 ? `${(Math.max(0, ms) / 1000).toFixed(1)}s` : formatScriptDuration(ms);
 }
@@ -271,7 +265,8 @@ function RunSummary({ run }: { run: CommandRun }) {
 
 function RunActions({ run, current, onDismiss }: { run: CodeBlockRun; current: CommandRun; onDismiss: () => void }) {
 	const { t } = useTranslation();
-	const output = useMemo(() => displayOutput(current.output), [current.output]);
+	const { screen, tail } = current;
+	const output = useMemo(() => commandRunText({ screen, tail }), [screen, tail]);
 	const openInTerminal = useOpenInTerminal(run, current);
 	return (
 		<div className="flex shrink-0 items-center gap-0.5">
@@ -335,7 +330,8 @@ function RunOutputBody({ run }: { run: CommandRun }) {
 	const { t } = useTranslation();
 	const pre = useRef<HTMLPreElement>(null);
 	const follow = useRef(true);
-	const output = useMemo(() => displayOutput(run.output), [run.output]);
+	const { screen, tail } = run;
+	const output = useMemo(() => commandRunText({ screen, tail }), [screen, tail]);
 	useLayoutEffect(() => {
 		const node = pre.current;
 		if (node && follow.current) node.scrollTop = node.scrollHeight;

@@ -17,7 +17,7 @@ vi.mock("../lib/command-runs", async (importOriginal) => ({
 }));
 
 import { CommandRunUnavailableError } from "../lib/command-runs";
-import { MAX_STORED_OUTPUT, useCommandRunStore } from "./command-run-store";
+import { commandRunText, MAX_STORED_OUTPUT, useCommandRunStore } from "./command-run-store";
 
 const target = { sessionId: "s1" };
 const run = (key = "block") => useCommandRunStore.getState().runs[key];
@@ -32,7 +32,7 @@ beforeEach(() => {
 describe("command run store", () => {
 	it("streams output and records the exit code", async () => {
 		useCommandRunStore.getState().start("block", target, "Get-Date", "pwsh");
-		expect(run()).toMatchObject({ status: "starting", command: "Get-Date", shell: "pwsh", output: "" });
+		expect(run()).toMatchObject({ status: "starting", command: "Get-Date", shell: "pwsh", screen: "", tail: "" });
 		const live = daemon.runs[0];
 		expect(live.request).toEqual({ command: "Get-Date", shell: "pwsh" });
 		live.emit({ started: { runId: "cmdrun-1", shell: "PowerShell", shellPath: "pwsh.exe", workingDir: "C:\\repo", startedAt: "2026-11-12T10:00:00Z" } });
@@ -42,7 +42,21 @@ describe("command run store", () => {
 		live.emit({ exit: { exitCode: 3, durationMs: 120 } });
 		live.finish();
 		await flush();
-		expect(run()).toMatchObject({ status: "failed", exitCode: 3, durationMs: 120, output: "Wednesday\ndone\n" });
+		expect(run()).toMatchObject({ status: "failed", exitCode: 3, durationMs: 120 });
+		expect(commandRunText(run()!)).toBe("Wednesday\ndone");
+	});
+
+	it("projects each line once while a progress line keeps overwriting itself", () => {
+		useCommandRunStore.getState().start("block", target, "npm i", "auto");
+		const live = daemon.runs[0];
+		live.emit({ output: "\u001b[32mresolving\u001b[0m\nprogress 10%" });
+		expect(run()).toMatchObject({ screen: "resolving\n", tail: "progress 10%" });
+		live.emit({ output: "\rprogress 9" });
+		live.emit({ output: "9%\rprogress done\n\u001b[1" });
+		// The split escape sequence finishes in the next chunk.
+		live.emit({ output: "mok\u001b[0m\n" });
+		expect(run()).toMatchObject({ screen: "resolving\nprogress done\nok\n", tail: "" });
+		expect(commandRunText(run()!)).toBe("resolving\nprogress done\nok");
 	});
 
 	it("does not start a second run of a block that is still running", () => {
@@ -103,8 +117,9 @@ describe("command run store", () => {
 		live.emit({ output: "x".repeat(MAX_STORED_OUTPUT - 2) });
 		live.emit({ output: "yyyy" });
 		live.emit({ output: "zzzz" });
-		expect(run()?.output).toHaveLength(MAX_STORED_OUTPUT);
-		expect(run()?.output.endsWith("yy")).toBe(true);
+		const text = commandRunText(run()!);
+		expect(text).toHaveLength(MAX_STORED_OUTPUT);
+		expect(text.endsWith("yy")).toBe(true);
 		expect(run()?.truncated).toBe(true);
 		live.emit({ exit: { exitCode: 0, durationMs: 5, truncated: true, droppedBytes: 10 } });
 		live.finish();

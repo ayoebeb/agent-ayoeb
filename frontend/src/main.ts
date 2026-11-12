@@ -2996,9 +2996,11 @@ ipcMain.handle("daemon:restart", async () => {
 	}
 });
 // Chat's Run button presents this key to the local daemon. Only the app
-// window's main frame gets it: a subframe (an artifact or preview) must not.
+// shell's own renderer gets it, and only its main frame: any other web
+// contents, or a subframe (an artifact or preview), must not.
 const chatCommandRunKey = commandRunKey(browserRuntimeToken);
 ipcMain.handle("commandRuns:key", (event) => {
+	if (trustedShellWebContents.get(event.sender.id) !== event.sender) return "";
 	const { senderFrame } = event as { senderFrame?: { parent: unknown } | null };
 	if (senderFrame === null || (senderFrame && senderFrame.parent !== null)) return "";
 	return chatCommandRunKey;
