@@ -194,6 +194,6 @@ describe("Browser settings: other machines", () => {
 	it("says when no account is signed in", async () => {
 		install(makeBridge({ listOtherMachines: vi.fn(async () => ({ signedIn: false, machines: [] })) }));
 		render(<TooltipProvider><BrowserProfilesSection /></TooltipProvider>);
-		expect(await screen.findByText("Sign in to Ayo Cloud to see your other machines.")).toBeInTheDocument();
+		expect(await screen.findByText("Sign in to Orchestrator Cloud to see your other machines.")).toBeInTheDocument();
 	});
 });

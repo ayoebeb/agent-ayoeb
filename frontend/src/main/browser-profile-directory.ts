@@ -19,7 +19,7 @@ export type LinkedMachine = { hostId: string; name: string; url: string; credent
 /** Linked machines belong to an AO account; signed out there are none to read. */
 export class LinkedMachinesSignedOutError extends Error {
 	constructor() {
-		super("Sign in to Ayo Cloud to see your other machines.");
+		super("Sign in to Orchestrator Cloud to see your other machines.");
 		this.name = "LinkedMachinesSignedOutError";
 	}
 }
@@ -27,7 +27,7 @@ export class LinkedMachinesSignedOutError extends Error {
 /** AO Cloud did not answer with a usable directory. */
 export class AccountDirectoryUnavailableError extends Error {
 	constructor() {
-		super("Ayo Cloud did not list this account's machines.");
+		super("Orchestrator Cloud did not list this account's machines.");
 		this.name = "AccountDirectoryUnavailableError";
 	}
 }

@@ -1626,7 +1626,7 @@ describe("HarnessSettingsSection", () => {
 		cloudMocks.org = undefined;
 		renderSection(undefined, undefined, "cloud");
 
-		expect(await screen.findByText(/Sign in to Ayo Cloud/)).toBeInTheDocument();
+		expect(await screen.findByText(/Sign in to Orchestrator Cloud/)).toBeInTheDocument();
 		expect(screen.queryByText("Claude Code")).toBeNull();
 	});
 

@@ -426,7 +426,7 @@ export class BrowserProfileCopyService {
 		try {
 			machines = await this.options.linkedMachines();
 		} catch {
-			throw new CopyError("NOT_LINKED", "Sign in to Ayo Cloud to copy from your other machines.");
+			throw new CopyError("NOT_LINKED", "Sign in to Orchestrator Cloud to copy from your other machines.");
 		}
 		const machine = machines.find((candidate) => candidate.hostId === hostId);
 		if (!machine) throw new CopyError("NOT_LINKED", "That machine is no longer linked to this one.");

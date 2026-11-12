@@ -3526,7 +3526,7 @@ const browserProfileAccountDirectory = new AccountDirectory({
 	accountId: async () => (await getCloudSession(cloudDataDir()))?.user.id,
 	request: async (signal) => {
 		const baseUrl = await cloudControlPlaneUrl();
-		if (!baseUrl) throw new Error("No Ayo Cloud control plane is configured.");
+		if (!baseUrl) throw new Error("No Orchestrator Cloud control plane is configured.");
 		return cloudCpProxy.request({ baseUrl, path: "/api/cloud/v1/me/hosts", method: "GET" }, { hostTokens: true, signal });
 	},
 });
@@ -3559,12 +3559,12 @@ registerRemotesIpc(ipcMain, {
 	file: remotesFilePath(),
 	registry: remoteRegistry,
 	requireAccount: async () => {
-		if (!await getCloudSession(cloudDataDir())) throw new ExpectedIpcError("Sign in to Ayo Cloud to use remote hosts.");
+		if (!await getCloudSession(cloudDataDir())) throw new ExpectedIpcError("Sign in to Orchestrator Cloud to use remote hosts.");
 	},
 	getAccountId: async () => (await getCloudSession(cloudDataDir()))?.user.id ?? "",
 	cloudRequest: async (method, path, { body, signal } = {}) => {
 		const baseUrl = await cloudControlPlaneUrl();
-		if (!baseUrl) throw new ExpectedIpcError("No Ayo Cloud control plane is configured.");
+		if (!baseUrl) throw new ExpectedIpcError("No Orchestrator Cloud control plane is configured.");
 		return cloudCpProxy.request({
 			baseUrl, path, method,
 			...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),

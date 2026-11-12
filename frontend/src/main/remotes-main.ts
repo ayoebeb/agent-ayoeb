@@ -115,7 +115,7 @@ export function registerRemotesIpc(
 	const accountID = async () => {
 		await requireAccount();
 		const id = await getAccountId();
-		if (!id) throw new ExpectedIpcError("Sign in to Ayo Cloud to use remote hosts.");
+		if (!id) throw new ExpectedIpcError("Sign in to Orchestrator Cloud to use remote hosts.");
 		return id;
 	};
 	const owned = async () => {
@@ -203,9 +203,9 @@ export function registerRemotesIpc(
 				: await pending;
 		} catch (error) {
 			if (error instanceof ExpectedIpcError) throw error;
-			throw new ExpectedIpcError("Ayo Cloud did not answer the host sync.");
+			throw new ExpectedIpcError("Orchestrator Cloud did not answer the host sync.");
 		}
-		if (response.status >= 300) throw new ExpectedIpcError(`Ayo Cloud host sync failed (${response.status}).`);
+		if (response.status >= 300) throw new ExpectedIpcError(`Orchestrator Cloud host sync failed (${response.status}).`);
 		return (response.body ? JSON.parse(response.body) : {}) as T;
 	};
 	const importAccountHost = async (account: string, host: AccountHost) => {
