@@ -67,9 +67,12 @@ import { COMPOSER_MENU_WIDTH, TaskEffortPicker, TaskModelPicker } from "./TaskMo
 import { useModelTuning } from "./settings/ModelTuningControls";
 import {
 	readTaskComposerPreferences,
+	rememberTaskComposerInterface,
 	rememberTaskComposerPreference,
 	type TaskComposerAgentPreference,
+	type TaskComposerInterface,
 } from "../lib/task-composer-preferences";
+import { TaskInterfaceControl } from "./TaskInterfaceControl";
 
 type Project = components["schemas"]["Project"];
 type DelegateAgent = components["schemas"]["DelegateTaskRequest"]["agent"];
@@ -99,6 +102,13 @@ const CHAT_PREFLIGHT_CODES = new Set([
 ]);
 
 const READINESS_RECONCILE_CODES = new Set(["AGENT_BINARY_NOT_FOUND", "AGENT_AUTH_REQUIRED", "CHAT_AUTH_REQUIRED"]);
+
+/**
+ * Harnesses with no terminal interface, which start in Chat only. Settings
+ * report which harnesses have Chat (chatHarnesses) but not which lack a
+ * terminal, so this is the one place that says so.
+ */
+const CHAT_ONLY_HARNESSES: ReadonlySet<string> = new Set(["unreal-agent"]);
 
 function cancelTaskPreparation(token: string, hostId?: string): void {
 	if (!token) return;
@@ -183,6 +193,8 @@ export function useTaskLaunch({ projectId, hostId }: {
 	const [effortTouched, setEffortTouched] = useState(false);
 	// Only a permission the user picks is sent; otherwise the project's own applies.
 	const [approvalMode, setApprovalMode] = useState<ApprovalMode>();
+	// Chat or Terminal, once the user picks one for this task.
+	const [interfaceChoice, setInterfaceChoice] = useState<TaskComposerInterface>();
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 	const [status, setStatus] = useState<string | undefined>();
@@ -846,11 +858,27 @@ export function useTaskLaunch({ projectId, hostId }: {
 	// A cloud project's Chat-capable harnesses come from the control plane, as a
 	// local project's come from the daemon.
 	const chatHarnesses = isCloudProject ? cloudOffering.chatHarnesses : settings?.chatHarnesses;
-	const requiresTuiFallback =
-		selectedAgent !== "" &&
-		settings?.defaultSessionMode === "chat" &&
+	// Chat or Terminal: what the user picked for this task, else what they picked
+	// for this project's last task while Settings default to what it was picked
+	// over, else the Settings default.
+	const defaultInterface: TaskComposerInterface = settings?.defaultSessionMode === "chat" ? "chat" : "tui";
+	const rememberedInterface = persistedPreferences?.sessionInterface?.defaultMode === defaultInterface
+		? persistedPreferences.sessionInterface.mode
+		: undefined;
+	const wantedInterface = interfaceChoice ?? rememberedInterface ?? defaultInterface;
+	// What the agent can start in. A local list is known once Settings load; Cloud
+	// lists Chat for the harnesses it reports, and an older control plane for none.
+	const chatUnsupported = selectedAgent !== "" &&
+		(isCloudProject || settings !== undefined) &&
 		!(chatHarnesses ?? []).includes(selectedAgent);
-	const usesChatPermissions = !isCloudProject && !requiresTuiFallback && settings?.defaultSessionMode === "chat";
+	const interfaceLock: TaskComposerInterface | undefined = CHAT_ONLY_HARNESSES.has(selectedAgent)
+		? "chat"
+		: chatUnsupported ? "tui" : undefined;
+	const chosenInterface = interfaceLock ?? wantedInterface;
+	// Chat was wanted, but this agent starts in the terminal.
+	const requiresTuiFallback = wantedInterface === "chat" && interfaceLock === "tui";
+	// A Chat session's permission vocabulary; a Terminal task takes AO's own modes.
+	const usesChatPermissions = !isCloudProject && chosenInterface === "chat";
 	const permissionDiscovery = useChatPermissionModesQuery(hostId, usesChatPermissions ? selectedAgent : undefined);
 	const chatPermissionModes = permissionDiscovery.data?.get(selectedAgent);
 	const projectPermissions = projectConfig?.worker?.agentConfig?.permissions ?? projectConfig?.agentConfig?.permissions;
@@ -1145,6 +1173,12 @@ export function useTaskLaunch({ projectId, hostId }: {
 				agentDrafts[selectedAgent] = preference;
 				rememberTaskComposerPreference(preferenceContext, selectedAgent, preference);
 			}
+			// An interface the user picked is remembered for this project, as its agent
+			// is; picking the Settings default again forgets it. An agent that has only
+			// one interface says nothing about the user's preference.
+			if (interfaceChoice !== undefined && interfaceLock === undefined) {
+				rememberTaskComposerInterface(preferenceContext, { mode: interfaceChoice, defaultMode: defaultInterface });
+			}
 			return sessionId;
 		} catch (err) {
 			const canBypassApprovals =
@@ -1152,10 +1186,12 @@ export function useTaskLaunch({ projectId, hostId }: {
 				err.code === "SESSION_MODE_UNSUPPORTED" &&
 				hasErrorDetail(err.details, "missingCapabilities", "approvals") &&
 				hasErrorDetail(err.details, "allowedApprovalModes", "bypass-permissions");
+			// A task already asked for the terminal has no terminal to fall back to.
+			const requestedMode = replay ? replay.mode : interfaceMode;
 			setFallbackAction(
 				canBypassApprovals
 					? "bypass-permissions"
-					: selectedAgent !== "unreal-agent" && interfaceMode !== "tui" &&
+					: !CHAT_ONLY_HARNESSES.has(selectedAgent) && requestedMode !== "tui" &&
 							err instanceof TaskCreateError &&
 							Boolean(err.code && CHAT_PREFLIGHT_CODES.has(err.code))
 						? "tui"
@@ -1202,11 +1238,16 @@ export function useTaskLaunch({ projectId, hostId }: {
 			setIsSubmitting(false);
 		}
 	};
-	// The interface a plain submit asks for; a TUI-only agent cannot open Chat.
-	const submitMode: TaskLaunchOptions["interfaceMode"] = selectedAgent === "unreal-agent" ? "chat" : requiresTuiFallback ? "tui" : undefined;
+	// The interface a plain submit asks for: the one picked (for this task or this
+	// project's last), or the only one the agent has. With neither, the daemon
+	// applies the Settings default itself.
+	const submitMode: TaskLaunchOptions["interfaceMode"] =
+		interfaceLock === "chat" || requiresTuiFallback || interfaceChoice !== undefined || rememberedInterface !== undefined
+			? chosenInterface
+			: undefined;
 	const launchFallback = (brief: string, clientRequestId?: string, files?: FileAttachmentPayload[]) =>
 		fallbackAction === "bypass-permissions"
-			? launch(brief, { interfaceMode: selectedAgent === "unreal-agent" ? "chat" : undefined, approvalMode: "bypass-permissions", clientRequestId, attachments: files })
+			? launch(brief, { interfaceMode: submitMode, approvalMode: "bypass-permissions", clientRequestId, attachments: files })
 			: launch(brief, { interfaceMode: "tui", clientRequestId, attachments: files });
 
 	const changeAgent = (value: string) => {
@@ -1321,7 +1362,18 @@ export function useTaskLaunch({ projectId, hostId }: {
 		isCoderCloudProject,
 		canSubmit,
 		isSubmitting,
-		isDirty: modelTouched || effortTouched || attachments.length > 0,
+		isDirty: modelTouched || effortTouched || interfaceChoice !== undefined || attachments.length > 0,
+		// Chat or Terminal for this task. An agent with only one of them locks it, and says why.
+		sessionInterface: {
+			value: chosenInterface,
+			lockReason: interfaceLock === "chat"
+				? t("newTask.interface.chatOnly", { agent: selectedAgentLabel })
+				: interfaceLock === "tui"
+					? t(isCloudProject ? "newTask.interface.terminalOnlyCloud" : "newTask.interface.terminalOnly", { agent: selectedAgentLabel })
+					: undefined,
+			disabled: isSubmitting,
+			onChange: setInterfaceChoice,
+		},
 		error,
 		status,
 		errorAction: errorAction === "install-agent" ? {
@@ -1530,6 +1582,7 @@ export function TaskComposer({
 			renderEffortControl={task.renderEffortControl}
 			renderModelControl={task.renderModelControl}
 			showEffort={task.showEffort}
+			interfaceControl={<TaskInterfaceControl {...task.sessionInterface} />}
 		/>
 	);
 }

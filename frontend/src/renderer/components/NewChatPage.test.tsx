@@ -24,6 +24,8 @@ const h = vi.hoisted(() => ({
 	approvalModes: undefined as ApprovalMode[] | undefined,
 	modelWarning: undefined as string | undefined,
 	modelWarningRetries: true,
+	sessionInterface: "chat" as "chat" | "tui",
+	chooseInterface: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -66,6 +68,7 @@ vi.mock("./TaskComposer", () => ({
 		renderAgentControl: () => null,
 		renderModelControl: () => null,
 		renderEffortControl: () => null,
+		sessionInterface: { value: h.sessionInterface, onChange: h.chooseInterface },
 	}),
 }));
 vi.mock("../hooks/useWorkspaceQuery", () => ({
@@ -100,6 +103,8 @@ beforeEach(() => {
 	h.approvalModes = undefined;
 	h.modelWarning = undefined;
 	h.modelWarningRetries = true;
+	h.sessionInterface = "chat";
+	h.chooseInterface.mockReset();
 	window.localStorage.clear();
 });
 
@@ -386,6 +391,66 @@ describe("NewChatPage", () => {
 		expect(outcome).toMatchObject({ code: "AGENT_AUTH_REQUIRED" });
 		expect(JSON.parse(window.localStorage.getItem("ao.newTask.pendingLaunch.v1") ?? "{}").local).toMatchObject({ clientMessageId: "cid-1", projectId: "proj-1" });
 		expect(screen.getByRole("alert")).toHaveTextContent("Claude Code needs you to sign in again.");
+	});
+});
+
+describe("New Chat interface choice", () => {
+	const kimiTemplate = () => rememberChatSettingsTemplate("kimi", undefined, { options: [
+		{ id: "model", name: "Model", category: "model", type: "select", currentValue: "gpt-6", choices: [{ value: "gpt-6", name: "GPT-6" }] },
+		{ id: "mode", name: "Mode", category: "mode", type: "select", currentValue: "default", choices: [
+			{ value: "default", name: "Default", permissionMode: "default" },
+		] },
+	] });
+
+	it("offers Chat and Terminal beside the agent and model, and passes a pick to the launch", async () => {
+		const queryClient = renderPage();
+		render(<QueryClientProvider client={queryClient}>{h.workspace?.draftSettings}</QueryClientProvider>);
+		const choices = screen.getByRole("group", { name: "Interface" });
+		expect(screen.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
+		expect(screen.getByRole("radio", { name: "Terminal" })).toHaveAttribute("aria-checked", "false");
+		// Same row as the agent and model picker.
+		expect(choices.closest("[role=group][aria-label='Turn settings']")).not.toBeNull();
+		await userEvent.click(screen.getByRole("radio", { name: "Terminal" }));
+		expect(h.chooseInterface).toHaveBeenCalledWith("tui");
+	});
+
+	it("starts a Terminal task with AO's own controls, not the agent's Chat options", async () => {
+		h.harness = "kimi";
+		h.approvalMode = "default";
+		kimiTemplate();
+		// The launch reports no Chat permission vocabulary for a Terminal task.
+		h.approvalModes = undefined;
+		h.sessionInterface = "tui";
+		const queryClient = renderPage();
+		render(<QueryClientProvider client={queryClient}>{h.workspace?.draftSettings}</QueryClientProvider>);
+		expect(screen.getByRole("radio", { name: "Terminal" })).toHaveAttribute("aria-checked", "true");
+		expect(screen.queryByRole("button", { name: "Mode" })).toBeNull();
+		expect(screen.getByRole("button", { name: "Approval policy for the next turn" })).toBeInTheDocument();
+		cleanup();
+		// The same agent in Chat keeps the options its Chat session reported.
+		h.sessionInterface = "chat";
+		h.approvalModes = ["default"];
+		const chat = renderPage();
+		render(<QueryClientProvider client={chat}>{h.workspace?.draftSettings}</QueryClientProvider>);
+		expect(screen.getByRole("button", { name: "Mode" })).toBeInTheDocument();
+	});
+
+	it("holds a Terminal pick still while the task starts, and opens no chat for it", async () => {
+		h.replay = { ...h.replay, mode: "tui" };
+		let resolve!: (sessionId: string) => void;
+		h.launch.mockReturnValue(new Promise<string>((done) => { resolve = done; }));
+		const queryClient = renderPage();
+		let sent!: Promise<unknown>;
+		act(() => { sent = Promise.resolve(h.workspace?.onSend?.("Fix the build", undefined, "cid-1")); });
+		await waitFor(() => expect(h.launch).toHaveBeenCalledWith("Fix the build", expect.objectContaining({ replay: expect.objectContaining({ mode: "tui" }) })));
+		const frozen = h.workspace?.draftSettings as { props: { afterPicker: { props: { value: string; disabled?: boolean } } } };
+		expect(frozen.props.afterPicker.props).toMatchObject({ value: "tui", disabled: true });
+		await act(async () => {
+			resolve("sess-1");
+			await sent;
+		});
+		expect(queryClient.getQueryData(["conversation-local-echos"])).toBeUndefined();
+		await waitFor(() => expect(h.navigate).toHaveBeenCalledWith(expect.objectContaining({ params: { projectId: "proj-1", sessionId: "sess-1" } })));
 	});
 });
 

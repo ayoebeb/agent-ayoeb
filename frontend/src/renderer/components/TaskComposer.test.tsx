@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -1992,7 +1992,8 @@ describe("TaskComposer", () => {
 		await userEvent.click(picker);
 		expect(await screen.findByRole("menuitem", { name: "Sonnet 4.5" })).toBeInTheDocument();
 		expect(screen.getByRole("menuitem", { name: "Opus 4.7" })).toBeInTheDocument();
-		expect(screen.queryByText(/^Claude /)).not.toBeInTheDocument();
+		// The model menu; the agent's own name appears elsewhere in the composer.
+		expect(within(screen.getByRole("menu")).queryByText(/^Claude /)).not.toBeInTheDocument();
 	});
 
 	it("preselects the agent's default model when the project configures none", async () => {
@@ -4414,5 +4415,213 @@ describe("Chat launch permission discovery recovery", () => {
 		expect(delegate).toHaveBeenCalledTimes(2);
 		expect(delegate.mock.calls[0][0].body.mode).toBeUndefined();
 		expect(delegate.mock.calls[1][0].body.mode).toBe("tui");
+	});
+});
+
+describe("Task interface choice (Chat or Terminal)", () => {
+	const interfaceChoice = (name: "Chat" | "Terminal") => screen.getByRole("radio", { name });
+	const choices = () => screen.getByRole("group", { name: "Interface" });
+
+	/** A local project whose worker runs `agent`, with these Settings; a delegate is accepted unless `delegate` says otherwise. */
+	function localInterfaceFixture({
+		defaultSessionMode = "chat",
+		chatHarnesses = ["codex", "claude-code", "kimi"],
+		agent = "codex",
+		config = {},
+		delegate = async () => ({ data: { workerId: "worker-1" } }),
+	}: {
+		defaultSessionMode?: "chat" | "tui";
+		chatHarnesses?: string[];
+		agent?: string;
+		config?: Record<string, unknown>;
+		delegate?: (body: Record<string, unknown>) => Promise<unknown>;
+	} = {}) {
+		h.get.mockImplementation(async (path: string, init?: { params?: { path?: Record<string, string> } }) => {
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode, chatHarnesses } };
+			if (path.includes("/models")) return { data: { agent, selectionMode: "text", models: [], allowCustom: true } };
+			return { data: { status: "ok", project: { id: init?.params?.path?.id ?? "proj-1", agent, config } } };
+		});
+		h.post.mockImplementation(async (path: string, init?: { body: Record<string, unknown> }) =>
+			path === "/api/v1/orchestrators/delegate" || path === "/api/v1/sessions" ? delegate(init?.body ?? {}) : { data: {} });
+	}
+
+	async function submitTask(text = "Do the work") {
+		await waitForTaskReady();
+		fireEvent.change(task(), { target: { value: text } });
+		fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+		await waitFor(() => expect(delegated().length).toBeGreaterThan(0));
+	}
+
+	it.each([["chat", "Chat"], ["tui", "Terminal"]] as const)("starts from the Settings default session interface (%s)", async (defaultSessionMode, label) => {
+		localInterfaceFixture({ defaultSessionMode });
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice(label)).toHaveAttribute("aria-checked", "true"));
+		expect(interfaceChoice(label === "Chat" ? "Terminal" : "Chat")).toHaveAttribute("aria-checked", "false");
+		expect(interfaceChoice("Chat")).toBeEnabled();
+		expect(interfaceChoice("Terminal")).toBeEnabled();
+		await submitTask();
+		// Following the default leaves it to the daemon, as before.
+		expect(delegated()[0]).not.toHaveProperty("mode");
+	});
+
+	it.each([["chat", "Terminal", "tui"], ["tui", "Chat", "chat"]] as const)("sends the interface picked for this task over a %s default", async (defaultSessionMode, pick, mode) => {
+		localInterfaceFixture({ defaultSessionMode });
+		const onCreated = vi.fn();
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={onCreated} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice(pick)).toHaveAttribute("aria-checked", "false"));
+		await userEvent.click(interfaceChoice(pick));
+		expect(interfaceChoice(pick)).toHaveAttribute("aria-checked", "true");
+		await submitTask();
+		expect(delegated()[0]).toMatchObject({ agent: "codex", mode });
+		await waitFor(() => expect(onCreated).toHaveBeenCalledWith("worker-1"));
+	});
+
+	it("is reachable and operable from the keyboard", async () => {
+		localInterfaceFixture({ defaultSessionMode: "chat" });
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
+		act(() => interfaceChoice("Chat").focus());
+		await userEvent.keyboard("{ArrowRight}");
+		expect(interfaceChoice("Terminal")).toHaveFocus();
+		await userEvent.keyboard(" ");
+		expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true");
+	});
+
+	it("locks an agent without Chat to Terminal, says why, and starts it there", async () => {
+		localInterfaceFixture({ defaultSessionMode: "chat", chatHarnesses: ["codex"], agent: "grok" });
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		expect(interfaceChoice("Chat")).toBeDisabled();
+		expect(choices()).toHaveAccessibleDescription(`${agentLabel("grok")} only runs in Terminal`);
+		await submitTask();
+		expect(delegated()[0]).toMatchObject({ agent: "grok", mode: "tui" });
+	});
+
+	it("locks a Chat-only agent to Chat whatever the default", async () => {
+		h.agentCatalog = { agents: [agentReadiness("unreal-agent", "Unreal Agent")] };
+		localInterfaceFixture({ defaultSessionMode: "tui", chatHarnesses: ["unreal-agent"], agent: "unreal-agent", delegate: async () => ({ data: { session: { id: "sess-unreal" } } }) });
+		render(<Wrap><TaskComposer projectId="__standalone__" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
+		expect(interfaceChoice("Terminal")).toBeDisabled();
+		expect(choices()).toHaveAccessibleDescription("Unreal Agent only runs in Chat");
+		await waitForTaskReady();
+		fireEvent.change(task(), { target: { value: "Say hello" } });
+		fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+		await waitFor(() => expect(h.post).toHaveBeenCalledWith("/api/v1/sessions", expect.objectContaining({
+			body: expect.objectContaining({ harness: "unreal-agent", mode: "chat" }),
+		})));
+	});
+
+	it("follows the interfaces Cloud supports for a Cloud task", async () => {
+		const queryClient = cloudFixture("claude-code");
+		h.get.mockImplementation(async (path: string) => path === "/api/v1/settings"
+			? { data: { defaultSessionMode: "chat", chatHarnesses: [] } }
+			: { data: { agent: "claude-code", selectionMode: "catalog", models: [], allowCustom: true } });
+		render(<Wrap queryClient={queryClient}><TaskComposer projectId="cloud-1" onCreated={vi.fn()} /></Wrap>);
+		// Cloud runs Claude Code in Chat even though this computer lists no Chat agents.
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
+		await userEvent.click(interfaceChoice("Terminal"));
+		await waitForTaskReady();
+		fireEvent.change(task(), { target: { value: "Do the work" } });
+		fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+		await waitFor(() => expect(h.cloudCreateSession).toHaveBeenCalledWith("org-1", expect.objectContaining({ interfaceMode: "tui" }), { idempotencyKey: expect.any(String) }));
+		cleanup();
+
+		// A control plane without Chat for the agent locks it to the terminal.
+		h.cloudChatHarnesses = [];
+		render(<Wrap queryClient={queryClient}><TaskComposer projectId="cloud-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		expect(interfaceChoice("Chat")).toBeDisabled();
+		expect(choices()).toHaveAccessibleDescription(`${agentLabel("claude-code")} only runs in Terminal in Cloud`);
+	});
+
+	it("drops the Chat permission vocabulary for a Terminal task and keeps the project's policy", async () => {
+		localInterfaceFixture({ defaultSessionMode: "chat", agent: "kimi", config: { worker: { agent: "kimi", agentConfig: { permissions: "auto" } } } });
+		let launch!: ReturnType<typeof useTaskLaunch>;
+		function Launcher() {
+			launch = useTaskLaunch({ projectId: "proj-1" });
+			return null;
+		}
+		render(<Wrap><Launcher /></Wrap>);
+		await waitFor(() => expect(launch.canSubmit).toBe(true));
+		// Kimi's Chat runs only in its own default permissions.
+		await waitFor(() => expect(launch.approvalModes).toEqual(["default"]));
+		expect(launch.turnSettings.approvalMode).toBe("default");
+		act(() => launch.sessionInterface.onChange("tui"));
+		expect(launch.sessionInterface.value).toBe("tui");
+		expect(launch.approvalModes).toBeUndefined();
+		expect(launch.turnSettings.approvalMode).toBe("auto");
+		expect(launch.launchSnapshot()).toMatchObject({ mode: "tui", approvalMode: undefined });
+		await act(async () => { await launch.launch("In the terminal", { interfaceMode: launch.submitMode }); });
+		expect(delegated()[0]).toMatchObject({ mode: "tui" });
+		expect(delegated()[0]).not.toHaveProperty("approvalMode");
+	});
+
+	it("still offers the terminal when a picked Chat task cannot start in Chat, and not when Terminal was picked", async () => {
+		const delegate = vi.fn(async (body: Record<string, unknown>) => body.mode === "chat"
+			? { error: { code: "CHAT_DRIVER_UNAVAILABLE", message: "Codex Chat is unavailable." } }
+			: { data: { workerId: "terminal-worker" } });
+		localInterfaceFixture({ defaultSessionMode: "tui", delegate });
+		const onCreated = vi.fn();
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={onCreated} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		await userEvent.click(interfaceChoice("Chat"));
+		await submitTask();
+		await screen.findByText("Codex Chat is unavailable.");
+		fireEvent.click(await screen.findByRole("button", { name: "Create as Terminal UI" }));
+		await waitFor(() => expect(onCreated).toHaveBeenCalledWith("terminal-worker"));
+		expect(delegate.mock.calls.map(([body]) => body.mode)).toEqual(["chat", "tui"]);
+		cleanup();
+
+		// A refusal of a task that already asked for the terminal has no terminal retry.
+		const refuse = vi.fn(async () => ({ error: { code: "CHAT_AUTH_REQUIRED", message: "Sign in again." } }));
+		localInterfaceFixture({ defaultSessionMode: "chat", delegate: refuse });
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
+		await userEvent.click(interfaceChoice("Terminal"));
+		await submitTask();
+		await screen.findByText("Sign in again.");
+		expect(screen.queryByRole("button", { name: "Create as Terminal UI" })).toBeNull();
+	});
+
+	it("remembers a picked interface for its project while Settings keep the default it was picked over", async () => {
+		localInterfaceFixture({ defaultSessionMode: "chat" });
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
+		await userEvent.click(interfaceChoice("Terminal"));
+		await submitTask();
+		await waitFor(() => expect(screen.getByRole("button", { name: "Start task" })).toBeEnabled());
+		cleanup();
+
+		// The same project opens on Terminal and sends it; another project keeps the default.
+		h.post.mockClear();
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		await submitTask();
+		expect(delegated()[0]).toMatchObject({ mode: "tui" });
+		cleanup();
+		render(<Wrap><TaskComposer projectId="proj-2" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
+		cleanup();
+
+		// A new Settings default wins: the pick no longer applies, and nothing is sent for it.
+		h.post.mockClear();
+		localInterfaceFixture({ defaultSessionMode: "tui" });
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		await submitTask();
+		expect(delegated()[0]).not.toHaveProperty("mode");
+		cleanup();
+
+		// Back on a Chat default, picking Chat again forgets the Terminal pick.
+		localInterfaceFixture({ defaultSessionMode: "chat" });
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		await userEvent.click(interfaceChoice("Chat"));
+		await submitTask();
+		await waitFor(() => expect(screen.getByRole("button", { name: "Start task" })).toBeEnabled());
+		cleanup();
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
 	});
 });

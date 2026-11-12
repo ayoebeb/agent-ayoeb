@@ -142,6 +142,8 @@ export type TaskComposerViewProps = {
 	canSubmit: boolean;
 	context?: ReactNode;
 	initialPrompt?: string;
+	/** Chat or Terminal for the task, drawn after the model and effort controls. */
+	interfaceControl?: ReactNode;
 	labels: TaskComposerLabels;
 	model: Omit<TaskComposerModelControl, "id">;
 	effort: Omit<TaskComposerEffortControl, "id" | "label">;
@@ -221,6 +223,7 @@ export function TaskComposerView({
 	canSubmit,
 	context,
 	initialPrompt = "",
+	interfaceControl,
 	labels,
 	model,
 	effort,
@@ -442,6 +445,7 @@ export function TaskComposerView({
 							{renderEffortControl({ ...effort, id: effortId, label: labels.effort })}
 						</div>
 					) : null}
+					{interfaceControl ? <div className="shrink-0">{interfaceControl}</div> : null}
 				</div>
 
 				<button
