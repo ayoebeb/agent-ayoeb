@@ -662,8 +662,8 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersInstallIDParam":                "InstallIDParam",
 	"ControllersPushPairingIDParam":            "PushPairingIDParam",
 	// httpd/controllers: browser profiles shared with linked machines
-	"ControllersSharedBrowserProfileIDParam":        "SharedBrowserProfileIDParam",
-	"ControllersSharedBrowserProfileExportQuery":    "SharedBrowserProfileExportQuery",
+	"ControllersSharedBrowserProfileIDParam":         "SharedBrowserProfileIDParam",
+	"ControllersSharedBrowserProfileExportQuery":     "SharedBrowserProfileExportQuery",
 	"ControllersSharedBrowserProfileReceiverHeaders": "SharedBrowserProfileReceiverHeaders",
 	"ControllersSealedBrowserProfilePayload":         "SealedBrowserProfilePayload",
 	"ControllersBrowserProfileTicketRequest":         "BrowserProfileTicketRequest",
