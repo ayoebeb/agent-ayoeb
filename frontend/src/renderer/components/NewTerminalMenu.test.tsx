@@ -137,6 +137,16 @@ describe("new terminal menu", () => {
 		expect(onOpen).toHaveBeenCalledWith({});
 	});
 
+	it("shows the new-terminal shortcut in its tooltip only where the shortcut works", async () => {
+		catalogState.data = windowsCatalog({ available: true });
+		const view = renderMenu({ shortcutHint: true });
+		fireEvent.focus(screen.getByRole("button", { name: "New terminal" }));
+		const tip = await screen.findByRole("tooltip");
+		expect(tip.parentElement?.querySelector('[data-slot="tooltip-shortcut"]')).not.toBeNull();
+		view.rerender({ shortcutHint: false });
+		expect(document.querySelector('[data-slot="tooltip-shortcut"]')).toBeNull();
+	});
+
 	it("says why an open failed, once per failure", () => {
 		catalogState.data = windowsCatalog({ available: true });
 		const { rerender } = renderMenu();
@@ -151,14 +161,16 @@ describe("terminal menu model", () => {
 		const catalog = windowsCatalog({ available: true });
 		catalog.default.path = "c:/program files/powershell/7/PWSH.EXE";
 		const model = terminalMenuModel(catalog, "auto");
-		expect(model.shells[0]).toEqual({ id: "pwsh", name: "PowerShell", isDefault: true });
+		expect(model.shells[0]).toEqual({ id: "pwsh", name: "PowerShell", isDefault: true, detected: true });
 		expect(model.admin).toBe("available");
 	});
 
 	it("lists a custom default shell that detection does not know", () => {
 		const model = terminalMenuModel(windowsCatalog({ available: true }), "D:\\tools\\nu.exe");
-		expect(model.shells[0]).toEqual({ id: "D:\\tools\\nu.exe", name: "nu", isDefault: true });
+		expect(model.shells[0]).toEqual({ id: "D:\\tools\\nu.exe", name: "nu", isDefault: true, detected: false });
 		expect(model.shells).toHaveLength(windowsShells.length + 1);
+		// It opens as the user only: administrator rows list detected shells.
+		expect(model.adminShells.map((shell) => shell.id)).toEqual(windowsShells.map((shell) => shell.id));
 	});
 
 	it("hides administrator rows for a daemon that predates them", () => {

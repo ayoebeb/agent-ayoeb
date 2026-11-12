@@ -16,6 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/requestscope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/presence"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
@@ -303,6 +304,14 @@ func (a *API) Register(root chi.Router) {
 					// followed by its own read: either outlasts the REST budget.
 					if chi.RouteContext(req.Context()).RoutePattern() == "/api/v1/computer-use/call" {
 						computerUse.ServeHTTP(w, req)
+						return
+					}
+					// The desktop app's terminal open may wait on a UAC prompt the
+					// person answers at their own pace; cutting it off would kill a
+					// host they approved. Other callers keep the REST budget.
+					if req.Method == http.MethodPost && chi.RouteContext(req.Context()).RoutePattern() == "/api/v1/shell-terminals" &&
+						req.Header.Get(requestscope.DesktopCredentialHeader) != "" {
+						upload.ServeHTTP(w, req)
 						return
 					}
 					// A spawn, an orchestrator start or a restore runs the project's

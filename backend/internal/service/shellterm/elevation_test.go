@@ -14,7 +14,9 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
-const testDesktopRuntimeToken = "desktop-runtime-token"
+// testElevationSecret stands in for the per-app-run secret the desktop app
+// hands its daemon over stdin.
+const testElevationSecret = "per-app-run-secret-0123456789abcdefghijklmnopqrstu"
 
 // elevatedTestService is a Windows-like service that trusts the desktop app
 // holding testDesktopRuntimeToken.
@@ -29,12 +31,18 @@ func elevatedTestService(t *testing.T, rt *fakeShellRuntime, st *fakeShellTermin
 	}
 	svc := newTestServiceWithSessions(rt, st, projects, sessions)
 	svc.SetElevationSupportedForTest(true)
-	svc.SetDesktopElevationToken(DesktopElevationToken(testDesktopRuntimeToken))
+	svc.SetDesktopElevationSecret(testElevationSecret)
+	svc.detectShells = func() ShellCatalog {
+		return ShellCatalog{Shells: []AvailableShell{
+			{ID: "pwsh", Name: "PowerShell", Path: "/opt/shells/pwsh.exe"},
+			{ID: "cmd", Name: "Command Prompt", Path: "/opt/shells/cmd.exe"},
+		}}
+	}
 	return svc
 }
 
 func desktopContext() context.Context {
-	return requestscope.WithDesktopCredential(context.Background(), DesktopElevationToken(testDesktopRuntimeToken))
+	return requestscope.WithDesktopCredential(context.Background(), testElevationSecret)
 }
 
 func apiCode(err error) string {
@@ -45,23 +53,12 @@ func apiCode(err error) string {
 	return ""
 }
 
-// The same vector is asserted by the desktop app's derivation test
-// (frontend/src/main/desktop-elevation.test.ts), so both sides agree.
-func TestDesktopElevationTokenMatchesTheDesktopDerivation(t *testing.T) {
-	if got, want := DesktopElevationToken("test-runtime-token"), "daz7gKKnkPMiP--MrTxyfqmGBM7nJNwmowx_O95iJb8"; got != want {
-		t.Fatalf("DesktopElevationToken = %q, want %q", got, want)
-	}
-	if DesktopElevationToken("") != "" {
-		t.Fatal("no runtime token must derive no credential")
-	}
-}
-
 func TestElevationAccessIsForTheLocalDesktopAppOnly(t *testing.T) {
-	valid := DesktopElevationToken(testDesktopRuntimeToken)
+	valid := testElevationSecret
 	for _, tc := range []struct {
 		name      string
 		supported bool
-		token     string
+		secret    string
 		ctx       context.Context
 		want      ElevationAccess
 	}{
@@ -77,7 +74,7 @@ func TestElevationAccessIsForTheLocalDesktopAppOnly(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := newTestService(newFakeShellRuntime(), &fakeShellTerminalStore{}, &fakeProjectRootLocator{})
 			svc.SetElevationSupportedForTest(tc.supported)
-			svc.SetDesktopElevationToken(tc.token)
+			svc.SetDesktopElevationSecret(tc.secret)
 			if got := svc.ElevationAccess(tc.ctx); got != tc.want {
 				t.Fatalf("ElevationAccess = %+v, want %+v", got, tc.want)
 			}
@@ -148,6 +145,29 @@ func TestOpenElevatedTerminalRunsInTheSessionWorkspaceWithACleanEnvironment(t *t
 	}
 	if len(tracker.tracked) != 0 {
 		t.Fatal("an administrator shell must not be watched for agents")
+	}
+}
+
+// Only shells this daemon detected may run as administrator. A path from the
+// saved setting (a file agents can write) is refused before any UAC prompt.
+func TestOpenElevatedTerminalOnlyLaunchesDetectedShells(t *testing.T) {
+	for _, shell := range []string{`C:\Users\me\AppData\Local\Temp\payload.exe`, "/tmp/payload", "pwsh.exe --evil"} {
+		rt := newFakeShellRuntime()
+		st := &fakeShellTerminalStore{}
+		svc := elevatedTestService(t, rt, st)
+		_, err := svc.OpenShellTerminal(desktopContext(), OpenShellTerminalInput{SessionID: "proj-orchestrator", Shell: shell, Elevated: true})
+		if got := apiCode(err); got != "ELEVATED_TERMINAL_SHELL_NOT_ALLOWED" {
+			t.Fatalf("shell %q: code = %q (%v), want ELEVATED_TERMINAL_SHELL_NOT_ALLOWED", shell, got, err)
+		}
+		if len(rt.created) != 0 {
+			t.Fatalf("shell %q started a runtime", shell)
+		}
+	}
+	svc := elevatedTestService(t, newFakeShellRuntime(), &fakeShellTerminalStore{})
+	for _, shell := range []string{"", "auto", "pwsh", "CMD", "/opt/shells/pwsh.exe"} {
+		if !svc.elevatedShellAllowed(shell) {
+			t.Errorf("detected shell %q must be allowed as administrator", shell)
+		}
 	}
 }
 

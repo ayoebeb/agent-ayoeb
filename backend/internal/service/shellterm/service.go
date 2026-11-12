@@ -99,11 +99,14 @@ type Service struct {
 
 	agents AgentTracker // set once at boot; nil without agent detection
 
-	// desktopElevationToken is the local desktop app's credential for
+	// desktopElevationSecret is the local desktop app's per-run credential for
 	// administrator terminals; empty keeps them unavailable (see elevation.go).
-	desktopElevationToken string
+	desktopElevationSecret string
 	// elevationSupported is whether this platform has administrator terminals.
 	elevationSupported bool
+	// detectShells lists the shells an administrator terminal may launch;
+	// injectable so tests do not depend on what this machine has installed.
+	detectShells func() ShellCatalog
 }
 
 // AgentTracker follows the agent, if any, running in a user shell.
@@ -237,6 +240,7 @@ func NewService(shellRuntime ShellRuntime, store Store, projects ProjectRootLoca
 		initialInputTimeout: initialInputTimeout,
 		gates:               map[domain.SessionID]*sessionGate{},
 		elevationSupported:  goruntime.GOOS == "windows",
+		detectShells:        DetectShells,
 	}
 }
 
@@ -327,10 +331,15 @@ func (s *Service) OpenShellTerminal(ctx context.Context, in OpenShellTerminalInp
 	}
 	// Clients that already show a tab pass its numbered default here.
 	titleExplicit := title != "" && !defaultShellTerminalTitle.MatchString(title)
-	// Refuse before any lookup or gate: only the local desktop app may ask.
+	// Refuse before any lookup or gate: only the local desktop app may ask,
+	// and only for a shell this daemon detected.
 	if in.Elevated {
 		if access := s.ElevationAccess(ctx); !access.Available {
 			return ShellTerminal{}, elevationDenied(access)
+		}
+		if !s.elevatedShellAllowed(in.Shell) {
+			return ShellTerminal{}, apierr.Invalid("ELEVATED_TERMINAL_SHELL_NOT_ALLOWED",
+				"Administrator terminals open only the shells AO detected on this computer", nil)
 		}
 	}
 	if in.SessionID != "" {

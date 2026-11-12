@@ -2,10 +2,8 @@ package shellterm
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
+	"path/filepath"
 	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/caller"
@@ -24,10 +22,15 @@ import (
 //     into), rename or close it. Typing into an open administrator shell needs
 //     no prompt, so this is the boundary that keeps agents out.
 //
-// The desktop credential is derived from the browser-runtime token the app
-// hands its daemon over a private stdin pipe at spawn; the app's main process
-// adds it only to its own window's requests to this daemon, so the renderer,
-// agent pages and remote hosts never hold it.
+// The desktop credential is a random secret the desktop app generates once per
+// app run and hands only to a daemon it spawns, over that daemon's private stdin
+// pipe. Both sides keep it in memory only: nothing on disk (not
+// browser-runtime.key, not running.json) lets another process of this user
+// compute it, so reading AO's files is not enough to reach an administrator
+// shell. The app's main process adds it only to its own window's requests to
+// this daemon, so the renderer, agent pages and remote hosts never hold it.
+// Code that can read another process's memory is out of scope; UAC stays the
+// hard boundary for opening one.
 
 // elevatedHandlePrefix names an administrator terminal's runtime handle, so the
 // terminal mux and the list can recognise one without a database column.
@@ -45,25 +48,12 @@ func IsElevatedHandleID(handleID string) bool {
 	return strings.HasPrefix(handleID, elevatedHandlePrefix)
 }
 
-const desktopElevationLabel = "ao-desktop-elevated-terminal-v1"
-
-// DesktopElevationToken derives the desktop credential from the browser-runtime
-// token the desktop app gave this daemon. The app's main process derives the
-// same value (frontend/src/main/desktop-elevation.ts).
-func DesktopElevationToken(desktopRuntimeToken string) string {
-	if desktopRuntimeToken == "" {
-		return ""
-	}
-	mac := hmac.New(sha256.New, []byte(desktopRuntimeToken))
-	mac.Write([]byte(desktopElevationLabel))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-
-// SetDesktopElevationToken enables administrator terminals for requests that
-// carry this credential. Empty (a daemon the desktop app did not start) keeps
-// them unavailable. Call once at boot, before serving requests.
-func (s *Service) SetDesktopElevationToken(token string) {
-	s.desktopElevationToken = token
+// SetDesktopElevationSecret enables administrator terminals for requests that
+// carry this per-app-run secret (see the package comment above). Empty, as in a
+// daemon the desktop app adopted rather than spawned, keeps them unavailable.
+// Call once at boot, before serving requests.
+func (s *Service) SetDesktopElevationSecret(secret string) {
+	s.desktopElevationSecret = secret
 }
 
 // Reasons an administrator terminal is unavailable to a request.
@@ -89,8 +79,8 @@ func (s *Service) ElevationAccess(ctx context.Context) ElevationAccess {
 		return ElevationAccess{Reason: ElevationRemote}
 	case caller.From(ctx) != "":
 		return ElevationAccess{Reason: ElevationDesktopOnly}
-	case s.desktopElevationToken == "",
-		subtle.ConstantTimeCompare([]byte(requestscope.DesktopCredential(ctx)), []byte(s.desktopElevationToken)) != 1:
+	case s.desktopElevationSecret == "",
+		subtle.ConstantTimeCompare([]byte(requestscope.DesktopCredential(ctx)), []byte(s.desktopElevationSecret)) != 1:
 		return ElevationAccess{Reason: ElevationDesktopOnly}
 	default:
 		return ElevationAccess{Available: true}
@@ -109,6 +99,36 @@ func elevationDenied(access ElevationAccess) error {
 		return apierr.Forbidden("ELEVATED_TERMINAL_DESKTOP_ONLY",
 			"Administrator terminals can only be opened from the AO desktop app on this computer")
 	}
+}
+
+// elevatedShellAllowed limits what an administrator terminal may launch to the
+// shells this daemon detected (by selector or exact path) and "auto", which
+// resolves among them. A saved default shell qualifies when it is one of
+// those. An arbitrary path never does: the saved setting lives in a file any
+// process of this user can write, and the UAC prompt names AO, not the
+// program, so an agent must not be able to choose what it starts.
+func (s *Service) elevatedShellAllowed(shell string) bool {
+	shell = strings.TrimSpace(shell)
+	if shell == "" || strings.EqualFold(shell, "auto") {
+		return true
+	}
+	for _, candidate := range s.detectShells().Shells {
+		if strings.EqualFold(shell, candidate.ID) || sameExecutable(shell, candidate.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameExecutable(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if filepath.Separator == '\\' {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // requireElevationAccess refuses a request that may not use the handle when

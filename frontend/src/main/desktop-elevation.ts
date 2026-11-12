@@ -1,10 +1,15 @@
-import { createHmac } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 // Administrator terminals are local-desktop-only. The daemon accepts an
 // elevated request only with this header, and only on its loopback listener
-// from a request that does not name an agent session. The header's value is
-// derived from the browser-runtime token the app hands its daemon over a
-// private stdin pipe, so only this app and that daemon can compute it.
+// from a request that does not name an agent session. The header's value is a
+// random secret this app generates once per run (createDesktopElevationSecret)
+// and hands only to a daemon it spawns, over that daemon's private stdin pipe.
+// Both sides keep it in memory only. It is deliberately not derived from
+// anything on disk, such as browser-runtime.key: every process of this user,
+// agents included, can read AO's files. A daemon this app adopted rather than
+// spawned never received it, so administrator terminals stay unavailable there
+// until that daemon restarts.
 //
 // The main process adds it, rather than the renderer holding it: agent pages
 // framed in the chat, a compromised renderer script and remote hosts never see
@@ -12,13 +17,12 @@ import { createHmac } from "node:crypto";
 // only on the routes that open, list or attach terminals.
 export const DESKTOP_ELEVATION_HEADER = "X-AO-Desktop-Elevation";
 
-const DERIVATION_LABEL = "ao-desktop-elevated-terminal-v1";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const TERMINAL_PATHS = ["/api/v1/shell-terminals", "/api/v1/terminal-shells", "/mux"];
 
-/** Mirrors shellterm.DesktopElevationToken in the daemon. */
-export function desktopElevationToken(runtimeToken: string): string {
-	return createHmac("sha256", runtimeToken).update(DERIVATION_LABEL).digest("base64url");
+/** A fresh 32-byte secret for this app run; never written anywhere. */
+export function createDesktopElevationSecret(): string {
+	return randomBytes(32).toString("base64url");
 }
 
 /** Whether a request targets this computer daemon's terminal routes on its current port. */

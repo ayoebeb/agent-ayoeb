@@ -45,12 +45,15 @@ func startShellTerminals(
 }
 
 // configureShellTerminalElevation makes administrator terminals available
-// only to the local desktop app: its credential derives from the browser
-// runtime token the app hands this daemon over stdin (a headless daemon makes
-// up a token nobody else knows, so it never accepts an elevated request), and
-// the terminal mux refuses to attach one for anyone else.
-func configureShellTerminalElevation(svc *shelltermsvc.Service, mux *terminal.Manager, desktopRuntimeToken string) {
-	svc.SetDesktopElevationToken(shelltermsvc.DesktopElevationToken(desktopRuntimeToken))
+// only to the local desktop app that spawned this daemon: elevationSecret is
+// the per-app-run secret that app handed over the private stdin pipe (see
+// desktop_handoff.go). It is deliberately not derived from anything on disk,
+// such as browser-runtime.key, which every process of this user can read. A
+// daemon the app adopted rather than spawned has no secret, so its
+// administrator terminals stay unavailable until it restarts. The terminal
+// mux refuses to attach an administrator terminal for anyone else.
+func configureShellTerminalElevation(svc *shelltermsvc.Service, mux *terminal.Manager, elevationSecret string) {
+	svc.SetDesktopElevationSecret(elevationSecret)
 	mux.SetAttachGuard(svc.AuthorizeTerminalAttach)
 }
 

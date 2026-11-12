@@ -182,8 +182,8 @@ func newElevatedBoundary(t *testing.T) *elevatedBoundary {
 	b := &elevatedBoundary{runtime: &elevatedFakeRuntime{}, attach: &attachRecorder{}}
 	svc := shelltermsvc.NewService(b.runtime, &elevatedFakeStore{}, nil, nil, t.TempDir(), "run-1", discardLogger())
 	svc.SetElevationSupportedForTest(true)
-	b.credential = shelltermsvc.DesktopElevationToken("desktop-runtime-token")
-	svc.SetDesktopElevationToken(b.credential)
+	b.credential = "per-app-run-secret-0123456789abcdefghijklmnopqrstu"
+	svc.SetDesktopElevationSecret(b.credential)
 
 	mux := terminal.NewManager(b.attach, nil, discardLogger())
 	t.Cleanup(mux.Close)
@@ -279,7 +279,7 @@ func (c elevatedClient) attachRefused(t *testing.T, terminalID string) bool {
 
 func (b *elevatedBoundary) openElevated(t *testing.T, c elevatedClient) (int, string, string) {
 	t.Helper()
-	status, body := c.do(t, http.MethodPost, "/api/v1/shell-terminals", `{"shell":"pwsh","elevated":true}`)
+	status, body := c.do(t, http.MethodPost, "/api/v1/shell-terminals", `{"elevated":true}`)
 	code, _ := body["code"].(string)
 	handle := ""
 	if term, ok := body["shellTerminal"].(map[string]any); ok {

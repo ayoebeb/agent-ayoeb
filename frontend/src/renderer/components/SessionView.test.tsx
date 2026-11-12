@@ -2881,8 +2881,8 @@ describe("SessionView", () => {
 		fireEvent.keyDown(screen.getByRole("menuitem", { name: "Run as administrator" }), { key: "ArrowRight" });
 		fireEvent.click(screen.getByRole("menuitem", { name: "PowerShell as administrator" }));
 
-		// The default row names no shell: the daemon opens the saved default.
-		expect(openShellTerminalMock).toHaveBeenCalledWith({ projectId: "proj-1", sessionId: "sess-orch", elevated: true });
+		// An administrator row always names its detected shell: the daemon accepts nothing else.
+		expect(openShellTerminalMock).toHaveBeenCalledWith({ projectId: "proj-1", sessionId: "sess-orch", shell: "pwsh", elevated: true });
 	});
 
 	// Regression (#3874 then re-added by #4252): the prime top bar carries session

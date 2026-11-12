@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	DESKTOP_ELEVATION_HEADER,
-	desktopElevationToken,
+	createDesktopElevationSecret,
 	isLocalDaemonTerminalRequest,
 	withDesktopElevation,
 	type ElevationHeaderTarget,
@@ -23,9 +23,12 @@ function headersFor(details: Partial<Parameters<typeof withDesktopElevation>[0]>
 }
 
 describe("desktop elevation credential", () => {
-	it("derives the same value as the daemon", () => {
-		// Pinned in backend/internal/service/shellterm/elevation_test.go too.
-		expect(desktopElevationToken("test-runtime-token")).toBe("daz7gKKnkPMiP--MrTxyfqmGBM7nJNwmowx_O95iJb8");
+	it("is a fresh 32-byte secret for each app run, not derived from anything", () => {
+		const first = createDesktopElevationSecret();
+		const second = createDesktopElevationSecret();
+		expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(Buffer.from(first, "base64url")).toHaveLength(32);
+		expect(second).not.toBe(first);
 	});
 
 	it("goes only to this computer's daemon terminal routes on its current port", () => {

@@ -36,7 +36,8 @@ export function terminalChoiceInput(choice: unknown): TerminalChoice {
 	};
 }
 
-export type TerminalMenuShell = { id: string; name: string; isDefault: boolean };
+/** detected: the daemon listed it, so it may also open as administrator. */
+export type TerminalMenuShell = { id: string; name: string; isDefault: boolean; detected: boolean };
 
 /**
  * available: this app on this computer may open administrator terminals.
@@ -45,7 +46,8 @@ export type TerminalMenuShell = { id: string; name: string; isDefault: boolean }
  */
 export type TerminalAdminState = "available" | "remote" | "desktop-only" | "hidden";
 
-export type TerminalMenuModel = { shells: TerminalMenuShell[]; admin: TerminalAdminState };
+/** adminShells: the detected shells, the only ones the daemon runs as administrator. */
+export type TerminalMenuModel = { shells: TerminalMenuShell[]; adminShells: TerminalMenuShell[]; admin: TerminalAdminState };
 
 const windowsPath = /^[a-z]:[\\/]/i;
 
@@ -67,15 +69,16 @@ function shellName(path: string): string {
  */
 export function terminalMenuModel(catalog: TerminalShellCatalog | undefined, preferredShell?: string): TerminalMenuModel {
 	// An older or unreachable daemon may answer without a catalog.
-	if (!catalog?.shells?.length) return { shells: [], admin: "hidden" };
+	if (!catalog?.shells?.length) return { shells: [], adminShells: [], admin: "hidden" };
 	const preferred = preferredShell && preferredShell !== "auto" ? preferredShell : undefined;
 	const isDefault = (shell: TerminalShellCatalog["shells"][number]) =>
 		preferred ? shell.id === preferred || samePath(shell.path, preferred) : samePath(shell.path, catalog.default.path);
-	const shells: TerminalMenuShell[] = catalog.shells.map((shell) => ({ id: shell.id, name: shell.name, isDefault: false }));
+	const shells: TerminalMenuShell[] = catalog.shells.map((shell) => ({ id: shell.id, name: shell.name, isDefault: false, detected: true }));
 	let defaultIndex = catalog.shells.findIndex(isDefault);
 	if (defaultIndex < 0 && preferred) {
-		// A custom shell from Settings that detection does not list.
-		shells.unshift({ id: preferred, name: shellName(preferred), isDefault: true });
+		// A custom shell from Settings that detection does not list: it opens as
+		// the user, never as administrator (the daemon refuses that).
+		shells.unshift({ id: preferred, name: shellName(preferred), isDefault: true, detected: false });
 	} else {
 		if (defaultIndex < 0) defaultIndex = 0;
 		const [first] = shells.splice(defaultIndex, 1);
@@ -86,15 +89,17 @@ export function terminalMenuModel(catalog: TerminalShellCatalog | undefined, pre
 	if (elevation?.available) admin = "available";
 	else if (elevation?.reason === "remote") admin = "remote";
 	else if (elevation?.reason === "desktop-only") admin = "desktop-only";
-	return { shells, admin };
+	return { shells, adminShells: shells.filter((shell) => shell.detected), admin };
 }
 
 /**
- * The default row names no shell, so it opens exactly what the one-click "+"
- * and the shortcut open: the saved default (or a remote host's own).
+ * A user row for the default names no shell, so it opens exactly what the
+ * shortcut opens: the saved default (or a remote host's own). An administrator
+ * row always names its detected shell, which is all the daemon accepts there.
  */
 export function rowChoice(shell: TerminalMenuShell, elevated: boolean): TerminalChoice {
-	return { ...(shell.isDefault ? {} : { shell: shell.id }), ...(elevated ? { elevated: true } : {}) };
+	if (elevated) return { shell: shell.id, elevated: true };
+	return shell.isDefault ? {} : { shell: shell.id };
 }
 
 /** A failed open, in words: the administrator refusals get their own. */
@@ -121,6 +126,8 @@ type NewTerminalMenuProps = {
 	failure?: string;
 	/** Changes with every failed open so a repeat failure shows again. */
 	failureKey?: number;
+	/** Show the new-terminal shortcut in the tooltip, where that shortcut works. */
+	shortcutHint?: boolean;
 };
 
 /**
@@ -128,7 +135,7 @@ type NewTerminalMenuProps = {
  * on Windows as administrator. Administrator rows open only on this computer;
  * a remote host shows them disabled, macOS and Linux do not show them.
  */
-export function NewTerminalMenu({ hostId, onOpen, failure, failureKey }: NewTerminalMenuProps) {
+export function NewTerminalMenu({ hostId, onOpen, failure, failureKey, shortcutHint = false }: NewTerminalMenuProps) {
 	const { t } = useTranslation();
 	const remote = Boolean(hostId && hostId !== LOCAL_HOST);
 	const catalog = useTerminalShells(hostId);
@@ -172,7 +179,9 @@ export function NewTerminalMenu({ hostId, onOpen, failure, failureKey }: NewTerm
 							</DropdownMenuTrigger>
 						</PopoverAnchor>
 					</TooltipTrigger>
-					<TooltipContent side="bottom">{t("terminal.new")}</TooltipContent>
+					<TooltipContent shortcut={shortcutHint ? "new-shell-terminal" : undefined} side="bottom">
+						{t("terminal.new")}
+					</TooltipContent>
 				</Tooltip>
 				<DropdownMenuContent align="start" className="min-w-56" data-testid="new-terminal-menu">
 					{model.shells.length === 0 ? (
@@ -189,7 +198,7 @@ export function NewTerminalMenu({ hostId, onOpen, failure, failureKey }: NewTerm
 							</DropdownMenuItem>
 						))
 					)}
-					{model.admin === "hidden" || model.shells.length === 0 ? null : (
+					{model.admin === "hidden" || model.adminShells.length === 0 ? null : (
 						<>
 							<DropdownMenuSeparator />
 							{model.admin === "available" ? (
@@ -199,7 +208,7 @@ export function NewTerminalMenu({ hostId, onOpen, failure, failureKey }: NewTerm
 										{t("terminal.runAsAdministrator")}
 									</DropdownMenuSubTrigger>
 									<DropdownMenuSubContent className="min-w-48" data-testid="new-admin-terminal-menu">
-										{model.shells.map((shell) => (
+										{model.adminShells.map((shell) => (
 											<DropdownMenuItem
 												aria-label={t("terminal.shellAsAdministrator", { shell: shell.name })}
 												key={shell.id}

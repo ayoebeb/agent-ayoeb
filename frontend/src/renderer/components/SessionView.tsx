@@ -1587,6 +1587,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 				failureKey={newTerminalFailureKey}
 				hostId={hostId}
 				onOpen={openTerminalFromMenu}
+				shortcutHint={!isOrchestrator}
 			/>
 		);
 	}, [addShellTerminal, hostId, isOrchestrator, newTerminalError, newTerminalFailureKey, openTerminalFromMenu, session, t]);

@@ -233,7 +233,7 @@ import {
 	type BrowserRuntimeLinkHandle,
 } from "./main/browser-runtime-link";
 import { resolveBrowserRuntimeToken } from "./main/browser-runtime-token";
-import { desktopElevationToken, installDesktopElevationHeader } from "./main/desktop-elevation";
+import { createDesktopElevationSecret, installDesktopElevationHeader } from "./main/desktop-elevation";
 import { checkRender, measureRender } from "./main/render-check";
 import {
 	connectBrowserStream,
@@ -1117,7 +1117,7 @@ async function createWindowInternal(): Promise<void> {
 		webContentsId: shellWebContents.id,
 		mainFrame: () => shellWebContents.mainFrame,
 		daemonPort: () => (daemonStatus.state === "ready" ? daemonStatus.port : undefined),
-		token: desktopElevationToken(browserRuntimeToken),
+		token: desktopElevationSecret,
 	});
 	const blockedPageHosts = new Set<string>();
 	shellWebContents.session.webRequest.onBeforeRequest((details, callback) => {
@@ -1741,6 +1741,9 @@ const browserRuntimeToken = (() => {
 		return randomBytes(32).toString("base64url");
 	}
 })();
+// Administrator terminals' credential: random per app run, kept in memory and
+// handed only to daemons this app spawns, after the runtime token on stdin.
+const desktopElevationSecret = createDesktopElevationSecret();
 let stagedBundledTmuxBinary: string | null = null;
 
 async function ensureBundledTmuxStaged(): Promise<void> {
@@ -2601,7 +2604,7 @@ async function startDaemonInner(startEpoch: number, autoRestartIntent?: DaemonAu
 	// worker processes when it spawns them.
 	if (child.stdin) {
 		child.stdin.on("error", () => undefined);
-		child.stdin.end(`${browserRuntimeToken}\n`);
+		child.stdin.end(`${browserRuntimeToken}\n${desktopElevationSecret}\n`);
 	} else {
 		console.warn("AO: browser runtime token handoff pipe was unavailable");
 	}
