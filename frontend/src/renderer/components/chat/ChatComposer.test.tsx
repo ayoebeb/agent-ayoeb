@@ -1982,7 +1982,7 @@ describe("slash commands", () => {
 		await typeInComposer(field, "/");
 
 		expect(screen.queryByText("agent", { exact: true })).toBeNull();
-		expect(screen.getByText("Orchestrator", { exact: true })).toBeInTheDocument();
+		expect(screen.getByText("Ayo", { exact: true })).toBeInTheDocument();
 	});
 
 	it("filters as the user types", async () => {

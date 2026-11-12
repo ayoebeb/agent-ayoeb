@@ -8,6 +8,7 @@ import { isLinuxPlatform, isMacPlatform } from "../lib/platform";
 import { sidebarIsVisible, useUiStore } from "../stores/ui-store";
 import { AOMascot } from "./AOMascot";
 import type { AppShortcutId } from "../../shared/shortcuts";
+import { PRODUCT_NAME } from "../../shared/brand";
 import { BuildInfoTooltip } from "./BuildInfoTooltip";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -160,7 +161,7 @@ export function TitlebarNav({
             <BuildInfoTooltip>
               <span className="inline-flex min-w-0 items-center gap-1.5">
                 <AOMascot className="h-5.5 w-5.5 shrink-0" />
-                <span className="min-w-0 truncate" data-brand-label="">Orchestrator</span>
+                <span className="min-w-0 truncate" data-brand-label="">{PRODUCT_NAME}</span>
               </span>
             </BuildInfoTooltip>
           </span>

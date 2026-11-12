@@ -146,6 +146,7 @@ import {
 	useSidebar,
 } from "./ui/sidebar";
 import { BuildInfoTooltip } from "./BuildInfoTooltip";
+import { PRODUCT_NAME } from "../../shared/brand";
 import { Button } from "./ui/button";
 import { Pressable } from "./ui/pressable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
@@ -1334,7 +1335,7 @@ export function Sidebar({
 					<span
 						className="sidebar-expanded-chrome min-w-0 flex-1 truncate text-base font-semibold leading-tight tracking-tight-lg text-foreground group-data-[collapsible=icon]:hidden"
 					>
-						<BuildInfoTooltip>Orchestrator</BuildInfoTooltip>
+						<BuildInfoTooltip>{PRODUCT_NAME}</BuildInfoTooltip>
 					</span>
 				</Pressable>
 				<Tooltip>

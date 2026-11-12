@@ -4,10 +4,12 @@ import "context"
 
 type lanKey struct{}
 
+// WithLAN marks ctx as belonging to a request that arrived on the LAN listener.
 func WithLAN(ctx context.Context) context.Context {
 	return context.WithValue(ctx, lanKey{}, true)
 }
 
+// IsLAN reports whether WithLAN marked ctx as a LAN-listener request.
 func IsLAN(ctx context.Context) bool {
 	value, _ := ctx.Value(lanKey{}).(bool)
 	return value
@@ -18,7 +20,7 @@ func IsLAN(ctx context.Context) bool {
 // on its own window's requests to this machine's daemon; the renderer never
 // sees the value. It means nothing on its own: the daemon still refuses it
 // from the LAN listener, a tunnel, or an agent's CLI call.
-const DesktopCredentialHeader = "X-AO-Desktop-Elevation"
+const DesktopCredentialHeader = "X-AO-Desktop-Elevation" //nolint:gosec // header name, not a credential
 
 type desktopCredentialKey struct{}
 

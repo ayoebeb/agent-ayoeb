@@ -226,7 +226,7 @@ describe("TurnChangedFiles", () => {
 
 	it("says the list was cut rather than presenting it as the whole change", () => {
 		render(<TurnChangedFiles diff={diff({ truncated: true })} onReview={() => {}} />);
-		expect(screen.getByText(/changed more files than Orchestrator lists/i)).toBeInTheDocument();
+		expect(screen.getByText(/changed more files than Ayo lists/i)).toBeInTheDocument();
 		expect(screen.getByText(/Use Review for the whole change/i)).toBeInTheDocument();
 	});
 
@@ -270,7 +270,7 @@ describe("ActivityRow command output", () => {
 		expect(shown).toContain("END_OVERSIZE");
 		expect(shown).not.toContain("BEGIN_OVERSIZE");
 		expect(screen.getByText("Showing the end of this large output.")).toBeInTheDocument();
-		expect(screen.queryByText(/printed more than Orchestrator stores/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/printed more than Ayo stores/i)).not.toBeInTheDocument();
 	});
 
 	it("bounds single-line output without splitting a surrogate pair", async () => {
@@ -349,7 +349,7 @@ describe("ActivityRow command output", () => {
 			/>,
 		);
 		await userEvent.click(screen.getByRole("button"));
-		expect(screen.getByText(/printed more than Orchestrator stores/i)).toBeInTheDocument();
+		expect(screen.getByText(/printed more than Ayo stores/i)).toBeInTheDocument();
 	});
 
 	it("keeps a finished command collapsed so the timeline stays readable", () => {

@@ -15,20 +15,36 @@ import (
 )
 
 func TestCommandRunInvocationPerShell(t *testing.T) {
+	// A shell path is a path on the host that runs the command: filepath.Base
+	// does not split a Windows path on a POSIX host, and a POSIX host is never
+	// handed one. So each executable is spelled in the host's own path syntax,
+	// and every case runs on every host; the shell-by-name mapping under test
+	// is the same everywhere.
+	hostPath := func(windows, posix string) string {
+		if runtime.GOOS == "windows" {
+			return windows
+		}
+		return posix
+	}
+	pwsh := hostPath(`C:\Program Files\PowerShell\7\pwsh.exe`, "/opt/microsoft/powershell/7/pwsh.exe")
+	windowsPowerShell := hostPath(`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, "/opt/windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+	cmd := hostPath(`C:\Windows\system32\cmd.exe`, "/opt/windows/system32/cmd.exe")
+	gitBash := hostPath(`C:\Program Files\Git\bin\bash.exe`, "/opt/git/bin/bash.exe")
+	wsl := hostPath(`C:\Windows\system32\wsl.exe`, "/opt/windows/system32/wsl.exe")
 	for _, tc := range []struct {
 		shell    string
 		wantArgs []string
 		wantRaw  string
 		wantErr  string
 	}{
-		{shell: `C:\Program Files\PowerShell\7\pwsh.exe`, wantArgs: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", powershellRunPrelude + "echo hi" + powershellRunTrailer}},
-		{shell: `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, wantArgs: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", powershellRunPrelude + "echo hi" + powershellRunTrailer}},
+		{shell: pwsh, wantArgs: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", powershellRunPrelude + "echo hi" + powershellRunTrailer}},
+		{shell: windowsPowerShell, wantArgs: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", powershellRunPrelude + "echo hi" + powershellRunTrailer}},
 		{shell: "/usr/local/bin/pwsh", wantArgs: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", powershellRunPrelude + "echo hi" + powershellRunTrailer}},
-		{shell: `C:\Windows\system32\cmd.exe`, wantArgs: []string{"/d", "/s", "/c", "chcp 65001>nul & echo hi"}, wantRaw: `"C:\Windows\system32\cmd.exe" /d /s /c "chcp 65001>nul & echo hi"`},
-		{shell: `C:\Program Files\Git\bin\bash.exe`, wantArgs: []string{"-c", "echo hi"}},
+		{shell: cmd, wantArgs: []string{"/d", "/s", "/c", "chcp 65001>nul & echo hi"}, wantRaw: `"` + cmd + `" /d /s /c "chcp 65001>nul & echo hi"`},
+		{shell: gitBash, wantArgs: []string{"-c", "echo hi"}},
 		{shell: "/bin/zsh", wantArgs: []string{"-c", "echo hi"}},
 		{shell: "/opt/homebrew/bin/fish", wantArgs: []string{"-c", "echo hi"}},
-		{shell: `C:\Windows\system32\wsl.exe`, wantErr: "COMMAND_RUN_SHELL_UNSUPPORTED"},
+		{shell: wsl, wantErr: "COMMAND_RUN_SHELL_UNSUPPORTED"},
 	} {
 		t.Run(filepath.Base(tc.shell), func(t *testing.T) {
 			got, err := commandRunInvocation(tc.shell, "echo hi")

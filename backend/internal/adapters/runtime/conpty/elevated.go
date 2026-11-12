@@ -140,7 +140,7 @@ func writeAuthFrame(conn net.Conn, token string) error {
 }
 
 // readAuthAck waits for the host's acknowledgement of this connection's token.
-func readAuthAck(conn net.Conn, timeout time.Duration) error {
+func readAuthAck(conn net.Conn, timeout time.Duration) error { //nolint:unused // called from elevated_windows.go
 	_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
 	var ack [5]byte
@@ -220,8 +220,11 @@ func (l *authListener) admit(conn net.Conn) bool {
 // superviseElevatedHost ends the host when no client authenticates within
 // elevatedIdleTimeout. The platform part also ends it with its parent daemon.
 func superviseElevatedHost(done <-chan struct{}, ln *authListener, stop func()) {
+	// Read the timeout here, not inside the goroutine, so a test that restores
+	// elevatedIdleTimeout afterwards cannot race with the supervisor.
+	idle := elevatedIdleTimeout
 	go func() {
-		timer := time.NewTimer(elevatedIdleTimeout)
+		timer := time.NewTimer(idle)
 		defer timer.Stop()
 		select {
 		case <-ln.Authenticated():

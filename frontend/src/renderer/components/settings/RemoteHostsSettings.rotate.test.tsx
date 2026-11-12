@@ -111,7 +111,7 @@ it("says when the account link fails after the new password, and retries the lin
 
 	// The password did change, so the offer closes; the failed link is shown in the section.
 	const alert = await screen.findByRole("alert");
-	expect(alert).toHaveTextContent("The new password is set, but this computer could not be linked to your Orchestrator account again");
+	expect(alert).toHaveTextContent("The new password is set, but this computer could not be linked to your Ayo account again");
 	expect(alert).toHaveTextContent("AO Cloud host sync failed (502).");
 	expect(screen.queryByRole("dialog")).toBeNull();
 	expect(posted()).toEqual(["/api/v1/mobile/regenerate"]);

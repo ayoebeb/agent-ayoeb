@@ -16,7 +16,7 @@ async function render(): Promise<void> {
 	const dot = document.getElementById("dot")!;
 	dot.className = `dot ${status.state === "connected" ? "ok" : "bad"}`;
 	document.getElementById("state")!.textContent =
-		status.state === "connected" ? (status.activeCommands > 0 ? "Agent working" : "Connected to Orchestrator") : status.state === "connecting" ? "Connecting to Orchestrator…" : "Not connected to Orchestrator";
+		status.state === "connected" ? (status.activeCommands > 0 ? "Agent working" : "Connected to Ayo") : status.state === "connecting" ? "Connecting to Ayo…" : "Not connected to Ayo";
 	document.getElementById("detail")!.textContent = status.error?.message ?? `Version ${status.version}`;
 	const list = document.getElementById("sessions")!;
 	list.replaceChildren();

@@ -29,6 +29,8 @@
 
 </div>
 
+> **Ayo** is a fork of [Agent Orchestrator](https://github.com/OrchestratorInc/agent-orchestrator). Only the user-facing product name changed; the `ao` CLI, `~/.ao` data, license, and upstream attribution are unchanged. The original README follows unmodified.
+
 <br />
 
 ## Why Orchestrator.inc

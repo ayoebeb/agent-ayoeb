@@ -37,7 +37,7 @@ func TestBrowserTargetCommand(t *testing.T) {
 	if !strings.Contains(capture.path, `"action":"target"`) || !strings.Contains(capture.path, `"target":"chrome"`) {
 		t.Fatalf("request = %s", capture.path)
 	}
-	if !strings.Contains(out, "your Chrome (Orchestrator Browser Bridge), not connected") || !strings.Contains(out, "ao browser chrome setup") {
+	if !strings.Contains(out, "your Chrome (Ayo Browser Bridge), not connected") || !strings.Contains(out, "ao browser chrome setup") {
 		t.Fatalf("output = %q", out)
 	}
 

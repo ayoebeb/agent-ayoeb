@@ -63,6 +63,7 @@ import { rememberPaneTerminalGrid } from "../lib/terminal-grid-hint";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { captureRendererException } from "../lib/telemetry";
+import { PRODUCT_NAME } from "../../shared/brand";
 
 type TerminalPaneProps = {
 	session?: WorkspaceSession;
@@ -1488,7 +1489,7 @@ function AttachedTerminal({
 							<TerminalBootStatus subject={session.kind === "orchestrator" ? "orchestrator" : "agent"} label={coverLabel} />
 						) : (
 							<div className="text-center">
-								<div className="text-terminal">{"Orchestrator"}</div>
+								<div className="text-terminal">{PRODUCT_NAME}</div>
 								<div className="mt-2 text-terminal-dim">{t("terminal.noSessionSelected")}</div>
 							</div>
 						)}

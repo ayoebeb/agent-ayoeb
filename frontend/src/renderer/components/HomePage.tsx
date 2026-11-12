@@ -1,7 +1,7 @@
 import type { ProjectSource } from "@aoagents/product-ui";
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Cloud, Folder, Folders, FolderOpen, GitFork, MessageSquarePlus, Star } from "@/components/app-icons";
+import { AlertTriangle, Cloud, Folder, Folders, FolderOpen, GitFork, MessageSquarePlus } from "@/components/app-icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useCloudGate } from "../hooks/useCloudGate";
 import { useMigrationOffer } from "../hooks/useMigrationOffer";
@@ -28,15 +28,12 @@ import { SessionImportOffer } from "./SessionImportOffer";
 import { NAV_ROW_HIGHLIGHT_HOST_CLASS, NavRowHighlight } from "./NavRowHighlight";
 import { dragStyle } from "./PageTopbar";
 import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
 import { Pressable } from "./ui/pressable";
 import { useEdgeFadeRef } from "../hooks/useEdgeFade";
 
 /**
  * Home landing layout contracts (do not regress without explicit design sign-off):
  * - One centered column (`max-w-[640px]`); no upward translate hack.
- * - "Star us" is a quiet text link with dashed underline on hover — NOT a
- *   filled button / accent pill / bordered card.
  * - Primary actions are always a 2×2 grid. The fourth cell is the
  *   standalone-agent action, or Clone to the cloud when Developer Mode and
  *   Cloud are both enabled (standalone stays reachable from the sidebar's
@@ -50,7 +47,6 @@ import { useEdgeFadeRef } from "../hooks/useEdgeFade";
  *   project: it never appears in the recent rows or counts toward the
  *   heading — the grid's standalone action and the sidebar own it.
  */
-const GITHUB_REPOSITORY_URL = "https://github.com/Untrivial-ai/agent-orchestrator";
 const RECENT_PROJECT_LIMIT = 3;
 const HOME_BUTTON_CLASS =
 	"flex w-full items-center gap-3 rounded-lg bg-card px-4 py-3 transition-[background-color] duration-fast ease-out hover:bg-accent hover:text-foreground";
@@ -280,16 +276,6 @@ function HomePageContent() {
 					<section className="space-y-3 px-3" style={firstRunPromptOpen ? { visibility: "hidden" } : undefined}>
 						<div className="flex items-baseline justify-between gap-4">
 							<h1 className={HOME_SECTION_TITLE_CLASS}>{recentProjects.length === 0 ? t("home.getStarted") : t("home.jumpBack")}</h1>
-							{/* Quiet text link — not filled button / accent. Dashed underline only on hover. */}
-							<Button
-								className="gap-1.5 rounded-none border-0 border-b border-dashed border-transparent pb-px text-sm text-muted-foreground no-underline hover:border-current"
-								onClick={() => void aoBridge.app.openExternal(GITHUB_REPOSITORY_URL)}
-								type="button"
-								variant="link"
-							>
-								<Star className="size-3.5" aria-hidden="true" />
-								{t("home.starUs")}
-							</Button>
 						</div>
 
 						<div className="grid grid-cols-2 gap-3">

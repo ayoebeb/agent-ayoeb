@@ -60,6 +60,7 @@ import { registerCliLinkIpc } from "./main/cli-link-ipc";
 import { registerCliShadowIpc } from "./main/cli-shadow-ipc";
 import { createCliShadowShellPath } from "./main/cli-shadow-shell-path";
 import { cliShadowEnabled } from "./shared/cli-shadow";
+import { PRODUCT_NAME, productDisplayName } from "./shared/brand";
 import { registerDictationIpc } from "./main/dictation";
 import { launchCommand } from "./main/launch-command";
 import { readNativeAppIcon } from "./main/native-app-icon";
@@ -292,13 +293,15 @@ process.stdout.on("error", ignoreStdStreamError);
 process.stderr.on("error", ignoreStdStreamError);
 
 // The name shown in window titles, the menu bar, the dock, and the About panel.
-// Packaged bundle and installer filenames are unchanged.
-const APP_DISPLAY_NAME = "Orchestrator.inc";
+// Display only (see shared/brand.ts): packaged bundle and installer filenames,
+// the appId / AppUserModelID, the pinned userData path, and the single-instance
+// lock do not derive from it.
+const APP_DISPLAY_NAME = PRODUCT_NAME;
 
 // Must run before app ready so the About panel and default-menu role labels use it.
 // Unpackaged runs get a distinct name so the dev window, dock menu, and About
 // panel never impersonate the installed app (#3642).
-app.setName(app.isPackaged ? APP_DISPLAY_NAME : `${APP_DISPLAY_NAME} (dev)`);
+app.setName(productDisplayName(app.isPackaged));
 
 // An unsigned dev Electron is a new app to macOS whenever its binary changes, so Chromium's
 // keychain-held cookie key prompted on start. Dev runs use the stand-in key; packaged keep the keychain.
@@ -991,7 +994,7 @@ async function createWindowInternal(): Promise<void> {
 		height: 860,
 		minWidth: 960,
 		minHeight: 640,
-		title: app.isPackaged ? APP_DISPLAY_NAME : `${APP_DISPLAY_NAME} (dev)`,
+		title: productDisplayName(app.isPackaged),
 		icon: windowIconPath(),
 		backgroundColor: NATIVE_WINDOW_BACKGROUND_DARK,
 		// Shown once the renderer has loaded (showWhenRendererLoaded below), so the
@@ -1456,7 +1459,7 @@ function runFilePath(): string | null {
 
 function editorStateDir(): string {
 	const runFile = runFilePath();
-	if (!runFile) throw new Error("Orchestrator state directory is not available.");
+	if (!runFile) throw new Error("Ayo state directory is not available.");
 	return path.dirname(runFile);
 }
 
@@ -1880,12 +1883,12 @@ function daemonIdentityError(launch: DaemonLaunchSpec, probe: DaemonProbe): stri
 			: false;
 		const executableMatches = probe.executablePath ? canonicalPathInside(probe.executablePath, launch.cwd) : false;
 		if (!probe.workingDirectory && !probe.startupWorkingDirectory && !probe.executablePath) {
-			return "An older Orchestrator daemon is already running, but it does not report its checkout identity. Stop it and restart this app.";
+			return "An older Ayo daemon is already running, but it does not report its checkout identity. Stop it and restart this app.";
 		}
 		if (!cwdMatches && !startupCwdMatches && !executableMatches) {
 			const actual =
 				probe.startupWorkingDirectory ?? probe.workingDirectory ?? probe.executablePath ?? "an unknown location";
-			return `Another Orchestrator daemon is already running from ${actual}; expected this checkout at ${launch.cwd}. Stop the other daemon before using this checkout.`;
+			return `Another Ayo daemon is already running from ${actual}; expected this checkout at ${launch.cwd}. Stop the other daemon before using this checkout.`;
 		}
 		return null;
 	}
@@ -2025,7 +2028,7 @@ function handleBrowserRuntimeRejection(reason: string): void {
 	disposeBrowserRuntimeLink();
 	setDaemonStatus({
 		state: "starting",
-		message: "Restarting the Orchestrator daemon to restore the browser runtime.",
+		message: "Restarting the Ayo daemon to restore the browser runtime.",
 	});
 	void startDaemon({ forceReplaceAdopted: true });
 }
@@ -2176,7 +2179,7 @@ async function refreshDaemonStatus(): Promise<DaemonStatus> {
 	) {
 		setDaemonStatus({
 			state: "stopped",
-			message: "Orchestrator daemon is no longer reachable.",
+			message: "Ayo daemon is no longer reachable.",
 			code: "daemon_unreachable",
 		});
 	}
@@ -2488,7 +2491,7 @@ async function startDaemonInner(startEpoch: number, autoRestartIntent?: DaemonAu
 	if (launch.source === "bundled" && !existsSync(launch.command)) {
 		setDaemonStatus({
 			state: "error",
-			message: `Bundled Orchestrator daemon binary was not found at ${launch.command}. Rebuild the desktop package.`,
+			message: `Bundled Ayo daemon binary was not found at ${launch.command}. Rebuild the desktop package.`,
 			code: "binary_missing",
 		});
 		return daemonStatus;
@@ -2499,7 +2502,7 @@ async function startDaemonInner(startEpoch: number, autoRestartIntent?: DaemonAu
 		if (autoRestartIntent && startCancelled()) return daemonStatus;
 		setDaemonStatus({
 			state: "error",
-			message: `Could not stage Orchestrator's bundled tmux under the Orchestrator data directory: ${(err as Error).message}`,
+			message: `Could not stage Ayo's bundled tmux under the Ayo data directory: ${(err as Error).message}`,
 			code: "binary_missing",
 		});
 		return daemonStatus;
@@ -2519,7 +2522,7 @@ async function startDaemonInner(startEpoch: number, autoRestartIntent?: DaemonAu
 			// and leave the UI stuck on "starting". Report it as a failure instead.
 			setDaemonStatus({
 				state: "error",
-				message: `Could not create the Orchestrator data directory at ${launch.cwd}: ${(err as Error).message}`,
+				message: `Could not create the Ayo data directory at ${launch.cwd}: ${(err as Error).message}`,
 				code: "datadir_unwritable",
 			});
 			return daemonStatus;
@@ -2894,7 +2897,7 @@ function stopDaemon(): DaemonStatus {
 function reportDaemonRestartFailure(error: unknown): DaemonStatus {
 	setDaemonStatus({
 		state: "error",
-		message: `Could not restart the Orchestrator daemon: ${error instanceof Error ? error.message : String(error)}`,
+		message: `Could not restart the Ayo daemon: ${error instanceof Error ? error.message : String(error)}`,
 		details: daemonOutput.trim() || undefined,
 		code: "spawn_failed",
 	});
@@ -2943,7 +2946,7 @@ async function restartDaemon(): Promise<DaemonStatus> {
 		// a replacement instead of collapsing back to a code-less stopped state.
 		setDaemonStatus({
 			state: "error",
-			message: "Orchestrator daemon is still stopping. It will restart automatically when shutdown completes.",
+			message: "Ayo daemon is still stopping. It will restart automatically when shutdown completes.",
 			details: daemonOutput.trim() || undefined,
 			code: "not_ready",
 		});
@@ -4425,9 +4428,9 @@ app.whenReady().then(async () => {
 					buttons: ["Move old copies to Trash", "Not now"],
 					defaultId: 0,
 					cancelId: 1,
-					title: "Remove old Orchestrator copies",
+					title: "Remove old Ayo copies",
 					message: `Old copies of ${APP_DISPLAY_NAME} can replace your updated app.`,
-					detail: `${formatStaleAppCopies(copies)}\n\nMove these copies to Trash to prevent another downgrade. Your Orchestrator projects and sessions will not be removed.`,
+					detail: `${formatStaleAppCopies(copies)}\n\nMove these copies to Trash to prevent another downgrade. Your Ayo projects and sessions will not be removed.`,
 					noLink: true,
 				});
 				return result.response === 0;
@@ -4439,7 +4442,7 @@ app.whenReady().then(async () => {
 					buttons: ["OK"],
 					defaultId: 0,
 					title: "Some old copies could not be removed",
-					message: "Move these copies to Trash manually before launching Orchestrator again.",
+					message: "Move these copies to Trash manually before launching Ayo again.",
 					detail: paths.join("\n"),
 					noLink: true,
 				});

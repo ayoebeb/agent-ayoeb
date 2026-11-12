@@ -453,7 +453,7 @@ describe("ChatMarkdown", () => {
 		const link = screen.getByRole("link", { name: "final report" });
 
 		fireEvent.contextMenu(link);
-		await user.click(await screen.findByRole("menuitem", { name: "Open in Orchestrator" }));
+		await user.click(await screen.findByRole("menuitem", { name: "Open in Ayo" }));
 
 		expect(onFileOpen).toHaveBeenCalledWith("reports/final.html");
 		expect(onLinkOpen).not.toHaveBeenCalled();

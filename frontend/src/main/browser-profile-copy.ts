@@ -98,8 +98,8 @@ const STATE_ERRORS: Record<Exclude<OtherMachineState, "online">, { code: Browser
 	unverified: { code: "UNVERIFIED", message: "The other machine could not confirm this machine." },
 	"sharing-off": { code: "SHARING_OFF", message: "Browser profile sharing is turned off on the other machine." },
 	unauthorized: { code: "UNAUTHORIZED", message: "Pair the other machine again in Remote hosts." },
-	outdated: { code: "OUTDATED", message: "Update Orchestrator on the other machine to copy its browser profiles." },
-	"desktop-closed": { code: "DESKTOP_CLOSED", message: "Open the Orchestrator desktop app on the other machine." },
+	outdated: { code: "OUTDATED", message: "Update Ayo on the other machine to copy its browser profiles." },
+	"desktop-closed": { code: "DESKTOP_CLOSED", message: "Open the Ayo desktop app on the other machine." },
 	failed: { code: "FAILED", message: "The other machine could not send its browser profiles." },
 };
 
@@ -272,7 +272,7 @@ export class BrowserProfileCopyService {
 	private async verifyIdentity(machine: LinkedMachine): Promise<string> {
 		const base = remoteBase(machine.url);
 		const local = await this.options.localHostId();
-		if (!local) throw new CopyError("FAILED", "This machine's Orchestrator is not ready. Try again in a moment.");
+		if (!local) throw new CopyError("FAILED", "This machine's Ayo is not ready. Try again in a moment.");
 		let actual: string;
 		try {
 			actual = await this.options.identity(base, AbortSignal.timeout(IDENTITY_TIMEOUT_MS));
@@ -310,7 +310,7 @@ export class BrowserProfileCopyService {
 			if (typeof signed?.ticket !== "string" || typeof signed.signature !== "string") throw new Error("no ticket");
 			return signed;
 		} catch {
-			throw new CopyError("FAILED", "This machine could not sign its request. Restart Orchestrator, then try again.");
+			throw new CopyError("FAILED", "This machine could not sign its request. Restart Ayo, then try again.");
 		}
 	}
 

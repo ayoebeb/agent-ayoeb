@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { BUNDLED_TMUX_VERSION } from "./scripts/tmux-version.mjs";
 import { checkMacDmgLayout } from "./scripts/build-mac-dmg.mjs";
+import { PRODUCT_NAME } from "./src/shared/brand";
 
 // Default GitHub release target (production). Releases land on Untrivial-ai
 // (the org the repo was transferred to in July 2026; AgentWrapper and aoagents
@@ -30,9 +31,12 @@ const DEFAULT_RELEASE_REPO = "Untrivial-ai/agent-orchestrator";
 // shortcut/launcher at the SAME name. Drift here means a broken Start menu
 // shortcut on Windows (#2414) or "could not find the Electron app binary" on deb.
 const EXECUTABLE_NAME = "agent-orchestrator";
-export const WINDOWS_DISPLAY_NAME = "Orchestrator.inc";
+// What Windows shows people: the installer, Start menu and desktop shortcuts,
+// Apps & features, and the exe's file properties. Display only; identity stays on
+// the appId and EXECUTABLE_NAME, which do not derive from it (see shared/brand.ts).
+export const WINDOWS_DISPLAY_NAME = PRODUCT_NAME;
 const AUTH_PROTOCOL = {
-	name: "Orchestrator authentication callback",
+	name: `${PRODUCT_NAME} authentication callback`,
 	schemes: ["ao-app"],
 };
 const AUTH_PROTOCOL_MIME_TYPE = "x-scheme-handler/ao-app";
@@ -67,7 +71,9 @@ async function prepareNativeDependencies(platform: NodeJS.Platform, arch: string
 
 // Packager app name. It sets the bundle filename ("<name>.app"), which the
 // installed path, updater, and `ao start` keep using, so it is not the label
-// people see in Finder.
+// people see in Finder. It is an identity, not branding: it stays
+// "Agent Orchestrator" whatever PRODUCT_NAME is. The label people see comes from
+// assets/mac/en.lproj/InfoPlist.strings.
 const PACKAGER_NAME = "Agent Orchestrator";
 
 // Finder uses the localized label only when the base display name matches the
@@ -386,8 +392,9 @@ const config: ForgeConfig = {
 				// the real "agent-orchestrator.exe" (not "Agent Orchestrator.exe").
 				executableName: EXECUTABLE_NAME,
 				icon: "assets/icon.ico",
-				// Keep the installer filename unchanged. electron-builder names it
-				// after productName by default.
+				// Keep the installer filename unchanged: the updater feed and the
+				// `ao start` bootstrapper find release assets by it. electron-builder
+				// names it after productName by default.
 				nsis: { artifactName: "Agent Orchestrator Setup ${version}.${ext}" },
 			},
 			["win32"],
@@ -414,7 +421,7 @@ const config: ForgeConfig = {
 		new MakerAppImage(
 			{
 				appId: "dev.agent-orchestrator.desktop",
-				productName: "Orchestrator",
+				productName: PRODUCT_NAME,
 				appImage: { artifactName: "Agent Orchestrator-${version}.${ext}" },
 				icon: "assets/icon.png",
 				protocols: [AUTH_PROTOCOL],

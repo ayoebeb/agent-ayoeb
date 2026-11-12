@@ -1039,7 +1039,7 @@ const replacementErrorCount = Object.keys(orchestratorReplacementErrors).length;
 			setProjectProvisioning(projectId, false, hostId);
 			const message = cause instanceof Error ? cause.message : "Try starting it from project settings.";
 			setOrchestratorStartupError(projectId, `Project added, but orchestrator did not start: ${message}`, hostId);
-			showGlobalToast("Orchestrator did not start", message, "error");
+			showGlobalToast("Ayo did not start", message, "error");
 		});
 	}, [navigate, queryClient, remoteHosts, setOrchestratorStartupError, setProjectProvisioning, showGlobalToast]);
 	const initializeRemoteProject = useCallback(async (hostId: string, path: string) => {

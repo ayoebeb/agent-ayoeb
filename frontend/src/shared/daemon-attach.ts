@@ -155,7 +155,7 @@ async function readinessStatus(
 			pid,
 			executablePath: health.executablePath,
 			workingDirectory: health.workingDirectory,
-			message: "An Orchestrator daemon is already running, but it is not ready yet.",
+			message: "An Ayo daemon is already running, but it is not ready yet.",
 			code: "not_ready",
 		};
 	}

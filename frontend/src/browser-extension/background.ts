@@ -98,7 +98,7 @@ export class Bridge {
 			const reason = this.chrome.runtime.lastError?.message;
 			if (reason && !this.lastError) {
 				this.lastError = /not found|specified native messaging host/i.test(reason)
-					? { code: "HOST_NOT_INSTALLED", message: "Orchestrator is not set up for Chrome. Run `ao browser chrome setup`." }
+					? { code: "HOST_NOT_INSTALLED", message: "Ayo is not set up for Chrome. Run `ao browser chrome setup`." }
 					: { code: "HOST_DISCONNECTED", message: reason };
 			}
 			this.port = undefined;
@@ -223,10 +223,10 @@ export class Bridge {
 		await this.chrome.action.setBadgeBackgroundColor({ color: busy ? "#f97316" : "#6b7280" }).catch(() => undefined);
 		const sessions = [...new Set([...this.inFlight.values()].map((entry) => entry.sessionId))];
 		const title = busy
-			? `Orchestrator agent working: ${sessions.join(", ")}`
+			? `Ayo agent working: ${sessions.join(", ")}`
 			: this.ready
-				? "Orchestrator Browser Bridge: connected"
-				: "Orchestrator Browser Bridge: not connected to Orchestrator";
+				? "Ayo Browser Bridge: connected"
+				: "Ayo Browser Bridge: not connected to Ayo";
 		await this.chrome.action.setTitle({ title }).catch(() => undefined);
 	}
 }

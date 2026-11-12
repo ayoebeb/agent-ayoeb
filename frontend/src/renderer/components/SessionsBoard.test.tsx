@@ -359,7 +359,7 @@ describe("SessionsBoard", () => {
 		expect(indicator.compareDocumentPosition(task) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 		expect(indicator).toHaveTextContent("12.0 GB");
 		expect(indicator).toHaveAttribute("data-memory-state", "tight");
-		expect(indicator).toHaveAttribute("aria-label", "Tight · 2.0 GB free of 32.0 GB · Orchestrator holds 12.0 GB · pressure 35.0");
+		expect(indicator).toHaveAttribute("aria-label", "Tight · 2.0 GB free of 32.0 GB · Ayo holds 12.0 GB · pressure 35.0");
 		await userEvent.click(indicator);
 		expect(await screen.findByTestId("session-memory-stacked")).toBeInTheDocument();
 	});
