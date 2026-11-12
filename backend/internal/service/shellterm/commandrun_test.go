@@ -31,6 +31,9 @@ func TestCommandRunInvocationPerShell(t *testing.T) {
 		{shell: `C:\Windows\system32\wsl.exe`, wantErr: "COMMAND_RUN_SHELL_UNSUPPORTED"},
 	} {
 		t.Run(filepath.Base(tc.shell), func(t *testing.T) {
+			if runtime.GOOS != "windows" && strings.Contains(tc.shell, `\`) {
+				t.Skip("backslash shell paths are only classified on Windows")
+			}
 			got, err := commandRunInvocation(tc.shell, "echo hi")
 			if tc.wantErr != "" {
 				var apiErr *apierr.Error
