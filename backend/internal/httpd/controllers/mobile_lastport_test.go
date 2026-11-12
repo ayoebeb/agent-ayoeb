@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
@@ -83,5 +84,45 @@ func TestMobileEnableStartsFromTheSavedLastPort(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestMobileEnableRejectsASavedLastPortAbove65535(t *testing.T) {
+	for _, enable := range []struct {
+		name string
+		call func(*BridgeService) (MobileStatusResponse, error)
+	}{
+		{"enable", (*BridgeService).Enable},
+		{"lan only", (*BridgeService).EnableLANOnly},
+		{"tunnel only", (*BridgeService).EnableTunnelOnly},
+	} {
+		t.Run(enable.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mobile", "config.json")
+			if err := mobilebridge.Save(path, mobilebridge.State{LastPort: 70000}); err != nil {
+				t.Fatal(err)
+			}
+			lan := &movedPortLAN{}
+			b := &BridgeService{
+				LAN:                lan,
+				ConfigPath:         path,
+				DefaultPort:        45011,
+				PickLANHosts:       func() []string { return nil },
+				PickTailscaleHosts: func() []string { return nil },
+			}
+			_, err := enable.call(b)
+			if err == nil || !strings.Contains(err.Error(), "saved listener port 70000 in "+path+" is above 65535") {
+				t.Fatalf("error %v, want it to name the saved port and its file", err)
+			}
+			if len(lan.asked) != 0 || lan.running || lan.hash != "" {
+				t.Fatalf("enable armed or started the listener (asked %v, running %v, hash set %v)", lan.asked, lan.running, lan.hash != "")
+			}
+			state, err := mobilebridge.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.Enabled || state.LastPort != 70000 {
+				t.Fatalf("saved state changed to enabled=%v lastPort=%d", state.Enabled, state.LastPort)
+			}
+		})
 	}
 }

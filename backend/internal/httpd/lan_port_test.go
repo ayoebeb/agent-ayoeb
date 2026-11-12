@@ -1,6 +1,7 @@
 package httpd
 
 import (
+	"bufio"
 	"context"
 	"net"
 	"net/http"
@@ -137,6 +138,22 @@ func TestLANManagerFailsWhenEverySearchedPortIsInUse(t *testing.T) {
 	}
 }
 
+func TestLANManagerRejectsAPortOutsideTheTCPRange(t *testing.T) {
+	for _, port := range []int{-1, 65536, 70000} {
+		t.Run(strconv.Itoa(port), func(t *testing.T) {
+			m := NewMobileLAN(http.NotFoundHandler(), "", 0, nil, nil)
+			stopLANOnCleanup(t, m)
+			_, err := m.StartLoopback(port)
+			if err == nil || !strings.Contains(err.Error(), "port "+strconv.Itoa(port)+" is outside 1-65535") {
+				t.Fatalf("StartLoopback(%d) error %v, want it to name the valid range", port, err)
+			}
+			if m.Running() {
+				t.Fatal("a rejected port left the listener running")
+			}
+		})
+	}
+}
+
 // Enable starts from the saved lastPort rather than the default, persists the
 // port it actually bound, and reports it in the status it returns.
 func TestBridgeEnableReusesLastPortAndMovesPastAHeldOne(t *testing.T) {
@@ -198,5 +215,76 @@ func TestBridgeEnableReusesLastPortAndMovesPastAHeldOne(t *testing.T) {
 			}
 			assertPort(res, last+1)
 		})
+	}
+}
+
+// openServedConn connects to the listener on port and waits for one response,
+// so the listener has accepted the connection before the caller disables it.
+func openServedConn(t *testing.T, port int) net.Conn {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write([]byte("GET /probe HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
+		t.Fatalf("no response before disable: %v", err)
+	}
+	return conn
+}
+
+// Disable closes the listener's accepted connections from the server side, so
+// their sockets linger on its port (FIN_WAIT_2 while the client stays
+// connected, TIME_WAIT after it closes). Re-enabling must not mistake those for
+// another process and move the port, which would strand paired devices.
+func TestBridgeReEnableKeepsItsPortWithALingeringConnection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		enable func(*controllers.BridgeService) (controllers.MobileStatusResponse, error)
+	}{
+		{"lan", (*controllers.BridgeService).Enable},
+		{"tunnel only", (*controllers.BridgeService).EnableTunnelOnly},
+	} {
+		for _, client := range []string{"client still connected", "client closed"} {
+			t.Run(tc.name+"/"+client, func(t *testing.T) {
+				port := freeLANPorts(t, 2)
+				path := filepath.Join(t.TempDir(), "mobile", "config.json")
+				m := NewMobileLAN(http.NotFoundHandler(), "", port, nil, nil)
+				stopLANOnCleanup(t, m)
+				bridge := &controllers.BridgeService{
+					LAN:                m,
+					ConfigPath:         path,
+					DefaultPort:        port,
+					PickLANHosts:       func() []string { return nil },
+					PickTailscaleHosts: func() []string { return nil },
+				}
+				if _, err := tc.enable(bridge); err != nil {
+					t.Fatal(err)
+				}
+				conn := openServedConn(t, port)
+				if err := bridge.Disable(); err != nil {
+					t.Fatal(err)
+				}
+				if client == "client closed" {
+					_ = conn.Close()
+				}
+
+				res, err := tc.enable(bridge)
+				if err != nil {
+					t.Fatal(err)
+				}
+				state, err := mobilebridge.Load(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.Port != port || state.LastPort != port {
+					t.Fatalf("re-enable reported %d and saved %d; want the same port %d", res.Port, state.LastPort, port)
+				}
+			})
+		}
 	}
 }

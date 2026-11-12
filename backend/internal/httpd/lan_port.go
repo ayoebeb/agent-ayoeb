@@ -52,6 +52,9 @@ func lanPortHeld(ctx context.Context, port int) bool {
 // shared port lets whichever socket is more specific take the other's
 // connections. skipped lists the ports it passed over. Port 0 asks the OS.
 func listenLAN(ctx context.Context, host string, preferred int) (ln net.Listener, skipped []int, err error) {
+	if preferred < 0 || preferred > 65535 {
+		return nil, nil, fmt.Errorf("bind authenticated listener on %s: port %d is outside 1-65535", host, preferred)
+	}
 	lc := net.ListenConfig{Control: lanBindControl}
 	if preferred == 0 {
 		ln, err = lc.Listen(ctx, "tcp", net.JoinHostPort(host, "0"))

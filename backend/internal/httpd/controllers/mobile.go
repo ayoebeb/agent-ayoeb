@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -769,6 +770,13 @@ func (b *BridgeService) enableWithPasswordLocked(pw string, noPublicTunnel, loop
 	prevHash := b.LAN.PasswordHash()
 	wasRunning := b.LAN.Running()
 	prevSt, _ := mobilebridge.Load(b.ConfigPath)
+	// lastPort lives in a file a person can edit. Name that file before arming
+	// anything, rather than report a failed search of ports that cannot exist. A
+	// running listener ignores the requested port, so rotation is unaffected.
+	if !wasRunning && prevSt.LastPort > 65535 {
+		return MobileStatusResponse{}, fmt.Errorf("saved listener port %d in %s is above 65535; set lastPort to a port from 1 to 65535, or remove it to use the default, then enable again",
+			prevSt.LastPort, b.ConfigPath)
+	}
 
 	// A fresh listener must be armed before binding. For an already-running
 	// listener, wait until persistence succeeds before rotating the hash: a
