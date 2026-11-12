@@ -4464,6 +4464,65 @@ describe("Task interface choice (Chat or Terminal)", () => {
 		expect(delegated()[0]).not.toHaveProperty("mode");
 	});
 
+	it("starts nothing until Settings say which interface is the default", async () => {
+		localInterfaceFixture({ defaultSessionMode: "chat" });
+		const answered = h.get.getMockImplementation()!;
+		let answerSettings!: () => void;
+		const settingsRead = new Promise<void>((resolve) => { answerSettings = resolve; });
+		h.get.mockImplementation(async (path: string, init?: { params?: { path?: Record<string, string> } }) => {
+			if (path === "/api/v1/settings") await settingsRead;
+			return answered(path, init);
+		});
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		fireEvent.change(task(), { target: { value: "Do the work" } });
+		// The project and agent are ready, but the toggle's Terminal is only a placeholder.
+		await waitFor(() => expect(screen.getByTestId("agent-field")).toHaveAttribute("data-value", "codex"));
+		expect(screen.getByRole("button", { name: "Start task" })).toBeDisabled();
+		fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+		expect(delegated()).toHaveLength(0);
+
+		await act(async () => { answerSettings(); });
+		await waitFor(() => expect(interfaceChoice("Chat")).toHaveAttribute("aria-checked", "true"));
+		await waitForTaskReady();
+		fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+		await waitFor(() => expect(delegated()).toHaveLength(1));
+		// Chat is the daemon's own default, which an omitted mode starts.
+		expect(delegated()[0]).not.toHaveProperty("mode");
+	});
+
+	it("keeps the effort picker when a Chat pick meets an agent that runs only in Terminal", async () => {
+		localInterfaceFixture({ defaultSessionMode: "tui", chatHarnesses: ["codex"], agent: "codex" });
+		const answered = h.get.getMockImplementation()!;
+		h.get.mockImplementation(async (path: string, init?: { params?: { path?: Record<string, string> } }) => path.includes("/models")
+			? { data: { agent: init?.params?.path?.agent ?? "codex", selectionMode: "catalog", allowCustom: true, models: [{ id: "model-test", label: "Model test", isDefault: true, efforts: ["low", "high"] }] } }
+			: answered(path, init));
+		render(<Wrap><TaskComposer projectId="proj-1" onCreated={vi.fn()} /></Wrap>);
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		await userEvent.click(interfaceChoice("Chat"));
+		expect(await screen.findByRole("button", { name: "Effort" })).toBeInTheDocument();
+		// Claude Code has no Chat in these Settings: it locks to Terminal, and its tuning stays.
+		fireEvent.click(screen.getByTestId("agent-field"));
+		await waitFor(() => expect(screen.getByTestId("agent-field")).toHaveAttribute("data-value", "claude-code"));
+		await waitFor(() => expect(interfaceChoice("Terminal")).toHaveAttribute("aria-checked", "true"));
+		expect(interfaceChoice("Chat")).toBeDisabled();
+		expect(await screen.findByRole("button", { name: "Effort" })).toBeInTheDocument();
+	});
+
+	it("says why Start stays off when Settings cannot be read", async () => {
+		localInterfaceFixture();
+		const answered = h.get.getMockImplementation()!;
+		h.get.mockImplementation(async (path: string, init?: { params?: { path?: Record<string, string> } }) =>
+			path === "/api/v1/settings" ? { error: { message: "AO daemon is starting" } } : answered(path, init));
+		let launch!: ReturnType<typeof useTaskLaunch>;
+		function Launcher() {
+			launch = useTaskLaunch({ projectId: "proj-1" });
+			return null;
+		}
+		render(<Wrap queryClient={new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })}><Launcher /></Wrap>);
+		await waitFor(() => expect(launch.remoteLoadError).toBe("AO daemon is starting"), { timeout: 5000 });
+		expect(launch.canSubmit).toBe(false);
+	});
+
 	it.each([["chat", "Terminal", "tui"], ["tui", "Chat", "chat"]] as const)("sends the interface picked for this task over a %s default", async (defaultSessionMode, pick, mode) => {
 		localInterfaceFixture({ defaultSessionMode });
 		const onCreated = vi.fn();

@@ -877,6 +877,10 @@ export function useTaskLaunch({ projectId, hostId }: {
 	const chosenInterface = interfaceLock ?? wantedInterface;
 	// Chat was wanted, but this agent starts in the terminal.
 	const requiresTuiFallback = wantedInterface === "chat" && interfaceLock === "tui";
+	// Settings default to Chat and this agent has none. The effort picker keeps the
+	// rule it had before the toggle: a pick of Chat or Terminal never changes which
+	// tuning controls show, since this agent starts in the terminal either way.
+	const defaultChatFallsBackToTui = defaultInterface === "chat" && interfaceLock === "tui";
 	// A Chat session's permission vocabulary; a Terminal task takes AO's own modes.
 	const usesChatPermissions = !isCloudProject && chosenInterface === "chat";
 	const permissionDiscovery = useChatPermissionModesQuery(hostId, usesChatPermissions ? selectedAgent : undefined);
@@ -893,7 +897,7 @@ export function useTaskLaunch({ projectId, hostId }: {
 	const launchApproval = usesNativePermissions ? "default" : approvalMode;
 	// With no provider default for the reported levels AO picks one, shows it as
 	// selected, and sends it, so the picker matches what the task runs with.
-	const aoDefaultEffort = requiresTuiFallback ? undefined : fallbackEffort(effortOptions, implicitEffort);
+	const aoDefaultEffort = defaultChatFallsBackToTui ? undefined : fallbackEffort(effortOptions, implicitEffort);
 	const effectiveEffort = isCloudProject
 		? effort && effort !== "default" && (cloudEffortsUnknown || effortOptions.includes(effort)) ? effort : cloudDefaultEffort
 		: effort && effort !== "default"
@@ -919,7 +923,7 @@ export function useTaskLaunch({ projectId, hostId }: {
 		: effortTouched || effortFromPreference
 			? !effectiveEffort || effectiveEffort === implicitEffort ? undefined : effectiveEffort
 			: aoDefaultEffort;
-	const effortAvailability: EffortAvailability = requiresTuiFallback
+	const effortAvailability: EffortAvailability = defaultChatFallsBackToTui
 		? "launch-unavailable"
 		: !effortModel || effortModel.efforts === undefined
 			? "unknown"
@@ -971,7 +975,10 @@ export function useTaskLaunch({ projectId, hostId }: {
 		selectedAgent !== "" &&
 		(!hostId || Boolean(agentCatalog?.agents.some((candidate) => candidate.id === selectedAgent && isLaunchableAgent(candidate)))) &&
 		(isCloudProject || isStandalone || projectQuery.data !== undefined) &&
-		(!hostId || (agentsQuery.isSuccess && settings !== undefined)) &&
+		(!hostId || agentsQuery.isSuccess) &&
+		// Until Settings load, the Chat / Terminal toggle shows a placeholder default
+		// that may not be the one the daemon applies, so nothing starts from it.
+		settings !== undefined &&
 		// Cloud refuses a model the account's own list lacks (MODEL_UNAVAILABLE),
 		// so the picker's warning asks for another before a send.
 		!cloudModelUnavailable(selectedModelOrMode);
@@ -986,7 +993,9 @@ export function useTaskLaunch({ projectId, hostId }: {
 	// Scratchpad never reads a project, but its disabled query still sees an entry
 	// another view cached under the same key, so that entry's error is not its own.
 	const projectError = isCloudProject || isStandalone ? undefined : projectQuery.error;
-	const remoteLoadError = !hostId ? (projectError instanceof Error ? projectError.message : standaloneAgentError) : !hostConnected ? t("remote.hostOffline") :
+	// A Settings read that keeps failing would otherwise leave Start disabled with no reason.
+	const localSettingsError = settings === undefined ? settingsError : undefined;
+	const remoteLoadError = !hostId ? (projectError instanceof Error ? projectError.message : standaloneAgentError ?? localSettingsError) : !hostConnected ? t("remote.hostOffline") :
 		[projectError, agentsQuery.error].find((cause): cause is Error => cause instanceof Error)?.message ?? settingsError ??
 			(agentsQuery.isSuccess && !agentCatalog?.agents.some(isLaunchableAgent) ? t("remote.noReadyAgent") : standaloneAgentError);
 	const refreshSelectedModels = useCallback(async () => {
@@ -1303,7 +1312,7 @@ export function useTaskLaunch({ projectId, hostId }: {
 
 	// A cloud task shows the effort it sends.
 	const shownEffort = isCloudProject ? effectiveEffort : effort;
-	const showEffort = cursorChoice ? cursorChoice.family.efforts.length > 1 : !requiresTuiFallback && (effortOptions.length > 0 || Boolean(shownEffort && shownEffort !== "default"));
+	const showEffort = cursorChoice ? cursorChoice.family.efforts.length > 1 : !defaultChatFallsBackToTui && (effortOptions.length > 0 || Boolean(shownEffort && shownEffort !== "default"));
 	// The same choices in the chat composer's shape, so the new chat page can use its settings bar.
 	// The orchestrator's model says so in the model menus.
 	const orchestratorModelHint = orchestratorModelIsValid
