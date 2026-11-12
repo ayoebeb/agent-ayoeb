@@ -3444,6 +3444,7 @@
 	"remote.rotateAfterRemoveDescription": "If {{label}} was ever paired with this computer, it may still have the connection password and could keep reaching this computer with it. A new password locks it out. Your phone and other devices paired with the old password need to pair again; devices signed in to your Orchestrator account pick up the change by themselves.",
 	"remote.rotateAfterRemoveConfirm": "Change password",
 	"remote.rotateAfterRemoveLater": "Not now",
+	"remote.rotateRelinkFailed": "The new password is set, but this computer could not be linked to your Orchestrator account again, so devices signed in to your account can't reach it yet.",
 	"remote.rotatePasswordFailed": "Could not change the connection password.",
 	"remote.name": "Name",
 	"remote.host": "Host",

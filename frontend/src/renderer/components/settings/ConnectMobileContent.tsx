@@ -334,17 +334,32 @@ type KeepAwakeStatus = NonNullable<MobileStatus["keepAwake"]>;
  * the account is cut off by signing it out of the account; a new password is
  * for password-paired devices.
  */
-export async function rotatePairingPassword(options: {
-	cloudBaseUrl: string;
-	accountId: string;
-	tunnelTimeoutMessage: string;
-	onRotated?: () => void;
-	onLinkError?: (cause: unknown) => void;
-}): Promise<MobileStatus | undefined> {
+export async function rotatePairingPassword(options: RelinkOptions & { onRotated?: () => void }): Promise<MobileStatus | undefined> {
 	const { data, error } = await apiClient.POST("/api/v1/mobile/regenerate");
 	if (error) throw apiErrorException(error);
 	options.onRotated?.();
-	if (!data || data.noPublicTunnel || !options.cloudBaseUrl || !options.accountId || !data.password) return data;
+	if (data) await relinkThisComputer(data, options);
+	return data;
+}
+
+type RelinkOptions = {
+	cloudBaseUrl: string;
+	accountId: string;
+	tunnelTimeoutMessage: string;
+	/** A failed link, reported once; the password is not changed again. */
+	onLinkError?: (cause: unknown) => void;
+};
+
+/**
+ * Lists this computer in the account again with its current password, when
+ * the account still lists it. Retries a link that failed after a new
+ * password without changing the password again.
+ */
+export async function relinkThisComputer(
+	data: Pick<MobileStatus, "hostId" | "password" | "noPublicTunnel">,
+	options: RelinkOptions,
+): Promise<void> {
+	if (data.noPublicTunnel || !options.cloudBaseUrl || !options.accountId || !data.password) return;
 	const link = (url?: string) =>
 		linkThisComputer(options.cloudBaseUrl, options.accountId, data.hostId ?? "", data.password ?? "", { ifListed: true, ...(url ? { url } : {}) });
 	const linked = await link().then(
@@ -365,7 +380,6 @@ export async function rotatePairingPassword(options: {
 			.then((ready) => ready && link(ready.url))
 			.catch((cause: unknown) => options.onLinkError?.(cause));
 	}
-	return data;
 }
 
 const KEEP_AWAKE_STORAGE_KEY = "ao.mobile.keepAwake";

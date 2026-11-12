@@ -3461,6 +3461,7 @@
 	"remote.rotateAfterRemoveDescription": "{{label}} がこのコンピュータとペアリングされたことがある場合、まだ接続パスワードを知っていて、それを使ってこのコンピュータに接続し続けられる可能性があります。新しいパスワードにすると接続できなくなります。古いパスワードでペアリングしたスマートフォンなどのデバイスは再度ペアリングが必要です。Orchestrator アカウントにサインインしているデバイスは自動的に変更を反映します。",
 	"remote.rotateAfterRemoveConfirm": "パスワードを変更",
 	"remote.rotateAfterRemoveLater": "後で",
+	"remote.rotateRelinkFailed": "新しいパスワードは設定されましたが、このコンピューターを Orchestrator アカウントに再びリンクできませんでした。アカウントにサインインしているデバイスは、まだこのコンピューターに接続できません。",
 	"remote.rotatePasswordFailed": "接続パスワードを変更できませんでした。",
 	"remote.name": "名前",
 	"remote.host": "ホスト",

@@ -3523,6 +3523,7 @@
 	"remote.rotateAfterRemoveDescription": "Si {{label}} se emparejó alguna vez con este equipo, puede que aún tenga la contraseña de conexión y siga pudiendo acceder a este equipo con ella. Una contraseña nueva lo deja fuera. Tu teléfono y otros dispositivos emparejados con la contraseña anterior tendrán que emparejarse de nuevo; los dispositivos con sesión iniciada en tu cuenta de Orchestrator aplican el cambio solos.",
 	"remote.rotateAfterRemoveConfirm": "Cambiar contraseña",
 	"remote.rotateAfterRemoveLater": "Ahora no",
+	"remote.rotateRelinkFailed": "La contraseña nueva ya está configurada, pero no se pudo volver a vincular este equipo a tu cuenta de Orchestrator, así que los dispositivos con sesión iniciada en tu cuenta aún no pueden acceder a él.",
 	"remote.rotatePasswordFailed": "No se pudo cambiar la contraseña de conexión.",
 	"remote.name": "Nombre",
 	"remote.host": "Host",

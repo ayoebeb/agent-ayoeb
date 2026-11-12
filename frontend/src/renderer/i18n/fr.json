@@ -3523,6 +3523,7 @@
 	"remote.rotateAfterRemoveDescription": "Si {{label}} a déjà été associé à cet ordinateur, il connaît peut-être encore le mot de passe de connexion et peut continuer à joindre cet ordinateur avec. Un nouveau mot de passe le bloque. Votre téléphone et les autres appareils associés avec l’ancien mot de passe devront être associés à nouveau ; les appareils connectés à votre compte Orchestrator prennent en compte le changement d’eux-mêmes.",
 	"remote.rotateAfterRemoveConfirm": "Changer le mot de passe",
 	"remote.rotateAfterRemoveLater": "Pas maintenant",
+	"remote.rotateRelinkFailed": "Le nouveau mot de passe est défini, mais cet ordinateur n’a pas pu être associé de nouveau à votre compte Orchestrator : les appareils connectés à votre compte ne peuvent pas encore le joindre.",
 	"remote.rotatePasswordFailed": "Impossible de changer le mot de passe de connexion.",
 	"remote.name": "Nom",
 	"remote.host": "Hôte",

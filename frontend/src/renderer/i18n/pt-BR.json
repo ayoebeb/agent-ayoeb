@@ -3523,6 +3523,7 @@
 	"remote.rotateAfterRemoveDescription": "Se {{label}} já foi pareado com este computador, ele ainda pode ter a senha de conexão e continuar acessando este computador com ela. Uma nova senha o bloqueia. Seu celular e outros dispositivos pareados com a senha antiga precisarão parear de novo; dispositivos conectados à sua conta do Orchestrator recebem a mudança sozinhos.",
 	"remote.rotateAfterRemoveConfirm": "Alterar senha",
 	"remote.rotateAfterRemoveLater": "Agora não",
+	"remote.rotateRelinkFailed": "A nova senha foi definida, mas não foi possível vincular este computador de novo à sua conta do Orchestrator, então os dispositivos conectados à sua conta ainda não conseguem acessá-lo.",
 	"remote.rotatePasswordFailed": "Não foi possível alterar a senha de conexão.",
 	"remote.name": "Nome",
 	"remote.host": "Host",

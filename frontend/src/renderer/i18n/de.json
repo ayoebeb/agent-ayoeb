@@ -3461,6 +3461,7 @@
 	"remote.rotateAfterRemoveDescription": "Wenn {{label}} jemals mit diesem Computer gekoppelt war, kennt es vielleicht noch das Verbindungspasswort und kann diesen Computer damit weiter erreichen. Ein neues Passwort sperrt es aus. Dein Telefon und andere mit dem alten Passwort gekoppelte Geräte müssen neu gekoppelt werden; Geräte, die in deinem Orchestrator-Konto angemeldet sind, übernehmen die Änderung selbst.",
 	"remote.rotateAfterRemoveConfirm": "Passwort ändern",
 	"remote.rotateAfterRemoveLater": "Nicht jetzt",
+	"remote.rotateRelinkFailed": "Das neue Passwort ist gesetzt, aber dieser Computer konnte nicht erneut mit deinem Orchestrator-Konto verknüpft werden. Geräte, die in deinem Konto angemeldet sind, erreichen ihn deshalb noch nicht.",
 	"remote.rotatePasswordFailed": "Das Verbindungspasswort konnte nicht geändert werden.",
 	"remote.name": "Name",
 	"remote.host": "Host",

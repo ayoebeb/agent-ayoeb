@@ -16,7 +16,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { SettingsRow } from "./SettingsRow";
-import { fetchMobileStatus, mobileStatusQueryKey, rotatePairingPassword } from "./ConnectMobileContent";
+import { fetchMobileStatus, mobileStatusQueryKey, relinkThisComputer, rotatePairingPassword } from "./ConnectMobileContent";
 import { SettingsSection } from "./SettingsSection";
 import { ThisComputerAccess } from "./ThisComputerAccess";
 
@@ -48,6 +48,10 @@ export function RemoteHostsSettings({ titleHidden }: { titleHidden?: boolean }) 
 	const [rotationOffer, setRotationOffer] = useState<string | null>(null);
 	const [rotateBusy, setRotateBusy] = useState(false);
 	const [rotateError, setRotateError] = useState("");
+	// The new password is set, but the account still lists this computer with
+	// the old one: why the link failed, until a retry links it.
+	const [relinkError, setRelinkError] = useState("");
+	const [relinkBusy, setRelinkBusy] = useState(false);
 	const formRef = useRef<HTMLFormElement>(null);
 
 	const load = async () => {
@@ -140,21 +144,43 @@ export function RemoteHostsSettings({ titleHidden }: { titleHidden?: boolean }) 
 		}
 	};
 
+	const relinkOptions = () => ({
+		cloudBaseUrl,
+		accountId: session?.user.id ?? "",
+		tunnelTimeoutMessage: t("remote.shareThisComputerTimeout"),
+		// Shown outside the offer, which has closed: retrying links again with the new password, never a second one.
+		onLinkError: (cause: unknown) => setRelinkError(cause instanceof Error && cause.message ? cause.message : t("remote.shareThisComputerFailed")),
+	});
+
 	const rotate = async () => {
 		setRotateBusy(true);
 		setRotateError("");
+		setRelinkError("");
 		try {
 			await rotatePairingPassword({
-				cloudBaseUrl,
-				accountId: session?.user.id ?? "",
-				tunnelTimeoutMessage: t("remote.shareThisComputerTimeout"),
-				onRotated: () => void queryClient.invalidateQueries({ queryKey: mobileStatusQueryKey }),
+				...relinkOptions(),
+				onRotated: () => {
+					// The password changed: the offer is done whatever the link does next.
+					setRotationOffer(null);
+					void queryClient.invalidateQueries({ queryKey: mobileStatusQueryKey });
+				},
 			});
-			setRotationOffer(null);
 		} catch (cause) {
 			setRotateError(cause instanceof Error && cause.message ? cause.message : t("remote.rotatePasswordFailed"));
 		} finally {
 			setRotateBusy(false);
+		}
+	};
+
+	const relink = async () => {
+		setRelinkBusy(true);
+		setRelinkError("");
+		try {
+			await relinkThisComputer(await fetchMobileStatus(), relinkOptions());
+		} catch (cause) {
+			relinkOptions().onLinkError(cause);
+		} finally {
+			setRelinkBusy(false);
 		}
 	};
 
@@ -178,6 +204,14 @@ export function RemoteHostsSettings({ titleHidden }: { titleHidden?: boolean }) 
 		<ThisComputerAccess />
 
 		<SettingsSection title={t("remote.savedHosts")} grouped>
+			{relinkError ? (
+				<SettingsRow
+					label={t("remote.thisComputer")}
+					description={<span className="block text-pretty text-error" role="alert">{t("remote.rotateRelinkFailed")} {relinkError}</span>}
+				>
+					<Button disabled={relinkBusy} onClick={() => void relink()} size="sm" type="button" variant="quiet">{t("notify.retry")}</Button>
+				</SettingsRow>
+			) : null}
 			{loading && saved.length === 0 ? <div className="settings-row-bar text-sm text-settings-muted" role="status">{t("remote.loadingHosts")}</div> : null}
 			{!loading && saved.length === 0 && !loadError ? <div className="settings-row-bar text-pretty text-sm text-settings-muted">{t("remote.emptyHosts")}</div> : null}
 			{saved.map((host) => (

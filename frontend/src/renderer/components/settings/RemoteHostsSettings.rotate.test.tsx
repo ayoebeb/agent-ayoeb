@@ -102,6 +102,27 @@ it("does not offer a new password when this computer is not reachable remotely",
 	expect(posted()).not.toContain("/api/v1/mobile/regenerate");
 });
 
+it("says when the account link fails after the new password, and retries the link without changing the password again", async () => {
+	vi.mocked(linkThisComputer).mockRejectedValueOnce(new Error("AO Cloud host sync failed (502)."));
+	renderSettings();
+	await removeOldLaptop();
+	const offer = await screen.findByRole("dialog", { name: "Change this computer's connection password?" });
+	fireEvent.click(within(offer).getByRole("button", { name: "Change password" }));
+
+	// The password did change, so the offer closes; the failed link is shown in the section.
+	const alert = await screen.findByRole("alert");
+	expect(alert).toHaveTextContent("The new password is set, but this computer could not be linked to your Orchestrator account again");
+	expect(alert).toHaveTextContent("AO Cloud host sync failed (502).");
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(posted()).toEqual(["/api/v1/mobile/regenerate"]);
+
+	fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+	await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+	expect(linkThisComputer).toHaveBeenCalledTimes(2);
+	expect(linkThisComputer).toHaveBeenLastCalledWith("https://cp.example.test", "user_1", "h_this", "pw-2", { ifListed: true });
+	expect(posted()).toEqual(["/api/v1/mobile/regenerate"]);
+});
+
 it("explains a failed change and keeps the offer open to try again", async () => {
 	fake.failRegenerate = true;
 	renderSettings();
