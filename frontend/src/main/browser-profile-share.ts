@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BROWSER_IMPORT_MAX_COOKIES } from "../shared/browser-profile-import";
@@ -25,7 +25,26 @@ import type { BrowserProfileStore } from "./browser-profile-store";
 export const BROWSER_PROFILE_SHARING_FILE_NAME = "browser-profile-sharing.json";
 /** Keeps one export page well under the 8 MiB desktop bridge frame. */
 export const BROWSER_PROFILE_SHARE_PAGE_BYTES = 3 * 1024 * 1024;
-const CURSOR_PATTERN = /^([0-9]{1,6}):([0-9]{1,6})$/;
+/** "<export snapshot>:<cookie offset>:<history offset>"; the first page has none. */
+const CURSOR_PATTERN = /^([0-9a-f]{32}):([0-9]{1,6}):([0-9]{1,6})$/;
+/** An export left unfinished this long is dropped, with the cookies it holds. */
+export const BROWSER_PROFILE_EXPORT_IDLE_MS = 2 * 60_000;
+/** Exports held at once; the oldest is dropped first. */
+const MAX_EXPORT_SNAPSHOTS = 8;
+
+/**
+ * One export's cookies and history, read once at its first page, so the
+ * pages that follow line up even while the profile is in use here.
+ */
+type ExportSnapshot = {
+	profileId: string;
+	receiverHostId: string;
+	/** Sharing's generation when it was read: turning sharing off ends it. */
+	generation: number;
+	cookies: SharedBrowserCookie[];
+	history: BrowserHistoryEntry[];
+	expiresAt: number;
+};
 
 /** The cookie shape that crosses the remote connection (Electron's own Cookie fields). */
 export type SharedBrowserCookie = {
@@ -214,6 +233,7 @@ function byteLength(value: unknown): number {
 
 export class BrowserProfileShareSource {
 	private readonly now: () => Date;
+	private readonly snapshots = new Map<string, ExportSnapshot>();
 
 	constructor(private readonly options: BrowserProfileShareSourceOptions) {
 		this.now = options.now ?? (() => new Date());
@@ -334,7 +354,7 @@ export class BrowserProfileShareSource {
 		const generation = await this.requireSharing();
 		const receiver = await this.verifiedReceiver(args);
 		const record = typeof args === "object" && args !== null ? args as Record<string, unknown> : {};
-		const page = await this.exportPlainPage(record.profileId, record.cursor);
+		const page = await this.exportPlainPage(record.profileId, record.cursor, receiver.receiverHostId, generation);
 		await this.requireSharingStill(generation);
 		return sealPayload(page, receiver.key, sealContext({
 			...receiver,
@@ -362,37 +382,80 @@ export class BrowserProfileShareSource {
 		}
 	}
 
+	private invalidCursor(): BrowserProfileShareError {
+		return new BrowserProfileShareError("INVALID_CURSOR", "Export cursor is invalid.");
+	}
+
+	/** Drops exports left unfinished; with room, makes space for one more by dropping the oldest. */
+	private pruneSnapshots(now: number, room: boolean): void {
+		for (const [id, snapshot] of this.snapshots) {
+			if (snapshot.expiresAt <= now) this.snapshots.delete(id);
+		}
+		if (!room) return;
+		for (const id of this.snapshots.keys()) {
+			if (this.snapshots.size < MAX_EXPORT_SNAPSHOTS) break;
+			this.snapshots.delete(id);
+		}
+	}
+
 	/**
 	 * One page of a profile's cookies, then its history, up to the page budget.
-	 * The cursor is "<cookie offset>:<history offset>".
+	 * The first page reads both once into a snapshot that the later pages walk,
+	 * so a cookie set or cleared here mid-export cannot shift a page past
+	 * another. The cursor is "<snapshot>:<cookie offset>:<history offset>",
+	 * good only for the machine and profile it was given for.
 	 */
-	private async exportPlainPage(rawProfileId: unknown, rawCursorValue: unknown): Promise<SharedBrowserProfilePage> {
+	private async exportPlainPage(
+		rawProfileId: unknown,
+		rawCursor: unknown,
+		receiverHostId: string,
+		generation: number,
+	): Promise<SharedBrowserProfilePage> {
 		const profileId = normalizeBrowserProfileId(rawProfileId);
 		if (!profileId) throw new BrowserProfileShareError("BROWSER_PROFILE_NOT_FOUND", "Browser profile was not found.");
-		const rawCursor = rawCursorValue === undefined ? "0:0" : rawCursorValue;
-		const cursor = typeof rawCursor === "string" ? CURSOR_PATTERN.exec(rawCursor) : null;
-		if (!cursor) throw new BrowserProfileShareError("INVALID_CURSOR", "Export cursor is invalid.");
+		// No cursor starts an export; any other value must be one this machine gave.
+		let cursor: RegExpExecArray | null = null;
+		if (rawCursor !== undefined) {
+			cursor = typeof rawCursor === "string" ? CURSOR_PATTERN.exec(rawCursor) : null;
+			if (!cursor) throw this.invalidCursor();
+		}
 		await this.options.store.load();
 		const profile = this.options.store.getProfile(profileId);
 		if (!profile) throw new BrowserProfileShareError("BROWSER_PROFILE_NOT_FOUND", "Browser profile was not found.");
+		// Checked on every page: a profile that became a copy mid-export stops.
 		if (!this.isOwnProfile(profile, await this.copiedIds())) {
 			throw new BrowserProfileShareError("BROWSER_PROFILE_NOT_SHARED", "Profiles copied from another machine are not shared.");
 		}
-		let cookies: SharedBrowserCookie[];
-		let history: BrowserHistoryEntry[];
-		try {
-			[cookies, history] = await Promise.all([
-				this.shareableCookies(profileId),
-				this.options.history.entries(profileId),
-			]);
-		} catch {
-			throw new BrowserProfileShareError("BROWSER_PROFILE_SHARE_FAILED", "Browser profile could not be read.");
+		const now = this.now().getTime();
+		this.pruneSnapshots(now, cursor === null);
+		let snapshotId: string;
+		let snapshot: ExportSnapshot | undefined;
+		if (cursor) {
+			snapshotId = cursor[1]!;
+			snapshot = this.snapshots.get(snapshotId);
+			if (!snapshot || snapshot.profileId !== profileId || snapshot.receiverHostId !== receiverHostId || snapshot.generation !== generation) {
+				throw this.invalidCursor();
+			}
+		} else {
+			let cookies: SharedBrowserCookie[];
+			let history: BrowserHistoryEntry[];
+			try {
+				[cookies, history] = await Promise.all([
+					this.shareableCookies(profileId),
+					this.options.history.entries(profileId),
+				]);
+			} catch {
+				throw new BrowserProfileShareError("BROWSER_PROFILE_SHARE_FAILED", "Browser profile could not be read.");
+			}
+			snapshotId = randomBytes(16).toString("hex");
+			snapshot = { profileId, receiverHostId, generation, cookies, history, expiresAt: 0 };
+			this.snapshots.set(snapshotId, snapshot);
 		}
-		let cookieOffset = Number(cursor[1]);
-		let historyOffset = Number(cursor[2]);
-		if (cookieOffset > cookies.length || historyOffset > history.length) {
-			throw new BrowserProfileShareError("INVALID_CURSOR", "Export cursor is invalid.");
-		}
+		snapshot.expiresAt = now + BROWSER_PROFILE_EXPORT_IDLE_MS;
+		const { cookies, history } = snapshot;
+		let cookieOffset = cursor ? Number(cursor[2]) : 0;
+		let historyOffset = cursor ? Number(cursor[3]) : 0;
+		if (cookieOffset > cookies.length || historyOffset > history.length) throw this.invalidCursor();
 		const summary = this.summary(profile, cookies.length, history);
 		let budget = BROWSER_PROFILE_SHARE_PAGE_BYTES - byteLength(summary);
 		const pageCookies: SharedBrowserCookie[] = [];
@@ -415,11 +478,12 @@ export class BrowserProfileShareSource {
 			}
 		}
 		const done = cookieOffset === cookies.length && historyOffset === history.length;
+		if (done) this.snapshots.delete(snapshotId);
 		return {
 			profile: summary,
 			cookies: pageCookies,
 			history: pageHistory,
-			...(done ? {} : { nextCursor: `${cookieOffset}:${historyOffset}` }),
+			...(done ? {} : { nextCursor: `${snapshotId}:${cookieOffset}:${historyOffset}` }),
 		};
 	}
 }

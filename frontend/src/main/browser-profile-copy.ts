@@ -47,7 +47,8 @@ export { LinkedMachinesSignedOutError, type LinkedMachine };
  */
 
 const HOST_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
-const CURSOR_PATTERN = /^[0-9]{1,6}:[0-9]{1,6}$/;
+/** "<export snapshot>:<cookie offset>:<history offset>", as the source gives it. */
+const CURSOR_PATTERN = /^[0-9a-f]{32}:[0-9]{1,6}:[0-9]{1,6}$/;
 const IDENTITY_TIMEOUT_MS = 5_000;
 const LIST_TIMEOUT_MS = 25_000;
 const PAGE_TIMEOUT_MS = 70_000;

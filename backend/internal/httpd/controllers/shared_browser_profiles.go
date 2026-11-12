@@ -69,8 +69,9 @@ func (c *SharedBrowserProfilesController) Register(r chi.Router) {
 }
 
 var (
-	sharedBrowserProfileIDPattern     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
-	sharedBrowserProfileCursorPattern = regexp.MustCompile(`^\d{1,6}:\d{1,6}$`)
+	sharedBrowserProfileIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+	// "<export snapshot>:<cookie offset>:<history offset>"; the desktop checks it is one it gave.
+	sharedBrowserProfileCursorPattern = regexp.MustCompile(`^[0-9a-f]{32}:\d{1,6}:\d{1,6}$`)
 	// A ticket is base64url JSON of a few hundred bytes; a signature is 64
 	// bytes. The desktop parses and checks both.
 	sharedBrowserProfileTicketPattern    = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)

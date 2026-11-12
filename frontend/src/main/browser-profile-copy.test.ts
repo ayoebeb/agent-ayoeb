@@ -21,6 +21,7 @@ import { resetMainErrorCaptureForTests, setMainErrorSink } from "./main-error-ca
 const NOW = new Date("2026-11-10T12:00:00.000Z");
 const FUTURE = NOW.getTime() / 1_000 + 86_400;
 const REMOTE_PROFILE = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const NEXT_CURSOR = "0123456789abcdef0123456789abcdef:1:0";
 const SECRET = "dummy-secret-cookie-value-7f3a";
 const ACCOUNT_TOKEN = "a".repeat(64);
 const LOCAL_HOST = "h_this_machine";
@@ -285,7 +286,7 @@ describe("BrowserProfileCopyService.copy", () => {
 				pages += 1;
 				const cursor = url.searchParams.get("cursor");
 				return cursor === null
-					? { status: 200, body: { profile: summary(), cookies: [wireCookie("a")], history: [], nextCursor: "1:0" } }
+					? { status: 200, body: { profile: summary(), cookies: [wireCookie("a")], history: [], nextCursor: NEXT_CURSOR } }
 					: { status: 200, body: { profile: summary(), cookies: [wireCookie("b")], history: [] } };
 			},
 		});
@@ -296,7 +297,7 @@ describe("BrowserProfileCopyService.copy", () => {
 		expect(new Set(paged.tickets.map((ticket) => ticket.key)).size).toBe(1);
 
 		const looping = await setup({
-			route: () => ({ status: 200, body: { profile: summary(), cookies: [wireCookie("a")], history: [], nextCursor: "1:0" } }),
+			route: () => ({ status: 200, body: { profile: summary(), cookies: [wireCookie("a")], history: [], nextCursor: NEXT_CURSOR } }),
 		});
 		expect(await looping.service.copy(MACHINE.hostId, REMOTE_PROFILE)).toMatchObject({ code: "INVALID_DATA" });
 		expect(looping.store.profiles).toEqual([]);
@@ -309,7 +310,7 @@ describe("BrowserProfileCopyService.copy", () => {
 		let identityChecks = 0;
 		const { service, requests, store } = await setup({
 			identity: async () => (++identityChecks <= 1 ? MACHINE.hostId : "h_someone_else"),
-			route: (url) => ({ status: 200, body: { profile: summary(), cookies: [wireCookie("a")], history: [], ...(url.searchParams.get("cursor") ? {} : { nextCursor: "1:0" }) } }),
+			route: (url) => ({ status: 200, body: { profile: summary(), cookies: [wireCookie("a")], history: [], ...(url.searchParams.get("cursor") ? {} : { nextCursor: NEXT_CURSOR }) } }),
 		});
 		expect(await service.copy(MACHINE.hostId, REMOTE_PROFILE)).toMatchObject({ code: "UNAUTHORIZED" });
 		expect(identityChecks).toBe(2);

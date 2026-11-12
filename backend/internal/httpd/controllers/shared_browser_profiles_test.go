@@ -82,11 +82,12 @@ func TestSharedBrowserProfilesRelayTheSealedPayload(t *testing.T) {
 
 func TestSharedBrowserProfileExportPassesTicketCursorAndNormalizedID(t *testing.T) {
 	source := &stubSharedBrowserProfiles{}
-	recorder, body := serveSharedBrowserProfiles(t, source, "/api/v1/shared-browser-profiles/"+strings.ToUpper(sharedProfileID)+"/export?cursor=40:2", ticketHeaders)
+	const cursor = "0123456789abcdef0123456789abcdef:40:2"
+	recorder, body := serveSharedBrowserProfiles(t, source, "/api/v1/shared-browser-profiles/"+strings.ToUpper(sharedProfileID)+"/export?cursor="+cursor, ticketHeaders)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if source.lastID != sharedProfileID || source.lastCursor != "40:2" || source.receiver.Ticket != sharedTicket {
+	if source.lastID != sharedProfileID || source.lastCursor != cursor || source.receiver.Ticket != sharedTicket {
 		t.Fatalf("source got id=%q cursor=%q receiver=%#v", source.lastID, source.lastCursor, source.receiver)
 	}
 	if body["data"] != "c2VhbGVk" || recorder.Header().Get("Cache-Control") != "no-store" {
@@ -118,7 +119,8 @@ func TestSharedBrowserProfileExportValidatesInput(t *testing.T) {
 	}{
 		{"/api/v1/shared-browser-profiles/not-a-uuid/export", "INVALID_PROFILE_ID"},
 		{"/api/v1/shared-browser-profiles/" + sharedProfileID + "/export?cursor=../../etc", "INVALID_CURSOR"},
-		{"/api/v1/shared-browser-profiles/" + sharedProfileID + "/export?cursor=1234567:0", "INVALID_CURSOR"},
+		{"/api/v1/shared-browser-profiles/" + sharedProfileID + "/export?cursor=0123456789abcdef0123456789abcdef:1234567:0", "INVALID_CURSOR"},
+		{"/api/v1/shared-browser-profiles/" + sharedProfileID + "/export?cursor=40:2", "INVALID_CURSOR"},
 	} {
 		source := &stubSharedBrowserProfiles{}
 		recorder, body := serveSharedBrowserProfiles(t, source, tc.path, ticketHeaders)

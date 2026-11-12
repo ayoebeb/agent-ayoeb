@@ -8,6 +8,7 @@ import { BrowserHistoryStore } from "./browser-history-store";
 import { BROWSER_PROFILE_COPIES_FILE_NAME, BrowserProfileCopyLedger } from "./browser-profile-copy-ledger";
 import { BrowserProfileReceiverUnverifiedError, type VerifiedReceiver } from "./browser-profile-receiver";
 import {
+	BROWSER_PROFILE_EXPORT_IDLE_MS,
 	BROWSER_PROFILE_SHARE_PAGE_BYTES,
 	BROWSER_PROFILE_SHARING_FILE_NAME,
 	BrowserProfileShareSource,
@@ -67,6 +68,7 @@ async function setup(options: { cookies?: (profileId: string) => Cookie[]; shari
 	const receiver = receiverFixture();
 	const reads: string[] = [];
 	const hooks: { onRead?: () => Promise<void> } = {};
+	const clock = { now: NOW };
 	const source = new BrowserProfileShareSource({
 		store,
 		history,
@@ -78,9 +80,9 @@ async function setup(options: { cookies?: (profileId: string) => Cookie[]; shari
 			await hooks.onRead?.();
 			return (options.cookies?.(profileId) ?? []) as never;
 		},
-		now: () => NOW,
+		now: () => clock.now,
 	});
-	return { dir, store, history, setting, copies, source, reads, receiver, hooks };
+	return { dir, store, history, setting, copies, source, reads, receiver, hooks, clock };
 }
 
 function cookie(name: string, overrides: Record<string, unknown> = {}): Cookie {
@@ -359,6 +361,59 @@ describe("BrowserProfileShareSource", () => {
 		expect(new Set(cookies.map((entry) => entry.name)).size).toBe(1_500);
 		expect(cookies).toHaveLength(1_500);
 		expect(new Set(visits).size).toBe(50);
+	});
+
+	// Review follow-up: pages walk one snapshot read at the first page, so the
+	// owner browsing mid-export cannot shift a page past a cookie.
+	it("walks one snapshot per export, so a cookie cleared mid-export does not skip another", async () => {
+		const big = "v".repeat(3_900);
+		let jar = Array.from({ length: 1_500 }, (_, index) => cookie(`c${index.toString().padStart(4, "0")}`, { value: big }));
+		const { store, source, receiver, reads } = await setup({ cookies: () => jar });
+		const profile = await store.createProfile("Brave");
+		const first = receiver.openPage(await source.exportPage({ ...TICKET, profileId: profile.id }), profile.id);
+		expect(first.nextCursor).toMatch(/^[0-9a-f]{32}:[0-9]+:0$/);
+		// The owner browses here: a cookie already sent is cleared.
+		jar = jar.slice(1);
+		const names = first.cookies.map((entry) => entry.name);
+		let cursor = first.nextCursor;
+		while (cursor) {
+			const page = receiver.openPage(await source.exportPage({ ...TICKET, profileId: profile.id, cursor }), profile.id, cursor);
+			names.push(...page.cookies.map((entry) => entry.name));
+			cursor = page.nextCursor;
+		}
+		expect(names).toHaveLength(1_500);
+		expect(new Set(names).size).toBe(1_500);
+		expect(reads).toEqual([profile.id]);
+		// Finished, its snapshot is gone.
+		await expect(source.exportPage({ ...TICKET, profileId: profile.id, cursor: first.nextCursor })).rejects.toMatchObject({ code: "INVALID_CURSOR" });
+	});
+
+	it("takes a cursor only for its machine, profile and sharing, and not after it idles", async () => {
+		const big = "v".repeat(3_900);
+		const jar = Array.from({ length: 1_500 }, (_, index) => cookie(`c${index}`, { value: big }));
+		const { store, source, receiver, setting, clock } = await setup({ cookies: () => jar });
+		const profile = await store.createProfile("Brave");
+		const other = await store.createProfile("Work");
+		const start = async () => receiver.openPage(await source.exportPage({ ...TICKET, profileId: profile.id }), profile.id).nextCursor!;
+		const next = (cursor: string, profileId = profile.id) => source.exportPage({ ...TICKET, profileId, cursor });
+
+		const cursor = await start();
+		await expect(next(cursor, other.id)).rejects.toMatchObject({ code: "INVALID_CURSOR" });
+		await expect(next(`${"f".repeat(32)}:1:0`)).rejects.toMatchObject({ code: "INVALID_CURSOR" });
+		receiver.verified.receiverHostId = "h_another_machine";
+		await expect(next(cursor)).rejects.toMatchObject({ code: "INVALID_CURSOR" });
+		receiver.verified.receiverHostId = "h_receiver";
+		await expect(next(cursor)).resolves.toBeDefined();
+
+		// Turning sharing off ends every export, even once it is back on.
+		const beforeOff = await start();
+		await setting.setEnabled(false);
+		await setting.setEnabled(true);
+		await expect(next(beforeOff)).rejects.toMatchObject({ code: "INVALID_CURSOR" });
+
+		const idle = await start();
+		clock.now = new Date(NOW.getTime() + BROWSER_PROFILE_EXPORT_IDLE_MS + 1);
+		await expect(next(idle)).rejects.toMatchObject({ code: "INVALID_CURSOR" });
 	});
 
 	it("caps a profile at the cookie import limit", async () => {
