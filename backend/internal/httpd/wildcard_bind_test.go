@@ -57,7 +57,7 @@ func narrowLANProbesToLoopback(t *testing.T) {
 		return
 	}
 	saved := lanPortProbes
-	var loopback []struct{ network, host string }
+	loopback := make([]struct{ network, host string }, 0, len(saved))
 	for _, p := range saved {
 		if ip := net.ParseIP(p.host); ip != nil && ip.IsLoopback() {
 			loopback = append(loopback, p)
