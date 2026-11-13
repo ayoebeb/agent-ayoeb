@@ -73,7 +73,11 @@ func TestTmuxUserShellExitReconciliation(t *testing.T) {
 				if !tc.noAnchor {
 					tmuxCommand("new-session", "-d", "-s", "anchor", "/bin/sh")
 				}
-				rt := tmux.New(tmux.Options{Binary: binary, LegacyBinary: binary, SocketName: tc.socket, Shell: "/bin/sh", Timeout: time.Second})
+				// A loaded -race runner can stall for seconds, so a tmux command
+				// gets far more than a second: at one second a busy machine failed
+				// the subtest with "context deadline exceeded" from an otherwise
+				// healthy tmux. The 15s ctx above still bounds the whole subtest.
+				rt := tmux.New(tmux.Options{Binary: binary, LegacyBinary: binary, SocketName: tc.socket, Shell: "/bin/sh", Timeout: 5 * time.Second})
 				st := &fakeShellTerminalStore{}
 				workspace := t.TempDir()
 				// Session-scoped: relaunch keeps only shells a session can show.

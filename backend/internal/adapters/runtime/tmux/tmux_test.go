@@ -533,16 +533,35 @@ func TestBuildLaunchCommandPreservesExplicitNoColor(t *testing.T) {
 	}
 }
 
-func TestCreateDestroysAndReturnsErrorWhenPaneCWDDoesNotMatch(t *testing.T) {
-	r, fr := newTestRuntime(0)
-	// new-session, then a stale pane cwd on every one of the paneCwdVerifyAttempts
-	// retries: the pane never settles on the workspace, so Create must exhaust
-	// all attempts and fail with the typed mismatch error.
-	fr.outputs = [][]byte{nil}
-	for i := 0; i < paneCwdVerifyAttempts; i++ {
-		fr.outputs = append(fr.outputs, []byte("/deleted/shipit\n"))
-	}
+// shortenPaneCwdVerify shrinks the pane cwd verification budget for a test that
+// expects the budget to run out, so it does not wait the production 3s.
+func shortenPaneCwdVerify(t *testing.T) {
+	t.Helper()
+	timeout, delay := paneCwdVerifyTimeout, paneCwdVerifyRetryDelay
+	paneCwdVerifyTimeout, paneCwdVerifyRetryDelay = 100*time.Millisecond, 2*time.Millisecond
+	t.Cleanup(func() { paneCwdVerifyTimeout, paneCwdVerifyRetryDelay = timeout, delay })
+}
 
+func countSequenceCalls(fr *fakeRunnerSequence, subcommand string) int {
+	n := 0
+	for _, c := range fr.calls {
+		if len(c.args) > 0 && c.args[0] == subcommand {
+			n++
+		}
+	}
+	return n
+}
+
+func TestCreateDestroysAndReturnsErrorWhenPaneCWDDoesNotMatch(t *testing.T) {
+	shortenPaneCwdVerify(t)
+	r, _ := newTestRuntime(0)
+	// new-session, then a stale pane cwd on every probe: the pane never settles
+	// on the workspace, so Create must keep probing for the whole budget and then
+	// fail with the typed mismatch error.
+	fr := &fakeRunnerSequence{results: []fakeRunnerResult{{}, {out: []byte("/deleted/shipit\n")}}}
+	r.runner = fr
+
+	started := time.Now()
 	_, err := r.Create(context.Background(), ports.RuntimeConfig{
 		SessionID:     "sess-1",
 		WorkspacePath: "/tmp/ws",
@@ -554,11 +573,74 @@ func TestCreateDestroysAndReturnsErrorWhenPaneCWDDoesNotMatch(t *testing.T) {
 	if !errors.Is(err, ports.ErrRuntimeWorkspaceCwdMismatch) {
 		t.Fatalf("Create err = %v, want wrapped ports.ErrRuntimeWorkspaceCwdMismatch", err)
 	}
-	if got := countCalls(fr, "display-message"); got != paneCwdVerifyAttempts {
-		t.Fatalf("pane cwd verification attempts = %d, want %d", got, paneCwdVerifyAttempts)
+	if got := countSequenceCalls(fr, "display-message"); got < paneCwdVerifyAttempts {
+		t.Fatalf("pane cwd verification attempts = %d, want at least %d", got, paneCwdVerifyAttempts)
 	}
-	if countCalls(fr, "kill-session") == 0 {
+	if elapsed := time.Since(started); elapsed < paneCwdVerifyTimeout {
+		t.Fatalf("Create gave up after %v, before the %v verification budget ran out", elapsed, paneCwdVerifyTimeout)
+	}
+	if countSequenceCalls(fr, "kill-session") == 0 {
 		t.Fatal("expected kill-session cleanup call when pane cwd verification fails")
+	}
+}
+
+// TestVerifyPaneWorkingDirectoryOutlastsAStaleWindowLongerThanTheMinimumAttempts
+// pins the fix for a spurious WORKSPACE_CWD_MISMATCH on a loaded machine: tmux
+// reports the server's directory for a freshly forked pane until the pane has
+// run its chdir, and when that took longer than a fixed number of probes the
+// spawn failed even though the pane was about to land in the right place. The
+// pane here is stale for more probes than the minimum, so only the time budget
+// keeps the check going until it settles. The budget is generous because a
+// settled pane returns at once and a stalled test machine must not end it early.
+func TestVerifyPaneWorkingDirectoryOutlastsAStaleWindowLongerThanTheMinimumAttempts(t *testing.T) {
+	timeout, delay := paneCwdVerifyTimeout, paneCwdVerifyRetryDelay
+	paneCwdVerifyTimeout, paneCwdVerifyRetryDelay = 10*time.Second, time.Millisecond
+	t.Cleanup(func() { paneCwdVerifyTimeout, paneCwdVerifyRetryDelay = timeout, delay })
+
+	r, _ := newTestRuntime(0)
+	stale := paneCwdVerifyAttempts + 4
+	results := make([]fakeRunnerResult, 0, stale+1)
+	for i := 0; i < stale; i++ {
+		results = append(results, fakeRunnerResult{out: []byte("/deleted/shipit\n")})
+	}
+	results = append(results, fakeRunnerResult{out: []byte("/tmp/ws\n")})
+	fr := &fakeRunnerSequence{results: results}
+	r.runner = fr
+
+	if err := r.verifyPaneWorkingDirectory(context.Background(), "sess-1", "/tmp/ws"); err != nil {
+		t.Fatalf("verifyPaneWorkingDirectory = %v, want nil once the pane settles after %d stale probes", err, stale)
+	}
+	if got := len(fr.calls); got != stale+1 {
+		t.Fatalf("probes = %d, want %d (every stale probe, then the matching one)", got, stale+1)
+	}
+}
+
+// TestVerifyPaneWorkingDirectoryStopsEarlyWhenTheSessionIsGone keeps a spawn
+// whose pane already exited (its cd guard failed on a missing worktree) failing
+// as fast as before: a session tmux confirms is gone has nothing left to settle,
+// so the longer budget must not apply, and the mismatch seen first survives.
+func TestVerifyPaneWorkingDirectoryStopsEarlyWhenTheSessionIsGone(t *testing.T) {
+	timeout, delay := paneCwdVerifyTimeout, paneCwdVerifyRetryDelay
+	paneCwdVerifyTimeout, paneCwdVerifyRetryDelay = 10*time.Second, time.Millisecond
+	t.Cleanup(func() { paneCwdVerifyTimeout, paneCwdVerifyRetryDelay = timeout, delay })
+
+	r, _ := newTestRuntime(0)
+	fr := &fakeRunnerSequence{results: []fakeRunnerResult{
+		{out: []byte("/deleted/shipit\n")},
+		{out: []byte("can't find session: sess-1"), err: &exec.ExitError{}},
+	}}
+	r.runner = fr
+
+	started := time.Now()
+	err := r.verifyPaneWorkingDirectory(context.Background(), "sess-1", "/tmp/ws")
+	if !errors.Is(err, ports.ErrRuntimeWorkspaceCwdMismatch) {
+		t.Fatalf("verifyPaneWorkingDirectory = %v, want the mismatch seen before the session vanished", err)
+	}
+	if got := len(fr.calls); got != 2 {
+		t.Fatalf("probes = %d, want 2 (stop as soon as the session is confirmed gone)", got)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("verification took %v, want it to stop without waiting out the budget", elapsed)
 	}
 }
 
@@ -569,6 +651,7 @@ func TestCreateDestroysAndReturnsErrorWhenPaneCWDDoesNotMatch(t *testing.T) {
 // Losing it would make the caller fall back to an opaque, unclassifiable
 // error and regress the whole point of Fix 4 (mapping to a typed apierr).
 func TestVerifyPaneWorkingDirectoryKeepsMismatchErrorAfterLaterProbeFailure(t *testing.T) {
+	shortenPaneCwdVerify(t)
 	r, _ := newTestRuntime(0)
 	fr := &fakeRunnerSequence{
 		results: []fakeRunnerResult{

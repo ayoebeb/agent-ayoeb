@@ -456,24 +456,41 @@ func (r *Runtime) Restart(ctx context.Context, handle ports.RuntimeHandle, cfg p
 	return handle, nil
 }
 
-// paneCwdVerifyAttempts and paneCwdVerifyRetryDelay bound how long Create
-// waits for the pane's working directory to settle before giving up.
-// buildLaunchCommand's `cd '<workspace>' || exit;` guard corrects a pane that
-// started in the tmux server's own (possibly poisoned) cwd, but only once the
-// pane's shell actually runs that cd. Measured live on 2026-07-25:
+// paneCwdVerifyAttempts, paneCwdVerifyTimeout and paneCwdVerifyRetryDelay bound
+// how long Create waits for the pane's working directory to settle before
+// giving up. buildLaunchCommand's `cd '<workspace>' || exit;` guard corrects a
+// pane that started in the tmux server's own (possibly poisoned) cwd, but only
+// once the pane's shell actually runs that cd. Measured live on 2026-07-25:
 // #{pane_current_path} sampled immediately after `new-session` was stale, and
 // the same probe sampled 50ms later was already correct. A single-shot check
 // therefore lost that race every time and turned a spawn that was actually
 // going to succeed into a hard failure (issue #2775): retrying gives the cd
 // guard the moment it needs to run.
-const (
-	paneCwdVerifyAttempts   = 5
+//
+// tmux computes #{pane_current_path} from the pane process's own cwd, so until
+// the freshly forked pane has run its chdir the probe reports the tmux server's
+// directory, or nothing at all. That window is microseconds on an idle machine,
+// but on a loaded one (a CI runner running the race detector) the first probe
+// does land in it, and how long it stays open depends on when the scheduler
+// runs the new pane. A fixed handful of probes bounds the wait by count, not by
+// time, so a spawn that was about to succeed could still fail with a spurious
+// mismatch (seen in CI as WORKSPACE_CWD_MISMATCH naming the server's directory).
+// The check therefore makes at least paneCwdVerifyAttempts probes and keeps
+// probing until paneCwdVerifyTimeout has also passed: a stalled machine cannot
+// use up the budget in one slow probe, and a pane that really is somewhere else
+// still fails, just after the timeout. The timeout and delay are variables so
+// tests can shorten them.
+const paneCwdVerifyAttempts = 5
+
+var (
+	paneCwdVerifyTimeout    = 3 * time.Second
 	paneCwdVerifyRetryDelay = 50 * time.Millisecond
 )
 
 func (r *Runtime) verifyPaneWorkingDirectory(ctx context.Context, id, want string) error {
 	var lastErr error
-	for attempt := 0; attempt < paneCwdVerifyAttempts; attempt++ {
+	deadline := time.Now().Add(paneCwdVerifyTimeout)
+	for attempt := 0; attempt < paneCwdVerifyAttempts || time.Now().Before(deadline); attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
@@ -491,6 +508,13 @@ func (r *Runtime) verifyPaneWorkingDirectory(ctx context.Context, id, want strin
 			// 500 whenever the very last attempt happened to hit a probe error.
 			if !errors.Is(lastErr, ports.ErrRuntimeWorkspaceCwdMismatch) {
 				lastErr = fmt.Errorf("tmux runtime: verify working directory %s: %w", id, err)
+			}
+			// A session or server tmux confirms is gone has nothing left to
+			// settle (the pane's shell exited, e.g. its cd guard failed on a
+			// missing worktree), so waiting out the budget would only delay
+			// the same error.
+			if confirmedAbsentOutput(err, string(out)) {
+				return lastErr
 			}
 			continue
 		}
