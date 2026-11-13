@@ -299,16 +299,23 @@ func TestSessionTeardownStopsRunningCommandsBeforeReturning(t *testing.T) {
 	}
 	defer release()
 	// The worktree is free once teardown returns: the run has already ended.
+	// RunCommand drops a run from the registry just before it closes the done
+	// channel teardown waits on, so a run still registered here means teardown
+	// returned while the command was still running in the worktree.
+	if runs := svc.commandRuns.forSession("session"); len(runs) != 0 {
+		t.Fatalf("BeginSessionTeardown returned while %d command(s) still ran in the worktree", len(runs))
+	}
+	// The exit reaches this test a moment after the run is done: RunCommand
+	// still has to return and the goroutine above to send it. Wait for it with a
+	// bound instead of sampling the channel, which failed whenever that
+	// goroutine had not been scheduled yet.
 	select {
 	case exit := <-done:
 		if !exit.Stopped {
 			t.Fatalf("exit = %+v, want stopped by teardown", exit)
 		}
-	default:
-		t.Fatal("BeginSessionTeardown returned while a command still ran in the worktree")
-	}
-	if runs := svc.commandRuns.forSession("session"); len(runs) != 0 {
-		t.Fatalf("runs still registered: %d", len(runs))
+	case <-time.After(20 * time.Second):
+		t.Fatal("RunCommand did not return after session teardown stopped it")
 	}
 }
 
