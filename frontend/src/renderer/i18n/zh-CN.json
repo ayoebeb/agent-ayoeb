@@ -4503,5 +4503,6 @@
 	"controlRoom.commits.notPushedShort": "未推送",
 	"controlRoom.commits.loading": "正在加载提交…",
 	"controlRoom.commits.unavailable": "暂时无法获取提交。",
-	"controlRoom.commits.empty": "暂无提交。"
+	"controlRoom.commits.empty": "暂无提交。",
+	"crew.approval.failed": "无法发送回答，请重试。"
 }

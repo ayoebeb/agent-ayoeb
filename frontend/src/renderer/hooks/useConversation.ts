@@ -1340,6 +1340,8 @@ export function useConversationCommands(sessionId: string | undefined, hostId?: 
 			if (stateSessionId) releaseConversationLocalEcho(queryClient, stateSessionId, clientMessageId);
 		},
 		resolve: (requestId: string, decisionId: string) => resolve.mutate({ requestId, decisionId }),
+		/** The same answer, for a caller that must know whether it went through. Rejects with the daemon's error. */
+		resolveAsync: (requestId: string, decisionId: string) => resolve.mutateAsync({ requestId, decisionId }),
 		resolveInput: (
 			requestId: string,
 			action: "accept" | "decline" | "cancel",

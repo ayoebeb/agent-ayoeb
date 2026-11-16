@@ -4742,5 +4742,6 @@
 	"controlRoom.info.worktrees_few": "в {{count}} рабочих деревьях",
 	"controlRoom.info.worktrees_many": "в {{count}} рабочих деревьях",
 	"controlRoom.commits.notPushed_few": "{{count}} не отправлено",
-	"controlRoom.commits.notPushed_many": "{{count}} не отправлено"
+	"controlRoom.commits.notPushed_many": "{{count}} не отправлено",
+	"crew.approval.failed": "Не удалось отправить ответ. Попробуйте ещё раз."
 }

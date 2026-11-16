@@ -10,6 +10,7 @@ import { useSplitPanesStore } from "../stores/split-panes-store";
 import { appShortcutBus } from "../test/app-shortcut-bus";
 import { useFilesTopbarHost } from "./files-topbar-host";
 import { SessionTopbarProvider } from "./SessionTopbarPortal";
+import { sendReferenceToChat, subscribeChatComposerReferences } from "../lib/chat-context-bus";
 import { SessionPaneContext, type SessionPaneValue } from "./session-pane-context";
 import { PageTopbarSurface } from "./PageTopbar";
 import { TooltipProvider } from "./ui/tooltip";
@@ -5796,6 +5797,79 @@ describe("SessionView", () => {
 		rerender(<SessionView sessionId="sess-1" />);
 		expect(screen.queryByTestId("orchestrator-control-bar")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("control-room-body")).not.toBeInTheDocument();
+	});
+
+	describe("control room overlay gives way to workspace navigation", () => {
+		const showChanges = () => act(() => useUiStore.getState().setControlRoom("sess-orch", { tab: "changes" }));
+		const expectBroughtForward = () => {
+			expect(screen.queryByTestId("control-room-body")).not.toBeInTheDocument();
+			expect(useUiStore.getState().controlRooms["sess-orch"]?.tab).toBe("session");
+		};
+
+		it("shows a file opened from the chat over a control-room tab, even one that is already open", async () => {
+			workerSession("sess-orch").mode = "chat";
+			render(<SessionView sessionId="sess-orch" />);
+			showChanges();
+			expect(screen.getByTestId("control-room-body")).toBeInTheDocument();
+
+			fireEvent.click(screen.getByRole("button", { name: "open chat basename" }));
+			await waitFor(() => expect(screen.getByTestId("session-file-workspace")).toBeInTheDocument());
+			expectBroughtForward();
+
+			// The file is already the selection now: opening it again changes no selection, yet must still show it.
+			showChanges();
+			expect(screen.getByTestId("control-room-body")).toBeInTheDocument();
+			fireEvent.click(screen.getByRole("button", { name: "open chat basename" }));
+			await waitFor(expectBroughtForward);
+		});
+
+		it("shows the transcript for a chat search hit", () => {
+			workerSession("sess-orch").mode = "chat";
+			render(<SessionView sessionId="sess-orch" />);
+			showChanges();
+			act(() => useUiStore.getState().requestChatMessageFocus("sess-orch", "m1", "flaky login"));
+			expectBroughtForward();
+			act(() => useUiStore.setState({ chatMessageFocusRequest: null }));
+		});
+
+		it("shows the chat when a reference is sent to its composer", () => {
+			workerSession("sess-orch").mode = "chat";
+			render(<SessionView sessionId="sess-orch" />);
+			const stopListening = subscribeChatComposerReferences("sess-orch", () => true);
+			try {
+				showChanges();
+				act(() => {
+					sendReferenceToChat("sess-orch", {} as never);
+				});
+				expectBroughtForward();
+			} finally {
+				stopListening();
+			}
+		});
+
+		it("shows the workspace when a session topbar tab is clicked, but not for tabs inside the overlay", () => {
+			render(<SessionView sessionId="sess-orch" />);
+			showChanges();
+			// Re-picking the selected tab changes no state, so the click itself must do it.
+			const insideOverlay = document.createElement("button");
+			insideOverlay.setAttribute("role", "tab");
+			screen.getByTestId("control-room-body").appendChild(insideOverlay);
+			fireEvent.click(insideOverlay);
+			expect(screen.getByTestId("control-room-body")).toBeInTheDocument();
+
+			const stripTab = document.createElement("button");
+			stripTab.setAttribute("role", "tab");
+			screen.getByTestId("session-topbar-host").appendChild(stripTab);
+			fireEvent.click(stripTab);
+			expectBroughtForward();
+		});
+
+		it("leaves a worker session's control-room state alone", () => {
+			render(<SessionView sessionId="sess-1" />);
+			act(() => useUiStore.getState().setControlRoom("sess-orch", { tab: "files" }));
+			fireEvent.click(screen.getByRole("button", { name: "view review file" }));
+			expect(useUiStore.getState().controlRooms["sess-orch"]?.tab).toBe("files");
+		});
 	});
 
 	it("gives a Cloud orchestrator no control room and no crew", () => {

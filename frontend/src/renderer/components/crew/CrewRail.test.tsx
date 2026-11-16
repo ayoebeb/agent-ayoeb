@@ -11,8 +11,9 @@ const NOW = Date.parse("2026-11-16T12:00:00Z");
 const MIN = 60_000;
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
-const { navigate, post, resolve, room, crewState, conversations, watching } = vi.hoisted(() => ({
+const { navigate, post, resolve, room, crewState, conversations, watching, hostClient } = vi.hoisted(() => ({
 	navigate: vi.fn(),
+	hostClient: vi.fn(),
 	post: vi.fn(),
 	resolve: vi.fn(),
 	room: {
@@ -29,7 +30,7 @@ const { navigate, post, resolve, room, crewState, conversations, watching } = vi
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
 vi.mock("../../hooks/useControlRoom", () => ({ useControlRoom: () => room }));
-vi.mock("../../hooks/useConversation", () => ({ useConversationCommands: () => ({ resolve }) }));
+vi.mock("../../hooks/useConversation", () => ({ useConversationCommands: () => ({ resolveAsync: resolve }) }));
 vi.mock("../../hooks/useCrew", () => ({
 	useCrew: () => crewState.current,
 	useCrewConversation: (session: WorkspaceSession, enabled: boolean) => {
@@ -38,7 +39,7 @@ vi.mock("../../hooks/useCrew", () => ({
 	},
 	crewConversationQueryKey: (id: string) => ["crew-conversation", id],
 }));
-vi.mock("../../lib/host-clients", () => ({ clientForSessionHost: () => ({ POST: post }) }));
+vi.mock("../../lib/host-clients", () => ({ clientForSessionHost: (hostId?: string) => hostClient(hostId) }));
 
 import { CrewRail } from "./CrewRail";
 import { TooltipProvider } from "../ui/tooltip";
@@ -99,7 +100,12 @@ beforeEach(() => {
 	for (const key of Object.keys(conversations)) delete conversations[key];
 	for (const key of Object.keys(watching)) delete watching[key];
 	room.scope = undefined;
+	post.mockReset();
 	post.mockResolvedValue({ error: undefined });
+	resolve.mockReset();
+	resolve.mockResolvedValue(undefined);
+	hostClient.mockReset();
+	hostClient.mockImplementation(() => ({ POST: post }));
 });
 
 describe("CrewRail", () => {
@@ -183,6 +189,31 @@ describe("CrewRail", () => {
 		expect(screen.getByRole("button", { name: "Ask for a report" })).toBeEnabled();
 	});
 
+	it("recovers when the request itself rejects (network failure), and lets the person retry", async () => {
+		post.mockRejectedValueOnce(new Error("network down"));
+		setCrew([worker({ id: "slow", lastEventAt: ago(9 * MIN), activity: { state: "active", lastActivityAt: ago(9 * MIN) } })]);
+		renderRail();
+		await userEvent.click(screen.getByRole("button", { name: "Ask for a report" }));
+		expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the orchestrator");
+		expect(screen.getByRole("button", { name: "Ask for a report" })).toBeEnabled();
+
+		await userEvent.click(screen.getByRole("button", { name: "Ask for a report" }));
+		expect(await screen.findByRole("status")).toHaveTextContent("Asked the orchestrator");
+		expect(post).toHaveBeenCalledTimes(2);
+	});
+
+	it("recovers when no client can be built for the orchestrator's host (a remote host that went away)", async () => {
+		hostClient.mockImplementationOnce(() => {
+			throw new Error("host disconnected");
+		});
+		setCrew([worker({ id: "slow", lastEventAt: ago(9 * MIN), activity: { state: "active", lastActivityAt: ago(9 * MIN) } })]);
+		renderRail();
+		await userEvent.click(screen.getByRole("button", { name: "Ask for a report" }));
+		expect(await screen.findByRole("alert")).toHaveTextContent("Could not reach the orchestrator");
+		expect(screen.getByRole("button", { name: "Ask for a report" })).toBeEnabled();
+		expect(post).not.toHaveBeenCalled();
+	});
+
 	it("does not mark a worker that is only a minute silent", () => {
 		setCrew([worker({ id: "fine", lastEventAt: ago(MIN), activity: { state: "active", lastActivityAt: ago(MIN) } })]);
 		renderRail();
@@ -212,6 +243,46 @@ describe("CrewRail", () => {
 		expect(resolve).toHaveBeenCalledWith("acp-request:h:2", "allow");
 		expect(within(prompt).getByRole("status")).toHaveTextContent("Sending…");
 		expect(within(prompt).getByRole("button", { name: "Allow once" })).toBeDisabled();
+	});
+
+	const approvalFor = (requestId: string): ConversationActivity => ({
+		kind: "activity", id: `a-${requestId}`, sequence: 5, revision: 1, activityKind: "approval", status: "pending", createdAt: ago(MIN),
+		summary: "Run npm test", requestId,
+		decisions: [{ id: "allow", label: "Allow once", kind: "allow_once" }, { id: "reject", label: "Deny", kind: "reject_once" }],
+	} as ConversationActivity);
+
+	it("shows a failed answer and re-enables the same request for another try", async () => {
+		resolve.mockRejectedValueOnce(new Error("503"));
+		setCrew([worker({ id: "asks", status: "needs_input", activity: { state: "waiting_input", lastActivityAt: ago(MIN) } })]);
+		conversations.asks = { approval: approvalFor("r1") };
+		renderRail();
+		const prompt = within(row("asks")).getByTestId("crew-approval");
+
+		await userEvent.click(within(prompt).getByRole("button", { name: "Allow once" }));
+		expect(await within(prompt).findByRole("alert")).toHaveTextContent("Could not send the answer. Try again.");
+		expect(within(prompt).queryByRole("status")).toBeNull();
+		expect(within(prompt).getByRole("button", { name: "Allow once" })).toBeEnabled();
+		expect(within(prompt).getByRole("button", { name: "Deny" })).toBeEnabled();
+
+		await userEvent.click(within(prompt).getByRole("button", { name: "Allow once" }));
+		expect(resolve).toHaveBeenCalledTimes(2);
+		expect(resolve).toHaveBeenLastCalledWith("r1", "allow");
+		expect(await within(prompt).findByRole("status")).toHaveTextContent("Sending…");
+		expect(within(prompt).queryByRole("alert")).toBeNull();
+	});
+
+	it("does not carry a failed or pending answer over to the next request", async () => {
+		resolve.mockRejectedValueOnce(new Error("503"));
+		setCrew([worker({ id: "asks", status: "needs_input", activity: { state: "waiting_input", lastActivityAt: ago(MIN) } })]);
+		conversations.asks = { approval: approvalFor("r1") };
+		const { rerender } = renderRail();
+		await userEvent.click(screen.getByRole("button", { name: "Allow once" }));
+		expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+		conversations.asks = { approval: approvalFor("r2") };
+		rerender(<CrewRail orchestrator={orchestrator} />);
+		expect(screen.queryByRole("alert")).toBeNull();
+		expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
 	});
 
 	it("labels the buttons by meaning in sentence case, whatever the provider calls them", async () => {

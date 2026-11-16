@@ -4521,5 +4521,6 @@
 	"controlRoom.commits.notPushedShort": "未プッシュ",
 	"controlRoom.commits.loading": "コミットを読み込み中…",
 	"controlRoom.commits.unavailable": "現在コミットを取得できません。",
-	"controlRoom.commits.empty": "コミットはまだありません。"
+	"controlRoom.commits.empty": "コミットはまだありません。",
+	"crew.approval.failed": "回答を送信できませんでした。もう一度お試しください。"
 }

@@ -594,6 +594,20 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const controlRoom = orchestratorFiles && !pane;
 	const controlRoomTab = useUiStore((state) => state.controlRooms[uiSessionId]?.tab ?? "session");
 	const controlRoomCovers = controlRoom && controlRoomTab !== "session";
+	const setControlRoom = useUiStore((state) => state.setControlRoom);
+	// The control room's tabs cover the session. Any explicit move in the workspace (a
+	// file opened, a tab picked, a chat revealed or searched) brings its content
+	// forward; unchanged state is a no-op, so a session without a control room is untouched.
+	const bringWorkspaceForward = useCallback(() => setControlRoom(uiSessionId, { tab: "session" }), [setControlRoom, uiSessionId]);
+	// Re-picking the tab that is already selected changes no state, so a click on a
+	// session topbar tab brings the workspace forward on its own. The control room's
+	// own tabs and the views inside its overlay are not in that strip.
+	const bringWorkspaceForwardOnTabClick = useCallback(
+		(event: { target: EventTarget }) => {
+			if (event.target instanceof Element && event.target.closest('[data-testid="session-topbar-host"] [role="tab"]')) bringWorkspaceForward();
+		},
+		[bringWorkspaceForward],
+	);
 	const isInspectorOpen = useUiStore((state) => inspectorIsOpen(state.inspectorSessions, uiSessionId));
 	const [sideChatContainer, setSideChatContainer] = useState<HTMLDivElement | null>(null);
 	const sideChatsAvailable = useSideChatsAvailable(session, hostId);
@@ -1272,7 +1286,13 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		}));
 	}, [setActiveShellTerminal, uiSessionId]);
 	// "Ask in chat" from a file tab brings the session's Chat surface forward.
-	useEffect(() => subscribeChatReveal(uiSessionId, selectSessionTerminal), [selectSessionTerminal, uiSessionId]);
+	useEffect(
+		() => subscribeChatReveal(uiSessionId, () => {
+			bringWorkspaceForward();
+			selectSessionTerminal();
+		}),
+		[bringWorkspaceForward, selectSessionTerminal, uiSessionId],
+	);
 	const selectReviewerTerminal = useCallback((target: ReviewerTerminalTarget) => {
 		setReviewerChatId(null);
 		setActiveShellTerminal(null);
@@ -1297,14 +1317,18 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		return request?.sessionId === uiSessionId ? request : undefined;
 	});
 	useEffect(() => {
+		// A search hit is an explicit move to the transcript: bring it over the control room too.
+		if (chatFocusRequest) bringWorkspaceForward();
 		if (chatFocusRequest?.reviewId) selectReviewerChat(chatFocusRequest.reviewId);
 		else if (chatFocusRequest && session?.mode === "chat") selectSessionTerminal();
-	}, [chatFocusRequest, session?.mode, selectReviewerChat, selectSessionTerminal]);
+	}, [bringWorkspaceForward, chatFocusRequest, session?.mode, selectReviewerChat, selectSessionTerminal]);
 	const openCenterFile = useCallback(
 		(path: string, options?: FileOpenOptions) => {
 			const filePath = path;
 			// Live paths retain their existing identities; snapshots coexist with them.
 			path = sessionFileTabKey(path, options?.source);
+			// Opening a file (even one already active) must show it over the control room.
+			bringWorkspaceForward();
 			setReviewerChatId(null);
 			setActiveShellTerminal(null);
 			setTerminalTarget({ kind: "worker" });
@@ -1336,7 +1360,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 				[uiSessionId]: openSessionFile(current[uiSessionId] ?? EMPTY_SESSION_FILE_TABS, path),
 			}));
 		},
-		[setActiveShellTerminal, uiSessionId, dirtyFiles],
+		[bringWorkspaceForward, setActiveShellTerminal, uiSessionId, dirtyFiles],
 	);
 
 	const markCenterFileEditingConsumed = useCallback((path: string, requestKey: number) => {
@@ -1889,6 +1913,14 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		}
 		if (sibling) selectTab(sibling);
 	};
+	// A different tab, file or reviewer becoming the selection (from the strip, the
+	// Files inspector, a new terminal) shows that content over the control room.
+	const previousSelectedTabKey = useRef(selectedTabKey);
+	useEffect(() => {
+		if (previousSelectedTabKey.current === selectedTabKey) return;
+		previousSelectedTabKey.current = selectedTabKey;
+		bringWorkspaceForward();
+	}, [bringWorkspaceForward, selectedTabKey]);
 	const selectedTabKeyRef = useRef(selectedTabKey);
 	selectedTabKeyRef.current = selectedTabKey;
 	const closePane = useCallback((key: string) => closePaneRef.current(key), []);
@@ -2568,7 +2600,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 					data-panel=""
 					id={pane ? undefined : "terminal"}
 				>
-					<div className="relative flex h-full min-h-0 flex-col" ref={centerColumnRef}>
+					<div className="relative flex h-full min-h-0 flex-col" onClickCapture={controlRoomCovers ? bringWorkspaceForwardOnTabClick : undefined} ref={centerColumnRef}>
 						<SessionTopbarHost
 							className="relative z-chrome flex h-toolbar w-full shrink-0 overflow-hidden"
 							data-testid="session-topbar-host"

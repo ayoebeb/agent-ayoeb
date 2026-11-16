@@ -291,11 +291,17 @@ function QuietNudge({ orchestrator, row }: { orchestrator: WorkspaceSession; row
 	const quiet = compactAge(row.quietMs ?? 0);
 	const send = async () => {
 		setState("sending");
-		const { error } = await clientForSessionHost(orchestrator.hostId).POST("/api/v1/sessions/{sessionId}/send", {
-			params: { path: { sessionId: orchestrator.id } },
-			body: { message: quietNudgeMessage(row.session, row.quietMs ?? 0) },
-		});
-		setState(error ? "failed" : "sent");
+		try {
+			const { error } = await clientForSessionHost(orchestrator.hostId).POST("/api/v1/sessions/{sessionId}/send", {
+				params: { path: { sessionId: orchestrator.id } },
+				body: { message: quietNudgeMessage(row.session, row.quietMs ?? 0) },
+			});
+			setState(error ? "failed" : "sent");
+		} catch {
+			// A dropped connection or a remote host that went away rejects instead of
+			// answering with an error: it must still leave "sending" so the person can retry.
+			setState("failed");
+		}
 	};
 	return (
 		<div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="crew-quiet">
@@ -325,28 +331,37 @@ function ApprovalPrompt({ approval, onOpenChat, session }: { approval: Conversat
 	const { t } = useTranslation();
 	const queryClient = useQueryClient();
 	const commands = useConversationCommands(session.id, session.hostId);
-	const [answered, setAnswered] = useState<string>();
+	// Tied to the request it answers: once the daemon moves on to another request the
+	// old outcome no longer applies, so a failed answer never disables the next one.
+	const [outcome, setOutcome] = useState<{ requestId: string; status: "sending" | "failed" }>();
 	const decisions = approval.decisions ?? [];
 	const allow = decisions.find((decision) => decision.kind === "allow_once");
 	const deny = decisions.find((decision) => decision.kind === "reject_once");
 	const requestId = approval.requestId;
-	const sending = answered !== undefined && answered === requestId;
-	const answer = (decisionId: string) => {
+	const current = outcome && outcome.requestId === requestId ? outcome.status : undefined;
+	const sending = current === "sending";
+	const answer = async (decisionId: string) => {
 		if (!requestId) return;
-		setAnswered(requestId);
-		commands.resolve(requestId, decisionId);
+		setOutcome({ requestId, status: "sending" });
+		try {
+			await commands.resolveAsync(requestId, decisionId);
+		} catch {
+			// The daemon refused or could not be reached: show it and offer the same request again.
+			setOutcome({ requestId, status: "failed" });
+			return;
+		}
 		window.setTimeout(() => void queryClient.invalidateQueries({ queryKey: crewConversationQueryKey(session.id, session.hostId) }), 800);
 	};
 	return (
 		<div className="mt-1.5 flex flex-col gap-1.5 rounded-md bg-interactive-hover px-2 py-1.5" data-testid="crew-approval">
 			<div className="flex flex-wrap items-center gap-1.5">
 				{requestId && allow ? (
-					<Button disabled={sending} onClick={() => answer(allow.id)} size="xs" variant="secondary">
+					<Button disabled={sending} onClick={() => void answer(allow.id)} size="xs" variant="secondary">
 						{t("crew.approval.allowOnce")}
 					</Button>
 				) : null}
 				{requestId && deny ? (
-					<Button disabled={sending} onClick={() => answer(deny.id)} size="xs" variant="destructive-ghost">
+					<Button disabled={sending} onClick={() => void answer(deny.id)} size="xs" variant="destructive-ghost">
 						{t("crew.approval.deny")}
 					</Button>
 				) : null}
@@ -354,6 +369,7 @@ function ApprovalPrompt({ approval, onOpenChat, session }: { approval: Conversat
 					{t("crew.approval.openChat")}
 				</Button>
 				{sending ? <span className="text-caption text-passive" role="status">{t("crew.approval.sending")}</span> : null}
+				{current === "failed" ? <span className="text-caption text-destructive" role="alert">{t("crew.approval.failed")}</span> : null}
 			</div>
 		</div>
 	);

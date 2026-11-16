@@ -4502,5 +4502,6 @@
 	"controlRoom.commits.notPushedShort": "Not pushed",
 	"controlRoom.commits.loading": "Loading commits…",
 	"controlRoom.commits.unavailable": "Commits are unavailable right now.",
-	"controlRoom.commits.empty": "No commits yet."
+	"controlRoom.commits.empty": "No commits yet.",
+	"crew.approval.failed": "Could not send the answer. Try again."
 }

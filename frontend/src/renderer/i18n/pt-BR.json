@@ -4635,5 +4635,6 @@
 	"crew.row.files_many": "{{count}} arquivos",
 	"crew.overlap.more_many": "e mais {{count}} arquivos",
 	"controlRoom.info.worktrees_many": "em {{count}} worktrees",
-	"controlRoom.commits.notPushed_many": "{{count}} não enviados"
+	"controlRoom.commits.notPushed_many": "{{count}} não enviados",
+	"crew.approval.failed": "Não foi possível enviar a resposta. Tente novamente."
 }

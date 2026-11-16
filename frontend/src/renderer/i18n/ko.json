@@ -4521,5 +4521,6 @@
 	"controlRoom.commits.notPushedShort": "푸시 안 됨",
 	"controlRoom.commits.loading": "커밋 불러오는 중…",
 	"controlRoom.commits.unavailable": "지금은 커밋을 불러올 수 없습니다.",
-	"controlRoom.commits.empty": "아직 커밋이 없습니다."
+	"controlRoom.commits.empty": "아직 커밋이 없습니다.",
+	"crew.approval.failed": "답변을 보내지 못했습니다. 다시 시도하세요."
 }
