@@ -33,6 +33,10 @@ type AppSettings struct {
 	// SessionRetentionDays is how long an archived session is kept before the
 	// daemon deletes it; 0 keeps it.
 	SessionRetentionDays int
+	// UsageLimitAutoResume continues sessions stopped on a usage limit once the
+	// window resets; UsageLimitMaxResumes caps how many continued turns run at once.
+	UsageLimitAutoResume bool
+	UsageLimitMaxResumes int
 	UpdatedAt            time.Time
 }
 
@@ -54,6 +58,8 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 		VersionRefresh:       row.VersionRefresh,
 		ComputerUse:          row.ComputerUse,
 		SessionRetentionDays: int(row.SessionRetentionDays),
+		UsageLimitAutoResume: row.UsageLimitAutoResume,
+		UsageLimitMaxResumes: int(row.UsageLimitMaxResumes),
 		UpdatedAt:            row.UpdatedAt,
 	}, nil
 }

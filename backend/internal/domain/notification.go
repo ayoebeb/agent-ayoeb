@@ -21,13 +21,17 @@ const (
 	NotificationReviewCompleted NotificationType = "review_completed"
 	// NotificationReviewChangesRequested means an AO reviewer found changes to make.
 	NotificationReviewChangesRequested NotificationType = "review_changes_requested"
+	// NotificationUsageLimit means sessions on one account stopped on the
+	// provider's usage limit. There is one per account and limit window, however
+	// many sessions stopped, and it names the session that stopped first.
+	NotificationUsageLimit NotificationType = "usage_limit"
 )
 
 // Valid reports whether t is one of the v1 notification kinds.
 func (t NotificationType) Valid() bool {
 	switch t {
 	case NotificationNeedsInput, NotificationReadyToMerge, NotificationPRMerged, NotificationPRClosedUnmerged,
-		NotificationReviewCompleted, NotificationReviewChangesRequested:
+		NotificationReviewCompleted, NotificationReviewChangesRequested, NotificationUsageLimit:
 		return true
 	default:
 		return false

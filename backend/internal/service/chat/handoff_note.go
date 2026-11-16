@@ -24,6 +24,14 @@ import (
 // A turn is written to one of the two stores only, so merging never repeats it.
 // A session that has never been in Chat simply has no conversation.
 func (s *Service) SessionTurns(ctx context.Context, id domain.SessionID) ([]domain.HandoffTurn, error) {
+	return s.sessionTurns(ctx, id, false)
+}
+
+// sessionTurns is SessionTurns, optionally with the turns that did not
+// complete. The history command shows them so a session whose turn failed (on a
+// usage limit, say) is not reported as having no turns; a handoff note must not
+// carry them, because there is no answer to hand over.
+func (s *Service) sessionTurns(ctx context.Context, id domain.SessionID, unfinished bool) ([]domain.HandoffTurn, error) {
 	var turns []domain.HandoffTurn
 	conversation, err := s.store.ConversationForSession(ctx, id)
 	switch {
@@ -35,7 +43,7 @@ func (s *Service) SessionTurns(ctx context.Context, id domain.SessionID) ([]doma
 		if readErr != nil {
 			return nil, fmt.Errorf("load conversation %s turns: %w", conversation.ID, readErr)
 		}
-		turns = chatHandoffTurns(rows.Turns, rows.Messages, rows.Activities)
+		turns = chatTurns(rows.Turns, rows.Messages, rows.Activities, unfinished)
 	}
 	stored, err := s.store.ListTerminalTurns(ctx, id)
 	if err != nil {
@@ -55,6 +63,12 @@ func (s *Service) SessionTurns(ctx context.Context, id domain.SessionID) ([]doma
 // first source's. Sequences are the conversation's, so an edit's new branch,
 // whose turns come after the marker of the agent it runs on, is credited too.
 func chatHandoffTurns(turns []domain.ConversationTurn, messages []domain.ConversationMessage, activities []domain.ConversationActivity) []domain.HandoffTurn {
+	return chatTurns(turns, messages, activities, false)
+}
+
+// chatTurns is chatHandoffTurns, optionally keeping the failed, interrupted and
+// running turns, each marked with its state and error.
+func chatTurns(turns []domain.ConversationTurn, messages []domain.ConversationMessage, activities []domain.ConversationActivity, unfinished bool) []domain.HandoffTurn {
 	type marker struct {
 		sequence int64
 		target   domain.AgentHarness
@@ -83,11 +97,20 @@ func chatHandoffTurns(turns []domain.ConversationTurn, messages []domain.Convers
 	}
 	type exchange struct {
 		user, assistant *domain.ConversationMessage
+		turnID          string
 	}
 	exchanges := make(map[string]*exchange, len(turns))
+	unfinishedTurns := make(map[string]domain.ConversationTurn)
 	for _, turn := range turns {
-		if turn.State == domain.TurnStateCompleted && turn.RolledBackAt == nil {
+		if turn.RolledBackAt != nil {
+			continue
+		}
+		switch {
+		case turn.State == domain.TurnStateCompleted:
 			exchanges[turn.ID] = &exchange{}
+		case unfinished && (turn.State == domain.TurnStateFailed || turn.State == domain.TurnStateInterrupted || turn.State == domain.TurnStateRunning):
+			exchanges[turn.ID] = &exchange{}
+			unfinishedTurns[turn.ID] = turn
 		}
 	}
 	for index := range messages {
@@ -109,15 +132,27 @@ func chatHandoffTurns(turns []domain.ConversationTurn, messages []domain.Convers
 		}
 	}
 	complete := make([]*exchange, 0, len(exchanges))
-	for _, pair := range exchanges {
-		if pair.user != nil && pair.assistant != nil && strings.TrimSpace(pair.user.Text) != "" {
+	for turnID, pair := range exchanges {
+		if pair.user == nil || strings.TrimSpace(pair.user.Text) == "" {
+			continue
+		}
+		// A turn that did not complete may have no answer yet; it still happened.
+		if _, open := unfinishedTurns[turnID]; open || pair.assistant != nil {
+			pair.turnID = turnID
 			complete = append(complete, pair)
 		}
 	}
 	sort.Slice(complete, func(i, j int) bool { return complete[i].user.Sequence < complete[j].user.Sequence })
 	out := make([]domain.HandoffTurn, 0, len(complete))
 	for _, pair := range complete {
-		out = append(out, domain.HandoffTurn{UserRequest: pair.user.Text, AgentResponse: pair.assistant.Text, At: pair.user.CreatedAt, Harness: answeredBy(pair.user.Sequence)})
+		turn := domain.HandoffTurn{UserRequest: pair.user.Text, At: pair.user.CreatedAt, Harness: answeredBy(pair.user.Sequence)}
+		if pair.assistant != nil {
+			turn.AgentResponse = pair.assistant.Text
+		}
+		if open, ok := unfinishedTurns[pair.turnID]; ok {
+			turn.State, turn.Error = string(open.State), open.ErrorMessage
+		}
+		out = append(out, turn)
 	}
 	return out
 }
@@ -182,7 +217,7 @@ func (s *Service) SessionHistory(ctx context.Context, id domain.SessionID, offse
 	} else if !found {
 		return nil, 0, ports.ErrSessionNotFound
 	}
-	turns, err := s.SessionTurns(ctx, id)
+	turns, err := s.sessionTurns(ctx, id, true)
 	if err != nil {
 		return nil, 0, err
 	}

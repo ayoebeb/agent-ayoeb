@@ -138,3 +138,33 @@ func TestSettingsSessionRetentionRequiresDays(t *testing.T) {
 		t.Fatalf("status=%d response=%+v err=%v", w.Code, got, err)
 	}
 }
+
+type usageLimitResumeSettingsService struct {
+	hibernationSettingsService
+	enabled bool
+	max     int
+}
+
+func (s *usageLimitResumeSettingsService) SetUsageLimitAutoResume(_ context.Context, enabled bool, maxConcurrent int) (settingssvc.Snapshot, error) {
+	s.enabled, s.max = enabled, maxConcurrent
+	s.calls++
+	return settingssvc.Snapshot{UsageLimitAutoResume: enabled, UsageLimitMaxResumes: maxConcurrent}, nil
+}
+
+func TestSettingsUsageLimitResumeRequiresBothFields(t *testing.T) {
+	svc := &usageLimitResumeSettingsService{}
+	c := &SettingsController{Svc: svc}
+	for _, body := range []string{`{}`, `{"enabled":true}`, `{"maxConcurrent":2}`, `{"enabled":"yes","maxConcurrent":2}`} {
+		w := httptest.NewRecorder()
+		c.setUsageLimitResume(w, httptest.NewRequest(http.MethodPatch, "/api/v1/settings/usage-limit-resume", strings.NewReader(body)))
+		if w.Code != http.StatusBadRequest || svc.calls != 0 {
+			t.Fatalf("body=%s status=%d calls=%d", body, w.Code, svc.calls)
+		}
+	}
+	w := httptest.NewRecorder()
+	c.setUsageLimitResume(w, httptest.NewRequest(http.MethodPatch, "/api/v1/settings/usage-limit-resume", strings.NewReader(`{"enabled":false,"maxConcurrent":2}`)))
+	var got SettingsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK || got.UsageLimitAutoResume || got.UsageLimitMaxResumes != 2 || svc.max != 2 {
+		t.Fatalf("status=%d response=%+v err=%v", w.Code, got, err)
+	}
+}

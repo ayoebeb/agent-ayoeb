@@ -17,6 +17,12 @@ func session(activity contract.ActivityState) contract.SessionFacts {
 	}
 }
 
+func limited(activity contract.ActivityState) contract.SessionFacts {
+	facts := session(activity)
+	facts.UsageLimited = true
+	return facts
+}
+
 func TestDeriveStatusPrecedence(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -35,6 +41,12 @@ func TestDeriveStatusPrecedence(t *testing.T) {
 		{"blocked before PR", session(contract.ActivityBlocked), []contract.PRFacts{{CI: contract.CIFailing}}, contract.StatusNeedsInput},
 		{"PR before idle", session(contract.ActivityIdle), []contract.PRFacts{{CI: contract.CIFailing}}, contract.StatusCIFailed},
 		{"idle", session(contract.ActivityIdle), nil, contract.StatusIdle},
+		{"usage limit is not idle", limited(contract.ActivityIdle), nil, contract.StatusUsageLimit},
+		{"usage limit outranks the PR", limited(contract.ActivityIdle), []contract.PRFacts{{CI: contract.CIFailing}}, contract.StatusUsageLimit},
+		{"a running worker is not limited", limited(contract.ActivityActive), nil, contract.StatusWorking},
+		{"a worker waiting on input is not limited", limited(contract.ActivityWaitingInput), nil, contract.StatusNeedsInput},
+		{"an exited worker is not limited", limited(contract.ActivityExited), nil, contract.StatusExited},
+		{"a terminated worker is not limited", contract.SessionFacts{IsTerminated: true, UsageLimited: true}, nil, contract.StatusTerminated},
 	}
 
 	for _, tt := range tests {

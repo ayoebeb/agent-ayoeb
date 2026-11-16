@@ -28,6 +28,46 @@ func (*hibernationSettingsStore) SetComputerUse(context.Context, bool, time.Time
 func (*hibernationSettingsStore) SetSessionRetentionDays(context.Context, int, time.Time) error {
 	return nil
 }
+func (*hibernationSettingsStore) SetUsageLimitAutoResume(context.Context, bool, int, time.Time) error {
+	return nil
+}
+
+type usageLimitResumeStore struct {
+	hibernationSettingsStore
+	enabled bool
+	max     int
+}
+
+func (s *usageLimitResumeStore) GetAppSettings(context.Context) (Snapshot, error) {
+	return Snapshot{UsageLimitAutoResume: s.enabled, UsageLimitMaxResumes: s.max}, nil
+}
+
+func (s *usageLimitResumeStore) SetUsageLimitAutoResume(_ context.Context, enabled bool, maxConcurrent int, _ time.Time) error {
+	s.enabled, s.max = enabled, maxConcurrent
+	return nil
+}
+
+// The resume preference is stored as given when it is in range, and refused
+// before it is stored when the cap is outside 1 to 10.
+func TestUsageLimitAutoResumeSetting(t *testing.T) {
+	ctx := context.Background()
+	store := &usageLimitResumeStore{enabled: true, max: 3}
+	svc := New(store, nil, Offering{}, nil)
+	for _, bad := range []int{0, -1, 11} {
+		var apiErr *apierr.Error
+		if _, err := svc.SetUsageLimitAutoResume(ctx, false, bad); !errors.As(err, &apiErr) || apiErr.Code != "USAGE_LIMIT_RESUME_INVALID" || !store.enabled || store.max != 3 {
+			t.Fatalf("max %d: err=%v enabled=%v max=%d", bad, err, store.enabled, store.max)
+		}
+	}
+	snapshot, err := svc.SetUsageLimitAutoResume(ctx, false, 5)
+	if err != nil || snapshot.UsageLimitAutoResume || snapshot.UsageLimitMaxResumes != 5 {
+		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
+	}
+	enabled, maxConcurrent, err := svc.UsageLimitResume(ctx)
+	if err != nil || enabled || maxConcurrent != 5 {
+		t.Fatalf("UsageLimitResume = %v, %d, %v", enabled, maxConcurrent, err)
+	}
+}
 
 func TestChatHibernationGateResetsOnDaemonBoot(t *testing.T) {
 	ctx := context.Background()

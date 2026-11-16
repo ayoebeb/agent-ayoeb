@@ -134,3 +134,25 @@ func TestCreateShowsEachReportedArtifactAfterTheReportIsStored(t *testing.T) {
 		t.Fatalf("unknown session: err = %v, recorded %q", err, calls)
 	}
 }
+
+// An Immediate report skips the batching delay: the orchestrator cannot see why
+// a worker went quiet (a usage-limit stop, say) except through it.
+func TestCreateImmediateReportIsDeliveredAtOnce(t *testing.T) {
+	now := time.Date(2026, 11, 16, 14, 20, 0, 0, time.UTC)
+	st := &fakeStore{ok: true, session: domain.SessionRecord{ID: "w1", ProjectID: "p", Kind: domain.KindWorker}}
+	svc := New(Deps{Store: st, Now: func() time.Time { return now }})
+	got, err := svc.Create(context.Background(), CreateInput{
+		SessionID: "w1", State: domain.ReportCheckpoint, Note: "Stopped on the 5-hour usage limit", Immediate: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AvailableAt.Equal(now) || got.State != domain.ReportCheckpoint {
+		t.Fatalf("report = %+v, want a checkpoint available at once", got)
+	}
+	// The same report without Immediate waits for the hourly batch.
+	got, err = svc.Create(context.Background(), CreateInput{SessionID: "w1", State: domain.ReportCheckpoint, Note: "progress"})
+	if err != nil || !got.AvailableAt.Equal(now.Add(domain.ReportBatchFallback)) {
+		t.Fatalf("report = %+v, err = %v", got, err)
+	}
+}

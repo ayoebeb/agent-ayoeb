@@ -64,3 +64,36 @@ func TestChatHandoffTurnsCreditEachProviderAndKeepRequestsSentThroughAO(t *testi
 		t.Fatalf("unswitched turns = %+v, want one uncredited turn", unswitched)
 	}
 }
+
+// A session whose first turn died on a usage limit still received its task. The
+// history lists that turn with its state and error, so an orchestrator cannot
+// read "0 turns" as "never delivered"; a handoff note stays completed turns only.
+func TestChatTurnsKeepUnfinishedTurnsForHistoryOnly(t *testing.T) {
+	const limit = "You've hit your 5-hour limit · resets 6pm (Europe/Amsterdam)"
+	turns := []domain.ConversationTurn{
+		{ID: "t1", State: domain.TurnStateFailed, ErrorMessage: limit},
+		{ID: "t2", State: domain.TurnStateRunning},
+		{ID: "t3", State: domain.TurnStateInterrupted},
+		{ID: "t4", State: domain.TurnStateQueued},
+	}
+	messages := []domain.ConversationMessage{
+		{Sequence: 1, TurnID: "t1", Role: domain.MessageRoleUser, Origin: domain.MessageOriginAutomation, Text: "build the dashboard"},
+		{Sequence: 2, TurnID: "t1", Role: domain.MessageRoleAssistant, Origin: domain.MessageOriginProvider, Text: "started on it"},
+		{Sequence: 3, TurnID: "t2", Role: domain.MessageRoleUser, Origin: domain.MessageOriginHuman, Text: "carry on"},
+		{Sequence: 4, TurnID: "t3", Role: domain.MessageRoleUser, Origin: domain.MessageOriginHuman, Text: "stop that"},
+		{Sequence: 5, TurnID: "t4", Role: domain.MessageRoleUser, Origin: domain.MessageOriginHuman, Text: "not delivered yet"},
+	}
+
+	if got := chatHandoffTurns(turns, messages, nil); len(got) != 0 {
+		t.Fatalf("a handoff note must carry completed turns only, got %+v", got)
+	}
+	got := chatTurns(turns, messages, nil, true)
+	want := []domain.HandoffTurn{
+		{UserRequest: "build the dashboard", AgentResponse: "started on it", State: "failed", Error: limit},
+		{UserRequest: "carry on", State: "running"},
+		{UserRequest: "stop that", State: "interrupted"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("history turns =\n%+v\nwant\n%+v", got, want)
+	}
+}

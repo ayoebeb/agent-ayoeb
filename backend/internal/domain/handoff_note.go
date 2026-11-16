@@ -56,6 +56,11 @@ type HandoffTurn struct {
 	AgentResponse string       `json:"agentResponse"`
 	At            time.Time    `json:"at"`
 	Harness       AgentHarness `json:"harness,omitempty"`
+	// State and Error describe a turn that did not complete (failed,
+	// interrupted, or still running). They are set only by the history command:
+	// a handoff note carries completed turns alone.
+	State string `json:"state,omitempty" description:"The turn's state when it did not complete: failed, interrupted or running."`
+	Error string `json:"error,omitempty" description:"Why a failed turn failed, such as a usage-limit message."`
 }
 
 // HandoffNoteInput is everything a handoff note is rendered from. Turns holds

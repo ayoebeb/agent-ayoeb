@@ -28,6 +28,8 @@ func (s settingsStore) GetAppSettings(ctx context.Context) (settingssvc.Snapshot
 		VersionRefresh:       row.VersionRefresh,
 		ComputerUse:          row.ComputerUse,
 		SessionRetentionDays: row.SessionRetentionDays,
+		UsageLimitAutoResume: row.UsageLimitAutoResume,
+		UsageLimitMaxResumes: row.UsageLimitMaxResumes,
 		UpdatedAt:            row.UpdatedAt,
 	}, nil
 }
@@ -50,6 +52,10 @@ func (s settingsStore) SetComputerUse(ctx context.Context, enabled bool, now tim
 
 func (s settingsStore) SetSessionRetentionDays(ctx context.Context, days int, now time.Time) error {
 	return s.store.SetSessionRetentionDays(ctx, days, now)
+}
+
+func (s settingsStore) SetUsageLimitAutoResume(ctx context.Context, enabled bool, maxConcurrent int, now time.Time) error {
+	return s.store.SetUsageLimitAutoResume(ctx, enabled, maxConcurrent, now)
 }
 
 func (s settingsStore) SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault, now time.Time) error {

@@ -594,8 +594,11 @@ type Session struct {
 	// ChatProviderPreserved is a live-controller observation, never stored.
 	// False also covers recovery/unknown ownership; callers must not infer safety.
 	ChatProviderPreserved bool          `json:"chatProviderPreserved"`
-	Status                SessionStatus `json:"status" enum:"working,pr_open,draft,ci_failed,review_pending,changes_requested,commented,approved,mergeable,merged,needs_input,exited,idle,terminated,no_signal"`
-	SCMStatus             SessionStatus `json:"scmStatus,omitempty" enum:"pr_open,draft,ci_failed,review_pending,changes_requested,commented,approved,mergeable,merged"`
+	Status                SessionStatus `json:"status" enum:"working,pr_open,draft,ci_failed,review_pending,changes_requested,commented,approved,mergeable,merged,needs_input,exited,idle,terminated,no_signal,usage_limit"`
+	// UsageLimit is present while the session's latest turn is stopped on the
+	// provider's usage limit. Derived at read time, never stored.
+	UsageLimit *SessionUsageLimit `json:"usageLimit,omitempty"`
+	SCMStatus  SessionStatus      `json:"scmStatus,omitempty" enum:"pr_open,draft,ci_failed,review_pending,changes_requested,commented,approved,mergeable,merged"`
 	// KanbanColumn is where the session sits in its delivery lifecycle and
 	// which loop is turning it: an AO-driven one (validating) or the
 	// review-feedback loop whose next turn is a person's (needs_review). It is
@@ -605,7 +608,7 @@ type Session struct {
 	// important current fact about the session at the stage it sits in. It is
 	// derived after the column, from the facts that column reads, and ships in
 	// renderable form so clients print it without a mapping table of their own.
-	DisplayStatus    DisplayStatus `json:"displayStatus" enum:"Working,Blocked,Exited,No signal,Interrupted,Awaiting PR,Fixing CI failures,Addressing comments,Needs review,Review scheduled,Reviewing,Review failed,Review pending,Draft,CI failing,Commented,Changes requested,Needs human review,Mergeable,Approved,Merged,Closed without merge,Terminated"`
+	DisplayStatus    DisplayStatus `json:"displayStatus" enum:"Working,Blocked,Exited,No signal,Interrupted,Usage limit,Awaiting PR,Fixing CI failures,Addressing comments,Needs review,Review scheduled,Reviewing,Review failed,Review pending,Draft,CI failing,Commented,Changes requested,Needs human review,Mergeable,Approved,Merged,Closed without merge,Terminated"`
 	TerminalHandleID string        `json:"terminalHandleId,omitempty"`
 	// TerminalTitle is the title the session's terminal program set, present
 	// only when it should label the session: it is meaningful and no explicit
