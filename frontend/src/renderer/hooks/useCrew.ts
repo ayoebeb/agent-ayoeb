@@ -1,5 +1,5 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { clientForSessionHost } from "../lib/host-clients";
 import { buildCrew, crewDiffFromManifest, currentPlan, type CrewDiff, type CrewModel } from "../lib/crew";
 import {
@@ -17,7 +17,6 @@ import {
 } from "../types/workspace";
 import { toSnapshot } from "./useConversation";
 import { sessionWorkspaceFilesQueryOptions, type WorkspaceFilesResponse } from "./useSessionWorkspaceFiles";
-import { useNow } from "./useNow";
 import { useRemoteProjectQuery, workspaceQueryOptions } from "./useWorkspaceQuery";
 
 /** Worktrees change without an event, so the crew reads them on a gentle clock. */
@@ -34,6 +33,18 @@ const EMPTY_SESSIONS: WorkspaceSession[] = [];
 /** A worker whose worktree the daemon can read. Cloud workers have none on this machine. */
 function hasReadableWorktree(session: WorkspaceSession): boolean {
 	return !isOrchestratorSession(session) && sessionIsActive(session) && !session.cloud && !session.needsResume && sessionWorkspaceReady(session);
+}
+
+/** The current time, refreshed every `intervalMs` while `running`; frozen at mount otherwise. */
+function useClock(running: boolean, intervalMs: number): Date {
+	const [now, setNow] = useState(() => new Date());
+	useEffect(() => {
+		if (!running) return;
+		setNow(new Date());
+		const id = window.setInterval(() => setNow(new Date()), intervalMs);
+		return () => window.clearInterval(id);
+	}, [intervalMs, running]);
+	return now;
 }
 
 export type UseCrewResult = {
@@ -61,7 +72,9 @@ export function useCrew(orchestrator: WorkspaceSession | undefined, enabled = tr
 	const local = useQuery({ ...workspaceQueryOptions, select: selectProjectSessions, enabled: !hostId && Boolean(projectId) });
 	const remote = useRemoteProjectQuery(hostId ?? "", projectId ?? "");
 	const sessions = (hostId ? remote.data?.sessions : local.data) ?? EMPTY_SESSIONS;
-	const now = useNow(QUIET_TICK_MS);
+	// Only a crew that is on screen needs a clock; every other session's inspector calls
+	// this hook too and must not re-render every 30 seconds for nothing.
+	const now = useClock(Boolean(orchestrator) && enabled, QUIET_TICK_MS);
 	const readable = useMemo(() => sessions.filter(hasReadableWorktree), [sessions]);
 	const diffs = useQueries({
 		queries: readable.map((worker) => ({
