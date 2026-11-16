@@ -6128,3 +6128,116 @@ func TestModelAliasAdmissionUsesTheBindingHarness(t *testing.T) {
 		})
 	}
 }
+
+// Claude Code can offer several "always" choices in one permission request: the
+// command class beside the exact command, or an MCP tool beside its whole
+// server. AO must show every one of them and hand the provider exactly the id
+// the user picked, whichever "always" it is; otherwise "Always allow" would
+// silently become a narrower rule than the card said.
+func TestACPDriverPassesTheChosenAlwaysAllowOptionToTheProvider(t *testing.T) {
+	options := []acpsdk.PermissionOption{
+		{OptionId: "reject", Name: "Deny", Kind: acpsdk.PermissionOptionKindRejectOnce},
+		{OptionId: "allow", Name: "Allow Once", Kind: acpsdk.PermissionOptionKindAllowOnce},
+		{OptionId: "allow_always", Name: `Always allow "node -e ..." in this workspace`, Kind: acpsdk.PermissionOptionKindAllowAlways},
+		{OptionId: "allow_always_exact", Name: "Always allow only this exact command", Kind: acpsdk.PermissionOptionKindAllowAlways},
+	}
+	wantDecisions := []ports.ChatDecisionOption{
+		{ID: "reject", Label: "Deny", Kind: ports.ChatDecisionRejectOnce},
+		{ID: "allow", Label: "Allow Once", Kind: ports.ChatDecisionAllowOnce},
+		{ID: "allow_always", Label: `Always allow "node -e ..." in this workspace`, Kind: ports.ChatDecisionAllowAlways},
+		{ID: "allow_always_exact", Label: "Always allow only this exact command", Kind: ports.ChatDecisionAllowAlways},
+	}
+
+	for _, pick := range []string{"allow_always", "allow_always_exact", "allow", "reject"} {
+		t.Run(pick, func(t *testing.T) {
+			agent := &fakeAgent{}
+			picked := make(chan string, 1)
+			agent.customPrompt = func(ctx context.Context, params acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
+				permission, err := agent.conn.RequestPermission(ctx, acpsdk.RequestPermissionRequest{
+					SessionId: params.SessionId,
+					ToolCall: acpsdk.ToolCallUpdate{
+						ToolCallId: "tool-1", Title: acpsdk.Ptr(`node -e "console.log(1)"`), Kind: acpsdk.Ptr(acpsdk.ToolKindExecute),
+					},
+					Options: options,
+				})
+				if err != nil {
+					return acpsdk.PromptResponse{}, err
+				}
+				if permission.Outcome.Selected == nil {
+					picked <- "(no option selected)"
+				} else {
+					picked <- string(permission.Outcome.Selected.OptionId)
+				}
+				return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
+			}
+			driver := New(Config{
+				Harness: domain.HarnessClaudeCode,
+				Capabilities: ports.ChatCapabilities{
+					ports.ChatCapabilityStreaming: true, ports.ChatCapabilityApprovals: true,
+				},
+				Probe:  func(context.Context) error { return nil },
+				Launch: func(context.Context, LaunchConfig) (Launch, error) { return Launch{Command: "fake"}, nil },
+			}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			driver.useTestProcess(fakeSpawn(agent))
+
+			conversation, err := driver.Start(context.Background(), ports.ChatStartConfig{WorkspacePath: t.TempDir()})
+			if err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			defer conversation.Close()
+			_ = nextEvent(t, conversation.Events()) // controller.ready
+			ref, err := conversation.SendTurn(context.Background(), ports.ChatUserMessage{Text: "run it"})
+			if err != nil {
+				t.Fatalf("SendTurn: %v", err)
+			}
+			if err := conversation.(ports.ChatDeferredTurnStarter).StartDeferredTurn(ref.ProviderTurnID); err != nil {
+				t.Fatalf("StartDeferredTurn: %v", err)
+			}
+
+			var approval ports.ChatEvent
+			for approval.RequestID == "" {
+				if event := nextEvent(t, conversation.Events()); event.Kind == ports.ChatEventApprovalRequested {
+					approval = event
+				}
+			}
+			if !reflect.DeepEqual(stripRaw(approval.Decisions), wantDecisions) {
+				t.Fatalf("approval decisions = %#v, want %#v", approval.Decisions, wantDecisions)
+			}
+
+			// A choice the provider did not offer is refused and leaves the request
+			// answerable, so a stale or invented id cannot become a broader grant.
+			err = conversation.ResolveRequest(context.Background(), approval.RequestID, ports.ChatDecision{ID: "allow_always_server"})
+			if !errors.Is(err, ports.ErrChatDecisionNotOffered) {
+				t.Fatalf("unoffered decision error = %v, want ErrChatDecisionNotOffered", err)
+			}
+			select {
+			case got := <-picked:
+				t.Fatalf("provider was answered %q by a refused decision", got)
+			case <-time.After(30 * time.Millisecond):
+			}
+
+			if err := conversation.ResolveRequest(context.Background(), approval.RequestID, ports.ChatDecision{ID: pick}); err != nil {
+				t.Fatalf("ResolveRequest(%s): %v", pick, err)
+			}
+			select {
+			case got := <-picked:
+				if got != pick {
+					t.Fatalf("provider received option %q, want %q", got, pick)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider was never answered")
+			}
+		})
+	}
+}
+
+// stripRaw drops the provider's raw option JSON so decisions compare by what
+// the card shows.
+func stripRaw(decisions []ports.ChatDecisionOption) []ports.ChatDecisionOption {
+	stripped := make([]ports.ChatDecisionOption, len(decisions))
+	for i, decision := range decisions {
+		decision.Raw = nil
+		stripped[i] = decision
+	}
+	return stripped
+}

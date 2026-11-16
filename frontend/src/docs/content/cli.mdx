@@ -149,7 +149,7 @@ Orchestrator chooses a project in this order: `--project`, `AO_PROJECT_ID`, the 
 | `ao session delete <id>` | Permanently delete a terminated session and its AO history once its worktree is cleaned up; `--cleanup` cleans it up first, never forced. Branches, PRs and agent account usage totals are kept. |
 | `ao session claim-pr [<session-id>] <pr-ref>` | Attach an existing PR; omitting the session uses `AO_SESSION_ID`. |
 | `ao session approvals ls <id>` | List the approvals and input requests a Chat session is waiting on, with the answers each offers. |
-| `ao session approvals resolve <id> <request-id>` | Answer one: `--decision <id>` for an approval (`allow`, `allow_always`, or `reject` for Claude), `--action <action>` for an input request (`accept`, `decline`, or `cancel`). |
+| `ao session approvals resolve <id> <request-id>` | Answer one: `--decision <id>` for an approval (`allow`, `allow_always`, or `reject` for Claude; a request can also offer `allow_always_exact` or `allow_always_server`, so read the labels `ls` shows), `--action <action>` for an input request (`accept`, `decline`, or `cancel`). |
 
 Most lookup commands accept `--project` to disambiguate a session ID.
 

@@ -430,6 +430,193 @@ export function patchClaudeSteerSettlement(adapterPath) {
 	return true;
 }
 
+/**
+ * Make "Always Allow" cover more than the one call it was pressed on.
+ *
+ * claude-agent-acp 0.70 answers "Always Allow" with the rule Claude Code itself
+ * suggests, and for two common shapes that rule is a single exact call:
+ *
+ * - A command that starts with a flag (`node -e "..."`, `python -c "..."`,
+ *   `curl -s URL`, `npx --no-install pkg`) gets the whole command line, so the
+ *   next one with different code or a different URL asks again.
+ * - An MCP tool gets only that tool, so every sibling tool of the same server
+ *   asks again.
+ *
+ * Commands with a subcommand (`git add *`, `npm run *`) already get a class
+ * rule, and file edits switch the session to accept-edits; both are left alone.
+ *
+ * For the two shapes above AO offers named choices instead. `allow_always`
+ * (what `ao session approvals resolve --decision allow_always` sends) becomes
+ * the command class (`node -e *`); the exact rule stays as
+ * `allow_always_exact`. An MCP tool keeps `allow_always` for itself and gains
+ * `allow_always_server` for `mcp__<server>`, a deliberate opt-in because a
+ * server's tools differ in risk. Every rule keeps the destination Claude Code
+ * chose (the session's own `.claude/settings.local.json`), and the option
+ * names say what is remembered. Setting AO_CLAUDE_EXACT_ALWAYS_ALLOW=1 in the
+ * adapter's environment restores the stock behaviour.
+ *
+ * The anchors are a deliberate upgrade tripwire: if upstream changes this code,
+ * packaging fails instead of silently going back to asking again.
+ */
+export function patchClaudeAlwaysAllowScope(adapterPath) {
+	let source = readFileSync(adapterPath, "utf8");
+	if (source.includes(CLAUDE_ALWAYS_ALLOW_MARKER)) return false;
+	const patches = [
+		[
+			"function permissionMetadataForAlwaysAllow(suggestions, toolName) {",
+			`${CLAUDE_ALWAYS_ALLOW_HELPERS}function permissionMetadataForAlwaysAllow(suggestions, toolName) {`,
+		],
+		[
+			[
+				"                    {",
+				'                        kind: "allow_always",',
+				'                        name: "Always Allow",',
+				'                        optionId: "allow_always",',
+				"                        _meta: {",
+				"                            permission: permissionMetadataForAlwaysAllow(suggestions, toolName),",
+				"                        },",
+				"                    },",
+			].join("\n"),
+			[
+				"                    ...aoAlwaysAllowOptions(toolName, suggestions).map((choice) => ({",
+				'                        kind: "allow_always",',
+				"                        name: choice.name,",
+				"                        optionId: choice.optionId,",
+				"                        _meta: {",
+				"                            permission: permissionMetadataForAlwaysAllow(choice.updates, toolName),",
+				"                        },",
+				"                    })),",
+			].join("\n"),
+		],
+		[
+			'(response.outcome.optionId === "allow" || response.outcome.optionId === "allow_always")) {',
+			[
+				'(response.outcome.optionId === "allow" ||',
+				"                    aoAlwaysAllowOptions(toolName, suggestions).some((choice) => choice.optionId === response.outcome.optionId))) {",
+			].join("\n"),
+		],
+		[
+			[
+				'                if (response.outcome.optionId === "allow_always") {',
+				"                    return {",
+				'                        behavior: "allow",',
+				"                        updatedInput: toolInput,",
+				"                        updatedPermissions: suggestions ?? [",
+			].join("\n"),
+			[
+				'                if (response.outcome.optionId !== "allow") {',
+				"                    const aoChoice = aoAlwaysAllowOptions(toolName, suggestions).find((choice) => choice.optionId === response.outcome.optionId);",
+				"                    return {",
+				'                        behavior: "allow",',
+				"                        updatedInput: toolInput,",
+				"                        updatedPermissions: aoChoice.updates ?? [",
+			].join("\n"),
+		],
+	];
+	for (const [original, replacement] of patches) {
+		const at = source.indexOf(original);
+		if (at < 0 || source.indexOf(original, at + 1) >= 0) {
+			throw new Error("claude-agent-acp no longer matches AO's always-allow scope patch");
+		}
+		source = source.slice(0, at) + replacement + source.slice(at + original.length);
+	}
+	writeFileSync(adapterPath, source);
+	return true;
+}
+
+const CLAUDE_ALWAYS_ALLOW_MARKER = "// AO: widen \"Always Allow\" where Claude Code's own rule is one exact call.";
+
+// Injected into the adapter as written, so it must be plain self-contained
+// JavaScript. It avoids backticks and ${} because this is a template literal.
+const CLAUDE_ALWAYS_ALLOW_HELPERS = String.raw`// AO: widen "Always Allow" where Claude Code's own rule is one exact call.
+// Programs whose arguments are themselves a command line. A wildcard after them
+// would approve whatever command follows, so they keep Claude Code's exact rule.
+const AO_UNWIDENED_PROGRAMS = new Set([
+    "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "cmd", "powershell", "pwsh", "wsl",
+    "env", "sudo", "doas", "su", "runas", "xargs", "eval", "exec", "nohup", "nice", "time", "timeout",
+    "stdbuf", "command", "builtin", "watch", "ssh", "start",
+]);
+// Shell syntax that makes a command more than one plain invocation, plus the
+// characters that would make the quote scan below unreliable.
+const AO_SHELL_SYNTAX = ";&|<>(){}$\\" + String.fromCharCode(96, 10, 13);
+// The command without its varying arguments, for one plain invocation: the
+// program, its leading options, and a script file that follows them. Undefined
+// when Claude Code's rule should stand: a compound command, a program that runs
+// other commands, or a command that has no option or script to hold on to.
+function aoBashCommandClass(content) {
+    if (typeof content !== "string") return undefined;
+    const text = content.trim();
+    if (text === "" || text.endsWith("*")) return undefined;
+    let quote = "";
+    for (const ch of text) {
+        if (ch === "$" || ch === "\\" || ch === String.fromCharCode(96)) return undefined;
+        if (quote) {
+            if (ch === quote) quote = "";
+            continue;
+        }
+        if (ch === "'" || ch === '"') {
+            quote = ch;
+            continue;
+        }
+        if (AO_SHELL_SYNTAX.includes(ch)) return undefined;
+    }
+    if (quote) return undefined;
+    const words = text.split(/\s+/);
+    if (!/^[A-Za-z][A-Za-z0-9._+-]*$/.test(words[0]) || AO_UNWIDENED_PROGRAMS.has(words[0].toLowerCase())) return undefined;
+    let end = 1;
+    while (end < words.length && /^--?[A-Za-z][A-Za-z0-9-]*$/.test(words[end])) end++;
+    const options = end > 1;
+    // A script path (script.js, tests/a.py), not a URL or a bare word.
+    const script = end < words.length && /^[A-Za-z0-9_.\/~-]+$/.test(words[end]) && /[./]/.test(words[end]) && !words[end].startsWith("-");
+    if (script) end++;
+    if (!script && (!options || end === words.length)) return undefined;
+    return words.slice(0, end).join(" ");
+}
+function aoAlwaysAllowLabel(text) {
+    return text.length > 48 ? text.slice(0, 45) + "..." : text;
+}
+// The "always" choices to offer for a permission request. The first one keeps
+// the id "allow_always"; updates is what Claude Code applies when it is picked,
+// and undefined keeps claude-agent-acp's own fallback for that choice.
+function aoAlwaysAllowOptions(toolName, suggestions) {
+    const stock = [{ optionId: "allow_always", name: "Always Allow", updates: suggestions }];
+    if (process.env.AO_CLAUDE_EXACT_ALWAYS_ALLOW === "1") return stock;
+    const isAllowRule = (update) => update?.type === "addRules" && update.behavior === "allow" && Array.isArray(update.rules);
+    if (typeof toolName === "string" && toolName.startsWith("mcp__")) {
+        const [, server, tool] = toolName.split("__");
+        if (!server || !tool) return stock;
+        const destination = Array.isArray(suggestions) ? suggestions.find(isAllowRule)?.destination : undefined;
+        return [
+            { optionId: "allow_always", name: "Always allow this tool in this workspace", updates: suggestions },
+            {
+                optionId: "allow_always_server",
+                name: "Always allow all " + aoAlwaysAllowLabel(server) + " tools in this workspace",
+                updates: [{ type: "addRules", rules: [{ toolName: "mcp__" + server }], behavior: "allow", destination: destination ?? "session" }],
+            },
+        ];
+    }
+    if (toolName !== "Bash" || !Array.isArray(suggestions)) return stock;
+    const classes = [];
+    const widened = suggestions.map((update) => {
+        if (!isAllowRule(update)) return update;
+        return {
+            ...update,
+            rules: update.rules.map((rule) => {
+                const prefix = rule?.toolName === "Bash" ? aoBashCommandClass(rule.ruleContent) : undefined;
+                if (prefix === undefined) return rule;
+                classes.push(prefix);
+                return { ...rule, ruleContent: prefix + " *" };
+            }),
+        };
+    });
+    if (classes.length === 0) return stock;
+    return [
+        { optionId: "allow_always", name: "Always allow " + String.fromCharCode(34) + aoAlwaysAllowLabel(classes.join(", ")) + " ..." + String.fromCharCode(34) + " in this workspace", updates: widened },
+        { optionId: "allow_always_exact", name: "Always allow only this exact command", updates: suggestions },
+    ];
+}
+`;
+
 export function pruneNodeDistribution(nodeRoot) {
 	// The Unix archives expose npm/corepack as bin/ symlinks into lib/. Remove
 	// the entry points before their targets so packagers never see dangling

@@ -178,8 +178,11 @@ allow, allow_always, or reject. An input request takes --action: accept,
 decline, or cancel. Accepting a form input also needs --content, a JSON object
 that satisfies the schema "ls" showed.
 
-allow_always keeps the grant for the rest of the session. Use allow unless the
-user asked for a standing grant.
+allow_always keeps the grant for the rest of the session. A request can offer
+more than one always-choice, for example allow_always_exact (only this exact
+command) or allow_always_server (every tool of an MCP server): use the one whose
+label "ls" shows matches what the user asked for. Use allow unless the user
+asked for a standing grant.
 
 A session cannot answer its own request: when <session-id> is the calling
 session (AO_SESSION_ID) the command exits 2 without contacting the daemon. Only
