@@ -79,6 +79,25 @@ describe("a row of an open step list", () => {
 		expect(screen.queryByText(/echo done/)).not.toBeInTheDocument();
 	});
 
+	it("shows the command in place of the bare program name on a generic run", () => {
+		render(
+			<StepSurface>
+				<ActivityRow activity={command("activity-1", "node -e \"console.log(1)\"", { durationMs: 3_000 })} />
+			</StepSurface>,
+		);
+		const row = screen.getByRole("button", { name: /^Ran node -e/ });
+		expect(row).toHaveTextContent("Ran");
+		expect(screen.getByText("node -e \"console.log(1)\"")).toBeInTheDocument();
+		// The program name is not drawn a second time as a chip beside the command.
+		expect(screen.queryByText(/^node$/)).not.toBeInTheDocument();
+	});
+
+	it("keeps the bare program name on a generic run that is on its own", () => {
+		render(<ActivityRow activity={command("activity-1", "node -e \"console.log(1)\"", { durationMs: 3_000 })} />);
+		expect(screen.getByRole("button", { name: /^Ran node$/ })).toBeInTheDocument();
+		expect(screen.queryByText("node -e \"console.log(1)\"")).not.toBeInTheDocument();
+	});
+
 	it("does not repeat the target of a step that already names what it touched", () => {
 		render(
 			<StepSurface>

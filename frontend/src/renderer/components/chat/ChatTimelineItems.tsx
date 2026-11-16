@@ -1851,13 +1851,17 @@ function GenericActivityRow({ activity }: { activity: ConversationActivity }) {
 	const noticeLabel = retry?.label.startsWith("Reconnecting…") ? retry.label : undefined;
 	const noticeDetail = noticeLabel ? retry?.detail : undefined;
 	const singleEdit = activity.activityKind === "file_change" && files.length === 1 ? files[0] : undefined;
-		// A row of an open step list says what ran and how long it took: the command line next to
-		// the verb (a step with a target, like "Read README.md", already names what it touched),
-		// and the time once it was long enough to matter. A lone step keeps its single calm line.
+		// A row of an open step list says what ran and how long it took. A step that names what it
+		// touched ("Read README.md") needs no command line. A generic run only names its program
+		// ("Ran node"), so the line replaces that name: "Ran" and what ran. A lone step keeps its
+		// single calm line.
 		const inSurface = useInStepSurface();
-		const stepCommand = inSurface && activity.activityKind === "command" && !path
+		const commandLine = inSurface && activity.activityKind === "command"
 			? activity.detail?.command?.trim().split("\n")[0]
 			: undefined;
+		const replacesTarget = Boolean(commandLine) && stepIconName === "run";
+		const stepCommand = commandLine && (!path || replacesTarget) ? commandLine : undefined;
+		const rowPath = replacesTarget ? undefined : path;
 		const stepDuration = inSurface && activity.activityKind === "command" && activity.status === "completed"
 			&& typeof activity.detail?.durationMs === "number" && activity.detail.durationMs >= 1000
 			? formatDuration(activity.detail.durationMs)
@@ -1920,7 +1924,7 @@ function GenericActivityRow({ activity }: { activity: ConversationActivity }) {
 							</span>
 						) : null}
 					</span>
-				) : compactSummary && path ? (
+				) : compactSummary && rowPath ? (
 					// Verb and target sit as close together as a file edit's verb and name.
 					// The space is not drawn in the flex row, but it keeps the accessible
 					// name "Read README.md" rather than "ReadREADME.md".
@@ -1929,7 +1933,7 @@ function GenericActivityRow({ activity }: { activity: ConversationActivity }) {
 							<ActivityTitle text={label} />
 						</strong>
 						{" "}
-						<StepTarget text={path} title={pathTitle} />
+						<StepTarget text={rowPath} title={pathTitle} />
 					</span>
 				) : (
 					<strong
@@ -1951,6 +1955,8 @@ function GenericActivityRow({ activity }: { activity: ConversationActivity }) {
 				)}
 					{inSurface && compactSummary ? (
 						<>
+							{/* Not drawn in the flex row; it keeps the accessible name "Ran node -e ..." from running together. */}
+							{" "}
 							{stepCommand ? (
 								<span className="min-w-0 flex-1 truncate font-mono text-caption text-foreground/65" title={stepCommand}>
 									{stepCommand}
