@@ -526,7 +526,7 @@ func inlineJSON(v any) string {
 
 // lineBreaks are the characters that end a line in text a worker wrote.
 var lineBreaks = strings.NewReplacer(
-	"\r\n", "\n", "\r", "\n", "\v", "\n", "\f", "\n", "\u0085", "\n", " ", "\n", " ", "\n",
+	"\r\n", "\n", "\r", "\n", "\v", "\n", "\f", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n",
 )
 
 // workerLine renders text a worker or an MCP server controls as one display line.

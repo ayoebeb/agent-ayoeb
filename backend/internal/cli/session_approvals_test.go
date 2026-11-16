@@ -248,7 +248,7 @@ func TestPendingRequestsFrom_Summaries(t *testing.T) {
 		},
 		{
 			name:        "bidirectional and zero-width characters are dropped",
-			activity:    `"summary":"rm‮ txt.sh​","detail":{"toolName":"Bash","input":"ls pwd"}`,
+			activity:    "\"summary\":\"rm\\u202e txt.sh\\u200b\",\"detail\":{\"toolName\":\"Bash\",\"input\":\"ls\\u2028pwd\"}",
 			wantTool:    "Bash",
 			wantInput:   "ls ⏎ pwd",
 			wantSummary: "rm txt.sh",
