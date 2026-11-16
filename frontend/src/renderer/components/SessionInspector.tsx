@@ -296,7 +296,7 @@ export const SessionInspector = memo(function SessionInspector({
 				sideChatView={sideChatView ?? <p className="p-4 text-xs text-muted-foreground">{t("sideChat.unavailable")}</p>}
 				activeView={view}
 				ariaLabel={t("inspector.aria")}
-				crewView={hasCrew && session ? <CrewRail orchestrator={session} /> : undefined}
+				crewView={hasCrew && session ? <CrewRail active={isInspectorVisible} orchestrator={session} /> : undefined}
 				artifactsView={
 					session ? (
 						<SessionArtifactsView hostId={hostId} key={sessionUiKey(session.id, hostId)} onRequestConsumed={onArtifactRequestConsumed} request={artifactRequest} session={session} />

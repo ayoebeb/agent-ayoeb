@@ -11,7 +11,7 @@ const NOW = Date.parse("2026-11-16T12:00:00Z");
 const MIN = 60_000;
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
-const { navigate, post, resolve, room, crewState, conversations } = vi.hoisted(() => ({
+const { navigate, post, resolve, room, crewState, conversations, watching } = vi.hoisted(() => ({
 	navigate: vi.fn(),
 	post: vi.fn(),
 	resolve: vi.fn(),
@@ -24,6 +24,7 @@ const { navigate, post, resolve, room, crewState, conversations } = vi.hoisted((
 	},
 	crewState: { current: undefined as unknown },
 	conversations: {} as Record<string, { plan?: ConversationPlan; approval?: ConversationActivity; question?: ConversationActivity } | undefined>,
+	watching: {} as Record<string, boolean>,
 }));
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
@@ -31,7 +32,10 @@ vi.mock("../../hooks/useControlRoom", () => ({ useControlRoom: () => room }));
 vi.mock("../../hooks/useConversation", () => ({ useConversationCommands: () => ({ resolve }) }));
 vi.mock("../../hooks/useCrew", () => ({
 	useCrew: () => crewState.current,
-	useCrewConversation: (session: WorkspaceSession) => conversations[session.id],
+	useCrewConversation: (session: WorkspaceSession, enabled: boolean) => {
+		watching[session.id] = enabled;
+		return conversations[session.id];
+	},
 	crewConversationQueryKey: (id: string) => ["crew-conversation", id],
 }));
 vi.mock("../../lib/host-clients", () => ({ clientForSessionHost: () => ({ POST: post }) }));
@@ -93,6 +97,7 @@ const row = (id: string): HTMLElement => {
 beforeEach(() => {
 	vi.clearAllMocks();
 	for (const key of Object.keys(conversations)) delete conversations[key];
+	for (const key of Object.keys(watching)) delete watching[key];
 	room.scope = undefined;
 	post.mockResolvedValue({ error: undefined });
 });
@@ -124,6 +129,20 @@ describe("CrewRail", () => {
 		renderRail();
 		expect(within(row("planner")).getByTestId("crew-line")).toHaveTextContent("Step 2 of 3 · Wire the toggle");
 		expect(within(row("plain")).getByTestId("crew-line")).toHaveTextContent("Working");
+	});
+
+	it("watches only the workers that can need the person, and none while the rail is hidden", () => {
+		const sessions = [
+			worker({ id: "asks", status: "needs_input", activity: { state: "waiting_input", lastActivityAt: ago(MIN) } }),
+			worker({ id: "builds" }),
+			worker({ id: "reviewed", status: "pr_open", kanbanColumn: "validating", displayStatus: "Reviewing" }),
+		];
+		setCrew(sessions);
+		const { rerender } = renderRail();
+		expect(watching).toEqual({ asks: true, builds: true, reviewed: false });
+
+		rerender(<CrewRail active={false} orchestrator={orchestrator} />);
+		expect(watching).toEqual({ asks: false, builds: false, reviewed: false });
 	});
 
 	it("shows branch, lines and PR state for a worker", () => {

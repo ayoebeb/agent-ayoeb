@@ -59,7 +59,7 @@ export function shortBranch(branch: string | undefined): string | undefined {
  * what the person has to do about it. A shared list with dividers, not a card per
  * agent. Rows answer "who is doing what, and does it need me" without opening a session.
  */
-export function CrewRail({ orchestrator }: { orchestrator: WorkspaceSession }) {
+export function CrewRail({ active = true, orchestrator }: { active?: boolean; orchestrator: WorkspaceSession }) {
 	const { t } = useTranslation();
 	const { model, now } = useCrew(orchestrator, true);
 	const room = useControlRoom(orchestrator);
@@ -94,7 +94,7 @@ export function CrewRail({ orchestrator }: { orchestrator: WorkspaceSession }) {
 							>
 								<ul className="flex flex-col divide-y divide-border">
 									{group.rows.map((row) => (
-										<CrewRowView key={row.session.id} now={now.getTime()} orchestrator={orchestrator} room={room} row={row} />
+										<CrewRowView active={active} key={row.session.id} now={now.getTime()} orchestrator={orchestrator} room={room} row={row} />
 									))}
 								</ul>
 							</CrewGroup>
@@ -147,17 +147,19 @@ function CrewGroup({
 }
 
 type CrewRowProps = {
+	/** The rail is on screen. A hidden rail stays mounted, so it must not keep polling workers. */
+	active: boolean;
 	now: number;
 	orchestrator: WorkspaceSession;
 	room: ReturnType<typeof useControlRoom>;
 	row: CrewRow;
 };
 
-function CrewRowView({ now, orchestrator, room, row }: CrewRowProps) {
+function CrewRowView({ active, now, orchestrator, room, row }: CrewRowProps) {
 	const { t } = useTranslation();
 	const navigate = useNavigate();
 	const { session } = row;
-	const watched = row.group === "needsYou" || row.group === "working";
+	const watched = active && (row.group === "needsYou" || row.group === "working");
 	const conversation = useCrewConversation(session, watched);
 	const progress = planProgress(conversation?.plan);
 	const step = progress && !progress.allDone ? conversation?.plan?.steps[progress.activeIndex] : undefined;
