@@ -471,14 +471,14 @@ func inlineJSON(v any) string {
 	return strings.TrimSpace(buf.String())
 }
 
-// capOneLine collapses whitespace and keeps at most max characters.
-func capOneLine(text string, max int) (string, bool) {
+// capOneLine collapses whitespace and keeps at most limit characters.
+func capOneLine(text string, limit int) (string, bool) {
 	line := oneLine(text)
 	runes := []rune(line)
-	if len(runes) <= max {
+	if len(runes) <= limit {
 		return line, false
 	}
-	return string(runes[:max]) + "…", true
+	return string(runes[:limit]) + "…", true
 }
 
 func writeApprovalsList(w io.Writer, id string, pending []pendingRequest) error {
