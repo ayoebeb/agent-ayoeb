@@ -14,7 +14,7 @@ import { ChatImage } from "./ChatImage";
 import { useSentAttachmentPreview } from "../../lib/sent-attachment-previews";
 import { CloudMessageAttachments } from "./CloudMessageAttachments";
 import { splitCloudAttachmentReferences } from "../../lib/cloud-attachments";
-import { createContext, Fragment, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { createContext, Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { agentModelsQueryOptions } from "../../hooks/useAgentModelsQuery";
@@ -141,6 +141,7 @@ import { ConversationBranchNavigator } from "./ConversationBranchNavigator";
 import { ConversationContentItems } from "./ConversationContentItems";
 import { AttachmentStrip, StagedAttachmentItems } from "./StagedAttachmentItems";
 import { UsageLimitMarker, UsageLimitNotice } from "./UsageLimitNotice";
+import { useInStepSurface } from "./step-surface";
 import {
 	ACTIVITY_SUMMARY_BUTTON_CLASS,
 	commandBinaryLabel,
@@ -945,26 +946,68 @@ export function formatTime(iso: string): string {
 	return Number.isNaN(parsed.getTime()) ? "" : timeFormatter.format(parsed);
 }
 
+/** Whole calendar days between an instant and now, in the reader's time zone. */
+function calendarDaysAgo(parsed: Date, now: Date): number {
+	const day = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+	return Math.round((today - day) / 86_400_000);
+}
+
 function formatMessageTimestamp(iso: string, now = new Date()): string {
 	const parsed = new Date(iso);
 	if (Number.isNaN(parsed.getTime())) return "";
 
-	const messageDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
-	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-	const daysAgo = Math.round((today - messageDay) / 86_400_000);
+	const daysAgo = calendarDaysAgo(parsed, now);
 	if (daysAgo === 0) return timeFormatter.format(parsed);
 	if (daysAgo === 1) return `Yesterday · ${timeFormatter.format(parsed)}`;
 	return dateFormatter.format(parsed);
+}
+
+/** The calendar day an instant falls on in the reader's time zone, or "" if it cannot be read. */
+export function calendarDayKey(iso: string): string {
+	const parsed = new Date(iso);
+	return Number.isNaN(parsed.getTime()) ? "" : `${parsed.getFullYear()}-${parsed.getMonth()}-${parsed.getDate()}`;
+}
+
+/** "Today", "Yesterday" or the date: the words on the line that starts a new day. */
+export function formatDayLabel(iso: string, now = new Date()): string {
+	const parsed = new Date(iso);
+	if (Number.isNaN(parsed.getTime())) return "";
+	const daysAgo = calendarDaysAgo(parsed, now);
+	if (daysAgo === 0) return "Today";
+	if (daysAgo === 1) return "Yesterday";
+	return dateFormatter.format(parsed);
+}
+
+/**
+ * A hairline and the day, between two turns that began on different days. A chat that
+ * runs for days has no other way to say that the reply under it came after a night's
+ * gap, and message times show only on hover.
+ */
+export function DaySeparator({ createdAt }: { createdAt: string }) {
+	const label = formatDayLabel(createdAt);
+	if (!label) return null;
+	return (
+		<div role="separator" aria-label={label} className="flex select-none items-center gap-3 pb-4 pt-5 text-caption text-muted-foreground/75">
+			<span aria-hidden="true" className="h-px flex-1 bg-border/60" />
+			<span aria-hidden="true">{label}</span>
+			<span aria-hidden="true" className="h-px flex-1 bg-border/60" />
+		</div>
+	);
 }
 
 /* -------------------------------------------------------------------------- */
 /* messages                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** The user's bubble. A queued one reads as not-yet-sent rather than as sent-and-ignored. */
+/**
+ * The user's bubble. A queued one reads as not-yet-sent rather than as sent-and-ignored.
+ * The bottom-right corner is nearly square so the bubble reads as the person's own side
+ * of the conversation; every other corner stays at the largest routine radius.
+ */
 export function humanBubbleClass(queued?: boolean): string {
 	return cn(
-		"cursor-chat-human-message w-fit max-w-[min(78%,560px)] rounded-[10px] px-3 py-2.5 text-sm leading-[1.55]",
+		"cursor-chat-human-message w-fit max-w-[min(78%,560px)] rounded-lg rounded-br-xs px-3 py-2.5 text-sm leading-[1.55]",
 		queued ? "border border-dashed border-border-strong bg-transparent text-muted-foreground" : "bg-raised text-foreground",
 	);
 }
@@ -1390,6 +1433,9 @@ export function reconnectCopy(activity: ConversationActivity): { label: string; 
 	return { label: `Reconnecting… ${match[1]}/${match[2]}`, detail: text ?? (rest || undefined) };
 }
 
+/** How long the agent must be silent before the live row says so. */
+const LIVE_QUIET_AFTER_MS = 30_000;
+
 const LIVE_RECONNECT_CHIP =
 	"inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-surface px-1.5 py-px text-xs tabular-nums text-muted-foreground";
 
@@ -1402,10 +1448,15 @@ const LIVE_RECONNECT_CHIP =
  * when the turn settles this row fades out where it is and "Worked for" opens at the
  * top of the turn, so nothing appears to travel between the two.
  */
-export function LiveResponseStatus({ entranceKey, startedAt, startupLabel, failed = false, task, step, reconnect, children }: {
+export function LiveResponseStatus({ entranceKey, startedAt, lastActivityAt, startupLabel, failed = false, task, step, reconnect, children }: {
 	/** Names this row across remounts (windowing), so its label's entrance plays once. */
 	entranceKey?: string;
 	startedAt?: string;
+	/**
+	 * When the daemon last wrote anything for this turn. Once the agent has been quiet
+	 * for a while the row says how long, so a stalled step reads differently from a slow one.
+	 */
+	lastActivityAt?: string;
 	/** Replaces the timer while the session is still being set up. */
 	startupLabel?: string;
 	failed?: boolean;
@@ -1441,6 +1492,11 @@ export function LiveResponseStatus({ entranceKey, startedAt, startupLabel, faile
 		return () => window.clearInterval(timer);
 	}, []);
 	const elapsedMs = Math.max(0, now - started);
+	const lastActivity = lastActivityAt ? Date.parse(lastActivityAt) : Number.NaN;
+	const quietMs = Number.isFinite(lastActivity) ? now - lastActivity : 0;
+	// Said only while the row is showing the turn's own clock: not during setup, a provider
+	// retry (which already explains the silence) or a failure.
+	const showQuiet = quietMs >= LIVE_QUIET_AFTER_MS && !startupLabel && !reconnect && !failed;
 	const label = startupLabel ?? reconnect?.label ?? task;
 	// The provider re-saves its retry on every attempt, and the step label changes
 	// with every tool call. Keyed by its text the label would remount, and replay its
@@ -1492,6 +1548,16 @@ export function LiveResponseStatus({ entranceKey, startedAt, startupLabel, faile
 						{formatDuration(elapsedMs)}
 					</span>
 				)}
+					{showQuiet ? (
+						<>
+							<span aria-hidden="true" className="shrink-0 text-muted-foreground/50">
+								·
+							</span>
+							<span className="shrink-0 tabular-nums text-muted-foreground/60" data-testid="live-working-quiet">
+								last activity {formatDuration(quietMs)} ago
+							</span>
+						</>
+					) : null}
 			</span>
 			{expandable ? (
 				<ChevronRight
@@ -1780,6 +1846,17 @@ function GenericActivityRow({ activity }: { activity: ConversationActivity }) {
 	const noticeLabel = retry?.label.startsWith("Reconnecting…") ? retry.label : undefined;
 	const noticeDetail = noticeLabel ? retry?.detail : undefined;
 	const singleEdit = activity.activityKind === "file_change" && files.length === 1 ? files[0] : undefined;
+		// A row of an open step list says what ran and how long it took: the command line next to
+		// the verb (a step with a target, like "Read README.md", already names what it touched),
+		// and the time once it was long enough to matter. A lone step keeps its single calm line.
+		const inSurface = useInStepSurface();
+		const stepCommand = inSurface && activity.activityKind === "command" && !path
+			? activity.detail?.command?.trim().split("\n")[0]
+			: undefined;
+		const stepDuration = inSurface && activity.activityKind === "command" && activity.status === "completed"
+			&& typeof activity.detail?.durationMs === "number" && activity.detail.durationMs >= 1000
+			? formatDuration(activity.detail.durationMs)
+			: undefined;
 
 	return (
 		<div
@@ -1867,7 +1944,21 @@ function GenericActivityRow({ activity }: { activity: ConversationActivity }) {
 						<ActivityTitle text={noticeLabel ?? label} />
 					</strong>
 				)}
-				{noticeDetail ? (
+					{inSurface && compactSummary ? (
+						<>
+							{stepCommand ? (
+								<span className="min-w-0 flex-1 truncate font-mono text-caption text-foreground/65" title={stepCommand}>
+									{stepCommand}
+								</span>
+							) : (
+								<span aria-hidden="true" className="flex-1" />
+							)}
+							{stepDuration ? (
+								<span className="shrink-0 pl-2 font-mono text-micro tabular-nums text-muted-foreground/70">{stepDuration}</span>
+							) : null}
+						</>
+					) : null}
+					{noticeDetail ? (
 					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70" title={noticeDetail}>
 						{noticeDetail}
 					</span>
@@ -1954,8 +2045,8 @@ function GenericActivityBody({ activity }: { activity: ConversationActivity }) {
 			{files.length > 1 ? <FileChangeList files={files} /> : null}
 			{!isFileChange && detail?.command ? (
 				// Said explicitly rather than implied by the label: "Ran command"
-				// alone never tells the reader what ran, and the collapsed row
-				// deliberately keeps only the category.
+					// alone never tells the reader what ran. A lone collapsed row keeps only the
+					// category; the rows of an open step list name the command themselves.
 				<pre className="scrollbar-none overflow-x-auto border border-border bg-background px-2.5 py-1.5 font-mono text-caption leading-relaxed text-foreground">
 					{detail.command}
 				</pre>
@@ -2013,9 +2104,17 @@ function CommandExploreBody({ activity }: { activity: ConversationActivity }) {
 	const reason = (detail?.reason ?? detail?.text)?.trim();
 	const binary = command ? commandBinaryLabel(command) : undefined;
 	const showPrompt = Boolean(reason && reason !== command);
+	// On the open step list's own surface the body is just more of the list: no outline, no
+	// second fill, a hairline above it. Anywhere else it is the soft card it always was.
+	const flat = useInStepSurface();
 
 	return (
-		<div className="cursor-chat-explore-box mt-1 flex min-w-0 flex-col overflow-hidden rounded-lg border">
+		<div
+			className={cn(
+				"flex min-w-0 flex-col overflow-hidden",
+				flat ? "border-t border-border/50" : "cursor-chat-explore-box mt-1 rounded-lg border",
+			)}
+		>
 			{showPrompt ? (
 				<div className="flex min-w-0 items-start gap-2 border-b border-border/60 px-3 py-2">
 					<span
@@ -2040,7 +2139,9 @@ function CommandExploreBody({ activity }: { activity: ConversationActivity }) {
 			{command ? (
 				<pre
 					className={cn(
-						"cursor-chat-explore-command overflow-x-auto px-3 py-2 font-mono text-caption leading-relaxed text-foreground/85",
+						flat
+							? "scrollbar-none overflow-x-auto px-3 py-2 font-mono text-caption leading-relaxed text-foreground/85"
+							: "cursor-chat-explore-command overflow-x-auto px-3 py-2 font-mono text-caption leading-relaxed text-foreground/85",
 						(detail?.output || detail?.terminalInput) && "border-b border-border/60",
 					)}
 				>
@@ -2093,6 +2194,9 @@ function TerminalInput({ text, truncated }: { text: string; truncated?: boolean 
 		</div>
 	);
 }
+
+/** Past this many lines an output folds to its newest ones, behind "Show all". */
+const OUTPUT_CLAMP_LINES = 12;
 
 /**
  * A command's output, with an honest account of what it is.
@@ -2150,23 +2254,40 @@ function CommandOutput({
 		return tail.split("\n").slice(-400).join("\n");
 	}, [output]);
 	const streaming = activity.status === "running";
+	const [showAll, setShowAll] = useState(false);
+	const lineCount = useMemo(() => preview.replace(/\n$/, "").split("\n").length, [preview]);
+	// A long output shows its newest lines, which is where a build or a test run says how it
+	// went, and fades above them; "Show all" opens the rest.
+	const clamped = lineCount > OUTPUT_CLAMP_LINES && !showAll;
+
+	// Before paint, so a clamped output never shows its first lines for a frame.
+	useLayoutEffect(() => {
+		const node = pre.current;
+		if (node && clamped) node.scrollTop = node.scrollHeight;
+	}, [output, clamped]);
 
 	useEffect(() => {
 		const node = pre.current;
-		if (!node || !streaming) return;
+		if (!node || !streaming || clamped) return;
 		// Within a line of the bottom counts as "following along". Anything further
 		// up is a deliberate scroll and is left alone.
 		const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
 		if (atBottom) node.scrollTop = node.scrollHeight;
-	}, [output, streaming]);
+	}, [output, streaming, clamped]);
 
 	return (
 		<>
 			<pre
 				ref={pre}
 				aria-live={streaming ? "polite" : undefined}
+				// The existing edge fade: a mask, so it holds in every theme. It is set by hand here
+				// because nothing scrolls while the output is folded.
+				data-fade-start={clamped ? "" : undefined}
+				data-fade-instant={clamped ? "" : undefined}
 				className={cn(
-					"scrollbar-none max-h-64 overflow-auto font-mono leading-relaxed text-muted-foreground",
+					"scrollbar-none font-mono leading-relaxed text-muted-foreground",
+					// Twelve lines of the output's own line height, plus the vertical padding.
+					clamped ? "edge-fade max-h-[calc(19.5em+1rem)] overflow-hidden" : showAll ? "max-h-[28rem] overflow-auto" : "max-h-64 overflow-auto",
 					embedded
 						? "cursor-chat-explore-output px-3 py-2 text-caption"
 						: "border border-border bg-background px-2.5 py-2 text-caption",
@@ -2178,6 +2299,16 @@ function CommandOutput({
 				<p className="px-2.5 py-1 text-xs text-muted-foreground">
 					Showing the end of this large output.
 				</p>
+			) : null}
+			{lineCount > OUTPUT_CLAMP_LINES ? (
+				<button
+					type="button"
+					aria-expanded={showAll}
+					onClick={() => setShowAll((current) => !current)}
+					className="self-start px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+				>
+					{showAll ? "Show fewer lines" : `Show all ${lineCount} lines`}
+				</button>
 			) : null}
 			{cutBytes !== undefined && wholeOutput === undefined && sessionId ? (
 				<button
@@ -2309,8 +2440,8 @@ function ActivityState({
 		);
 	}
 	// Everything else settled fine, which is the boring majority. A chevron on
-	// hover is the whole affordance; a duration or timestamp on every row builds a
-	// column of numbers nobody reads.
+	// hover is the whole affordance here. A duration appears only on the rows of an open
+	// step list, and only from one second up, so it is never a column of 0s.
 	if (hasBody && showDisclosure) {
 		return (
 			<ChevronRight
@@ -3865,7 +3996,7 @@ export function TurnChangedFiles({
 		<div className="overflow-hidden rounded-lg bg-surface">
 			<div className="flex items-center gap-2 px-3 py-2">
 				<span className="shrink-0 text-xs text-muted-foreground">
-					{diff.files.length === 1 ? "1 File Changed" : `${diff.files.length} Files Changed`}
+					{diff.files.length === 1 ? "1 file changed" : `${diff.files.length} files changed`}
 				</span>
 				{live ? (
 					<Loader2

@@ -27,6 +27,7 @@ import {
 	useConversationCommands,
 	useConversationConfigOptions,
 	useConversationSkills,
+	mergeConversationPages,
 	toSnapshot,
 } from "./useConversation";
 import { workspaceQueryKey } from "./useWorkspaceQuery";
@@ -1435,6 +1436,28 @@ describe("toSnapshot", () => {
 		if (item?.kind !== "activity") throw new Error("missing input activity");
 		expect(item.inputResponse?.action).toBe(expectedAction);
 		if (expectedAction) expect(item.inputResponse?.content).toEqual(content);
+	});
+
+	it("carries when the daemon last wrote the conversation, and nothing from a daemon that predates it", () => {
+		const wire = {
+			conversationId: "c1", sessionId: "s1", harness: "claude-code", mode: "chat" as const, controller: "ready" as const,
+			latestSequence: 1, oldestSequence: 1, hasMoreBefore: false, turns: [], messages: [], activities: [], settings: {},
+			branchedFromEarlierMessage: false, continueTurnId: "", nativeForkAvailableAfterSequence: 0,
+		};
+		expect(toSnapshot({ ...wire, lastEventAt: "2026-11-16T12:01:35Z" }).lastEventAt).toBe("2026-11-16T12:01:35Z");
+		expect(toSnapshot(wire).lastEventAt).toBeUndefined();
+		expect(toSnapshot({ ...wire, lastEventAt: "" }).lastEventAt).toBeUndefined();
+	});
+
+	it("keeps the live page's last-event time when older pages are merged under it", () => {
+		const page = (sequence: number, lastEventAt?: string) => toSnapshot({
+			conversationId: "c1", sessionId: "s1", harness: "claude-code", mode: "chat", controller: "busy" as const,
+			latestSequence: 2, oldestSequence: sequence, hasMoreBefore: sequence > 1, turns: [], activities: [], settings: {},
+			branchedFromEarlierMessage: false, continueTurnId: "", nativeForkAvailableAfterSequence: 0, lastEventAt,
+			messages: [{ kind: "message", id: `m${sequence}`, turnId: "t1", sequence, revision: 0, role: "user", origin: "human", text: "hi", editAvailable: true, streaming: false, createdAt: "2026-11-16T12:00:00Z" }],
+		});
+		const merged = mergeConversationPages([page(2, "2026-11-16T12:09:00Z"), page(1, "2026-11-16T11:00:00Z")]);
+		expect(merged?.lastEventAt).toBe("2026-11-16T12:09:00Z");
 	});
 
 	it("keeps the sender's clientMessageId on a user message so its echo can be matched", () => {

@@ -699,6 +699,19 @@ export const ChatComposer = memo(function ChatComposer({
 		];
 	}, [compactUnavailable, onCompact, skills]);
 
+	/**
+	 * What `/` and `@` open, said once in the placeholder of a chat that has no message
+	 * yet, so a first-time user finds them. Each half appears only when its sigil does
+	 * something here: with no commands `/` is an ordinary character, and likewise `@`
+	 * without files. After the first message the placeholder goes back to the plain one.
+	 */
+	const sigilHint = useMemo(() => {
+		const parts: string[] = [];
+		if (slashCommands.length > 0) parts.push("/ for commands");
+		if (filePaths.length > 0 || onFileQuery) parts.push("@ for files");
+		return parts.join(", ");
+	}, [slashCommands, filePaths, onFileQuery]);
+
 	const suggestionsFor = useCallback((currentTrigger?: ComposerTrigger): Suggestion[] => {
 		if (!currentTrigger || currentTrigger.key === dismissedKeyRef.current) return [];
 		// An empty candidate list is the whole reason the sigil stays ordinary: with
@@ -2304,7 +2317,9 @@ export const ChatComposer = memo(function ChatComposer({
 							? "The controller is not connected"
 							: willQueue
 								? (queuePlaceholder ?? "Next message you send will be queued")
-								: emptyPlaceholder ?? "Message the agent")
+								: emptyPlaceholder
+									? (sigilHint ? `${emptyPlaceholder} · ${sigilHint}` : emptyPlaceholder)
+									: "Message the agent")
 					}
 					menuOpen={menuOpen}
 					menuId={menuId}
