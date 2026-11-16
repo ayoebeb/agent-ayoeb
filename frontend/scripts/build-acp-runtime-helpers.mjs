@@ -436,24 +436,27 @@ export function patchClaudeSteerSettlement(adapterPath) {
  * claude-agent-acp 0.70 answers "Always Allow" with the rule Claude Code itself
  * suggests, and for two common shapes that rule is a single exact call:
  *
- * - A command that starts with a flag (`node -e "..."`, `python -c "..."`,
- *   `curl -s URL`, `npx --no-install pkg`) gets the whole command line, so the
- *   next one with different code or a different URL asks again.
+ * - An interpreter run that starts with a flag or names a script (`node -e
+ *   "..."`, `python -c "..."`, `python script.py`) gets the whole command line,
+ *   so the next one with different code or arguments asks again.
  * - An MCP tool gets only that tool, so every sibling tool of the same server
  *   asks again.
  *
  * Commands with a subcommand (`git add *`, `npm run *`) already get a class
  * rule, and file edits switch the session to accept-edits; both are left alone.
  *
- * For the two shapes above AO offers named choices instead. `allow_always`
- * (what `ao session approvals resolve --decision allow_always` sends) becomes
- * the command class (`node -e *`); the exact rule stays as
- * `allow_always_exact`. An MCP tool keeps `allow_always` for itself and gains
- * `allow_always_server` for `mcp__<server>`, a deliberate opt-in because a
- * server's tools differ in risk. Every rule keeps the destination Claude Code
- * chose (the session's own `.claude/settings.local.json`), and the option
- * names say what is remembered. Setting AO_CLAUDE_EXACT_ALWAYS_ALLOW=1 in the
- * adapter's environment restores the stock behaviour.
+ * For the two shapes above AO adds an explicit, named choice and changes no
+ * existing id. `allow_always` (what `ao session approvals resolve --decision
+ * allow_always` sends) stays Claude Code's own narrow rule. An interpreter run
+ * gains `allow_always_class` for the command kind (`node -e *`), offered only
+ * for a short allowlist of interpreters: a program that deletes, moves data or
+ * runs other commands (`rm -rf`, `git --no-pager`, `chmod -R`, `curl`, `npx`,
+ * shells) never gets a wildcard from AO. An MCP tool gains
+ * `allow_always_server` for `mcp__<server>`, because a server's tools differ in
+ * risk. Every rule keeps the destination Claude Code chose (the session's own
+ * `.claude/settings.local.json`), and the option names say what is remembered.
+ * Setting AO_CLAUDE_EXACT_ALWAYS_ALLOW=1 in the adapter's environment removes
+ * the added choices.
  *
  * The anchors are a deliberate upgrade tripwire: if upstream changes this code,
  * packaging fails instead of silently going back to asking again.
@@ -524,25 +527,26 @@ export function patchClaudeAlwaysAllowScope(adapterPath) {
 	return true;
 }
 
-const CLAUDE_ALWAYS_ALLOW_MARKER = "// AO: widen \"Always Allow\" where Claude Code's own rule is one exact call.";
+const CLAUDE_ALWAYS_ALLOW_MARKER = "// AO: add always-allow choices where Claude Code's own rule is one exact call.";
 
 // Injected into the adapter as written, so it must be plain self-contained
 // JavaScript. It avoids backticks and ${} because this is a template literal.
-const CLAUDE_ALWAYS_ALLOW_HELPERS = String.raw`// AO: widen "Always Allow" where Claude Code's own rule is one exact call.
-// Programs whose arguments are themselves a command line. A wildcard after them
-// would approve whatever command follows, so they keep Claude Code's exact rule.
-const AO_UNWIDENED_PROGRAMS = new Set([
-    "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "cmd", "powershell", "pwsh", "wsl",
-    "env", "sudo", "doas", "su", "runas", "xargs", "eval", "exec", "nohup", "nice", "time", "timeout",
-    "stdbuf", "command", "builtin", "watch", "ssh", "start",
-]);
+const CLAUDE_ALWAYS_ALLOW_HELPERS = String.raw`// AO: add always-allow choices where Claude Code's own rule is one exact call.
+// The only programs AO offers a command-kind choice for: interpreters and a test
+// runner, where "this kind of run" (node -e, python script.py) is what a person
+// means. Anything else keeps Claude Code's exact rule and gets no wildcard from
+// AO: a program that deletes or moves data (rm, mv, chmod, git), reaches the
+// network (curl, wget, ssh), fetches and runs packages (npx) or runs another
+// command line (shells, env, sudo, xargs) must never be a standing "any
+// arguments" grant that a worker can pick by sending allow_always.
+const AO_CLASS_PROGRAMS = new Set(["node", "python", "python3", "py", "pytest"]);
 // Shell syntax that makes a command more than one plain invocation, plus the
 // characters that would make the quote scan below unreliable.
 const AO_SHELL_SYNTAX = ";&|<>(){}$\\" + String.fromCharCode(96, 10, 13);
 // The command without its varying arguments, for one plain invocation: the
 // program, its leading options, and a script file that follows them. Undefined
-// when Claude Code's rule should stand: a compound command, a program that runs
-// other commands, or a command that has no option or script to hold on to.
+// when Claude Code's rule should stand: a compound command, a program outside
+// the allowlist above, or a command that has no option or script to hold on to.
 function aoBashCommandClass(content) {
     if (typeof content !== "string") return undefined;
     const text = content.trim();
@@ -562,7 +566,7 @@ function aoBashCommandClass(content) {
     }
     if (quote) return undefined;
     const words = text.split(/\s+/);
-    if (!/^[A-Za-z][A-Za-z0-9._+-]*$/.test(words[0]) || AO_UNWIDENED_PROGRAMS.has(words[0].toLowerCase())) return undefined;
+    if (!/^[A-Za-z][A-Za-z0-9._+-]*$/.test(words[0]) || !AO_CLASS_PROGRAMS.has(words[0].toLowerCase().replace(/\.exe$/, ""))) return undefined;
     let end = 1;
     while (end < words.length && /^--?[A-Za-z][A-Za-z0-9-]*$/.test(words[end])) end++;
     const options = end > 1;
@@ -575,9 +579,10 @@ function aoBashCommandClass(content) {
 function aoAlwaysAllowLabel(text) {
     return text.length > 48 ? text.slice(0, 45) + "..." : text;
 }
-// The "always" choices to offer for a permission request. The first one keeps
-// the id "allow_always"; updates is what Claude Code applies when it is picked,
-// and undefined keeps claude-agent-acp's own fallback for that choice.
+// The "always" choices to offer for a permission request. The first one is
+// always "allow_always" with Claude Code's own rule, so an existing id never
+// means more than it did. updates is what Claude Code applies when a choice is
+// picked, and undefined keeps claude-agent-acp's own fallback for that choice.
 function aoAlwaysAllowOptions(toolName, suggestions) {
     const stock = [{ optionId: "allow_always", name: "Always Allow", updates: suggestions }];
     if (process.env.AO_CLAUDE_EXACT_ALWAYS_ALLOW === "1") return stock;
@@ -611,8 +616,8 @@ function aoAlwaysAllowOptions(toolName, suggestions) {
     });
     if (classes.length === 0) return stock;
     return [
-        { optionId: "allow_always", name: "Always allow " + String.fromCharCode(34) + aoAlwaysAllowLabel(classes.join(", ")) + " ..." + String.fromCharCode(34) + " in this workspace", updates: widened },
-        { optionId: "allow_always_exact", name: "Always allow only this exact command", updates: suggestions },
+        { optionId: "allow_always", name: "Always allow only this exact command", updates: suggestions },
+        { optionId: "allow_always_class", name: "Always allow " + String.fromCharCode(34) + aoAlwaysAllowLabel(classes.join(", ")) + " ..." + String.fromCharCode(34) + " in this workspace", updates: widened },
     ];
 }
 `;

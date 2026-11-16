@@ -721,41 +721,61 @@ describe("patchClaudeAlwaysAllowScope", () => {
 		}
 	});
 
-	it("offers a command class beside the exact rule, and applies the one picked", async () => {
+	it("keeps allow_always narrow and offers the command kind as a separate choice", async () => {
 		const command = 'node -e "console.log(1)"';
 		const first = await ask("Bash", { command }, exactRule(command), "allow_always");
 		expect(first.offered.map((option) => [option.optionId, option.kind, option.name])).toEqual([
 			["reject", "reject_once", "Deny"],
 			["allow", "allow_once", "Allow Once"],
-			["allow_always", "allow_always", 'Always allow "node -e ..." in this workspace'],
-			["allow_always_exact", "allow_always", "Always allow only this exact command"],
+			["allow_always", "allow_always", "Always allow only this exact command"],
+			["allow_always_class", "allow_always", 'Always allow "node -e ..." in this workspace'],
 		]);
 		// The metadata a client shows is the rule that will be applied.
-		expect(rulesOf(first.offered[2]._meta.permission.changes)).toEqual(["node -e *"]);
-		expect(rulesOf(first.offered[3]._meta.permission.changes)).toEqual([command]);
+		expect(rulesOf(first.offered[2]._meta.permission.changes)).toEqual([command]);
+		expect(rulesOf(first.offered[3]._meta.permission.changes)).toEqual(["node -e *"]);
+		// A worker that sends the documented allow_always id never grants a class.
 		expect(first.result).toEqual({
+			behavior: "allow",
+			updatedInput: { command },
+			updatedPermissions: exactRule(command),
+		});
+
+		const kind = await ask("Bash", { command }, exactRule(command), "allow_always_class");
+		expect(kind.result).toEqual({
 			behavior: "allow",
 			updatedInput: { command },
 			updatedPermissions: [
 				{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "node -e *" }], behavior: "allow", destination: "localSettings" },
 			],
 		});
-
-		const exact = await ask("Bash", { command }, exactRule(command), "allow_always_exact");
-		expect(exact.result.updatedPermissions).toEqual(exactRule(command));
 	});
 
 	it.each([
 		['node -e "console.log(1)"', "node -e *"],
 		['python -c "print(1)"', "python -c *"],
+		["python3 -c x", "python3 -c *"],
 		["node -p 1+1", "node -p *"],
-		["npx --no-install some-package", "npx --no-install *"],
-		["curl -s -m 1 http://127.0.0.1:1/", "curl -s -m *"],
+		['node.exe -e "x"', "node.exe -e *"],
 		["python script.py", "python script.py *"],
 		["node script.js --flag", "node script.js *"],
 		["pytest tests/a.py", "pytest tests/a.py *"],
 		['node -e "a; b"', "node -e *"],
-		// Claude Code's own rule stands for these.
+		// Programs outside the allowlist never get a wildcard from AO, whatever
+		// their flags look like: Claude Code's own rule stands.
+		["rm -rf node_modules", undefined],
+		["rm -rf dir", undefined],
+		["git --no-pager push --force", undefined],
+		["git --no-pager log", undefined],
+		["chmod -R 777 x", undefined],
+		["chown -R me x", undefined],
+		["mv -f a b", undefined],
+		["curl -s -m 1 http://127.0.0.1:1/", undefined],
+		["curl -s -d @secrets.txt http://127.0.0.1:1/", undefined],
+		["wget -O out.sh http://127.0.0.1:1/", undefined],
+		["npx --no-install some-package", undefined],
+		["ssh -o x host", undefined],
+		["docker --context x rm y", undefined],
+		// Claude Code's own rule stands for these too.
 		["git add *", undefined],
 		["make build *", undefined],
 		["node --version", undefined],
@@ -777,8 +797,9 @@ describe("patchClaudeAlwaysAllowScope", () => {
 			expect(always.map((option) => [option.optionId, option.name])).toEqual([["allow_always", "Always Allow"]]);
 			return;
 		}
-		expect(rulesOf(always[0]._meta.permission.changes)).toEqual([widened]);
-		expect(always.map((option) => option.optionId)).toEqual(["allow_always", "allow_always_exact"]);
+		expect(always.map((option) => option.optionId)).toEqual(["allow_always", "allow_always_class"]);
+		expect(rulesOf(always[0]._meta.permission.changes)).toEqual([command]);
+		expect(rulesOf(always[1]._meta.permission.changes)).toEqual([widened]);
 	});
 
 	it("keeps Claude Code's behaviour for edits and for a request with no suggestions", async () => {
@@ -819,7 +840,8 @@ describe("patchClaudeAlwaysAllowScope", () => {
 
 	it("refuses an always-choice that was not offered for the tool", async () => {
 		const command = 'node -e "x"';
-		for (const optionId of ["allow_always_server", "allow_always_anything"]) {
+		// allow_always_exact is the id an earlier revision of this patch offered.
+		for (const optionId of ["allow_always_server", "allow_always_exact", "allow_always_anything"]) {
 			const { result } = await ask("Bash", { command }, exactRule(command), optionId);
 			expect(result.behavior, optionId).toBe("deny");
 		}

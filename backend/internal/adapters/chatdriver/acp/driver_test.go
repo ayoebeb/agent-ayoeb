@@ -6138,17 +6138,17 @@ func TestACPDriverPassesTheChosenAlwaysAllowOptionToTheProvider(t *testing.T) {
 	options := []acpsdk.PermissionOption{
 		{OptionId: "reject", Name: "Deny", Kind: acpsdk.PermissionOptionKindRejectOnce},
 		{OptionId: "allow", Name: "Allow Once", Kind: acpsdk.PermissionOptionKindAllowOnce},
-		{OptionId: "allow_always", Name: `Always allow "node -e ..." in this workspace`, Kind: acpsdk.PermissionOptionKindAllowAlways},
-		{OptionId: "allow_always_exact", Name: "Always allow only this exact command", Kind: acpsdk.PermissionOptionKindAllowAlways},
+		{OptionId: "allow_always", Name: "Always allow only this exact command", Kind: acpsdk.PermissionOptionKindAllowAlways},
+		{OptionId: "allow_always_class", Name: `Always allow "node -e ..." in this workspace`, Kind: acpsdk.PermissionOptionKindAllowAlways},
 	}
 	wantDecisions := []ports.ChatDecisionOption{
 		{ID: "reject", Label: "Deny", Kind: ports.ChatDecisionRejectOnce},
 		{ID: "allow", Label: "Allow Once", Kind: ports.ChatDecisionAllowOnce},
-		{ID: "allow_always", Label: `Always allow "node -e ..." in this workspace`, Kind: ports.ChatDecisionAllowAlways},
-		{ID: "allow_always_exact", Label: "Always allow only this exact command", Kind: ports.ChatDecisionAllowAlways},
+		{ID: "allow_always", Label: "Always allow only this exact command", Kind: ports.ChatDecisionAllowAlways},
+		{ID: "allow_always_class", Label: `Always allow "node -e ..." in this workspace`, Kind: ports.ChatDecisionAllowAlways},
 	}
 
-	for _, pick := range []string{"allow_always", "allow_always_exact", "allow", "reject"} {
+	for _, pick := range []string{"allow_always", "allow_always_class", "allow", "reject"} {
 		t.Run(pick, func(t *testing.T) {
 			agent := &fakeAgent{}
 			picked := make(chan string, 1)

@@ -2476,8 +2476,8 @@ describe("ChatWorkspace timeline", () => {
 			decisions: [
 				{ id: "reject", label: "Deny", kind: "reject_once" },
 				{ id: "allow", label: "Allow Once", kind: "allow_once" },
-				{ id: "allow_always", label: 'Always allow "node -e ..." in this workspace', kind: "allow_always" },
-				{ id: "allow_always_exact", label: "Always allow only this exact command", kind: "allow_always" },
+				{ id: "allow_always", label: "Always allow only this exact command", kind: "allow_always" },
+				{ id: "allow_always_class", label: 'Always allow "node -e ..." in this workspace', kind: "allow_always" },
 			],
 			detail: { command: 'node -e "console.log(1)"' },
 			createdAt: "2026-08-08T00:00:00Z",
@@ -2491,11 +2491,11 @@ describe("ChatWorkspace timeline", () => {
 		// can tell what each one remembers instead of two identical generic lines.
 		expect(screen.queryByRole("menuitem", { name: "Always allow this command" })).not.toBeInTheDocument();
 		await user.click(screen.getByRole("menuitem", { name: "Always allow only this exact command" }));
-		expect(onDecide).toHaveBeenLastCalledWith("always-request", "allow_always_exact");
+		expect(onDecide).toHaveBeenLastCalledWith("always-request", "allow_always");
 
 		await user.click(within(approval).getByRole("button", { name: "More approval options" }));
 		await user.click(screen.getByRole("menuitem", { name: 'Always allow "node -e ..." in this workspace' }));
-		expect(onDecide).toHaveBeenLastCalledWith("always-request", "allow_always");
+		expect(onDecide).toHaveBeenLastCalledWith("always-request", "allow_always_class");
 	});
 
 	it("requires an explicit click for decisions without a semantic kind", () => {
