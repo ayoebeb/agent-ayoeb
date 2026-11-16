@@ -12267,3 +12267,99 @@ func (f *fakeStore) SetSessionImportWorkspace(_ context.Context, id domain.Sessi
 	f.sessions[id] = rec
 	return true, nil
 }
+
+// TestSpawnOrchestrator_CommunicationStyleFollowsProjectConfig covers the
+// built-in communication style: every project's orchestrator gets it unless that
+// project sets orchestratorStyleDisabled, and one project's choice never leaks
+// into another's.
+func TestSpawnOrchestrator_CommunicationStyleFollowsProjectConfig(t *testing.T) {
+	cases := []struct {
+		name      string
+		projectID domain.ProjectID
+		disabled  bool
+		wantStyle bool
+	}{
+		{name: "default project gets the style", projectID: "mer", wantStyle: true},
+		{name: "another project gets the style too", projectID: "venus", wantStyle: true},
+		{name: "project opt-out removes it", projectID: "mer", disabled: true, wantStyle: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testRoleAgents()
+			cfg.OrchestratorStyleDisabled = tc.disabled
+			st := newFakeStore()
+			st.projects[string(tc.projectID)] = domain.ProjectRecord{ID: string(tc.projectID), Config: cfg}
+			agent := &recordingAgent{}
+			lookPath := func(string) (string, error) { return "/bin/true", nil }
+			m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+
+			if _, _, _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: tc.projectID, Kind: domain.KindOrchestrator}); err != nil {
+				t.Fatal(err)
+			}
+
+			systemPrompt := agent.lastLaunch.SystemPrompt
+			if got := strings.Contains(systemPrompt, communicationStyleHeading); got != tc.wantStyle {
+				t.Fatalf("communication style present = %v, want %v:\n%s", got, tc.wantStyle, systemPrompt)
+			}
+			// The plain-language rule travels with the style: both present or both gone.
+			if got := strings.Contains(systemPrompt, plainWordsMarker); got != tc.wantStyle {
+				t.Fatalf("plain-language rule present = %v, want %v:\n%s", got, tc.wantStyle, systemPrompt)
+			}
+			if strings.Contains(agent.lastLaunch.Prompt, styleMarker) || strings.Contains(agent.lastLaunch.Prompt, plainWordsMarker) {
+				t.Fatalf("the style is standing guidance and must not be in the user prompt:\n%s", agent.lastLaunch.Prompt)
+			}
+		})
+	}
+}
+
+// TestSystemPrompt_CommunicationStyleIsOrchestratorOnly checks the prompt the
+// daemon recomputes on restore and interface switches: the orchestrator carries
+// the style in terminal and chat mode, workers never do, and the opt-out is read
+// from the project's stored config each time.
+func TestSystemPrompt_CommunicationStyleIsOrchestratorOnly(t *testing.T) {
+	cases := []struct {
+		name      string
+		kind      domain.SessionKind
+		chat      bool
+		disabled  bool
+		prep      func(st *fakeStore)
+		wantStyle bool
+	}{
+		{name: "orchestrator terminal", kind: domain.KindOrchestrator, wantStyle: true},
+		{name: "orchestrator chat", kind: domain.KindOrchestrator, chat: true, wantStyle: true},
+		{name: "orchestrator opted out", kind: domain.KindOrchestrator, disabled: true, wantStyle: false},
+		{name: "orchestrator chat opted out", kind: domain.KindOrchestrator, chat: true, disabled: true, wantStyle: false},
+		{name: "worker without orchestrator", kind: domain.KindWorker, wantStyle: false},
+		{name: "worker chat", kind: domain.KindWorker, chat: true, wantStyle: false},
+		{name: "worker with orchestrator", kind: domain.KindWorker, prep: func(st *fakeStore) {
+			st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator}
+		}, wantStyle: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testRoleAgents()
+			cfg.OrchestratorStyleDisabled = tc.disabled
+			st := newFakeStore()
+			st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+			if tc.prep != nil {
+				tc.prep(st)
+			}
+			lookPath := func(string) (string, error) { return "/bin/true", nil }
+			m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+
+			sp, err := m.buildSystemPrompt(ctx, tc.kind, "mer", "mer-2", "", tc.chat)
+			if err != nil {
+				t.Fatalf("buildSystemPrompt: %v", err)
+			}
+			if got := strings.Contains(sp, communicationStyleHeading); got != tc.wantStyle {
+				t.Fatalf("communication style present = %v, want %v:\n%s", got, tc.wantStyle, sp)
+			}
+			if got := strings.Contains(sp, plainWordsMarker); got != tc.wantStyle {
+				t.Fatalf("plain-language rule present = %v, want %v:\n%s", got, tc.wantStyle, sp)
+			}
+			if !tc.wantStyle && strings.Contains(sp, styleMarker) {
+				t.Fatalf("style text leaked into the prompt without its heading:\n%s", sp)
+			}
+		})
+	}
+}

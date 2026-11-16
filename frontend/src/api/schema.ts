@@ -7054,6 +7054,7 @@ export interface components {
             orchestrator?: components["schemas"]["RoleOverride"];
             orchestratorRules?: string;
             orchestratorRulesFile?: string;
+            orchestratorStyleDisabled?: boolean;
             postCreate?: string[];
             preRemove?: string[];
             reviewers?: components["schemas"]["DomainReviewerConfig"][];

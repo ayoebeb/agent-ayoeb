@@ -132,6 +132,9 @@ type projectConfig struct {
 	// of another field never silently turns it off.
 	WorkersRequestReview bool             `json:"workersRequestReview,omitempty"`
 	Reviewers            []reviewerConfig `json:"reviewers,omitempty"`
+	// OrchestratorStyleDisabled must round-trip through set-config so a CLI edit
+	// of another field never silently turns the orchestrator style back on.
+	OrchestratorStyleDisabled bool `json:"orchestratorStyleDisabled,omitempty"`
 }
 
 // setConfigRequest mirrors the daemon's SetConfigInput body for
@@ -157,6 +160,7 @@ type projectSetConfigOptions struct {
 	postCreate            []string
 	preRemove             []string
 	trackerIntake         bool
+	orchestratorStyle     bool
 	trackerRepo           string
 	trackerAssignee       string
 	reviewers             []string
@@ -304,7 +308,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 		Use:   "set-config <id>",
 		Short: "Set the per-project config",
 		Long: "Update a project's per-project config (branch, session prefix, env, " +
-			"symlinks, post-create, pre-remove, rules, agent model/permissions, role overrides, tracker intake, reviewers). The config " +
+			"symlinks, post-create, pre-remove, rules, agent model/permissions, role overrides, orchestrator style, tracker intake, reviewers). The config " +
 			"is resolved when a session spawns.\n\n" +
 			"Field flags change only the fields they name and keep the rest of the saved config; " +
 			"a repeatable flag replaces that whole list or map. Field flags refuse a degraded " +
@@ -352,6 +356,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.agentRulesFile, "agent-rules-file", "", "Repo-relative file containing worker standing instructions")
 	f.StringVar(&opts.orchestratorRules, "orchestrator-rules", "", "Project-specific standing instructions for orchestrator sessions")
 	f.StringVar(&opts.orchestratorRulesFile, "orchestrator-rules-file", "", "Repo-relative file containing orchestrator standing instructions")
+	f.BoolVar(&opts.orchestratorStyle, "orchestrator-style", true, "Built-in communication style for orchestrator sessions (on by default; --orchestrator-style=false turns it off for this project)")
 	f.StringArrayVar(&opts.env, "env", nil, "Env var KEY=VALUE forwarded into sessions (repeatable)")
 	f.StringArrayVar(&opts.symlink, "symlink", nil, "Repo-relative path to symlink into workspaces (repeatable)")
 	f.StringArrayVar(&opts.postCreate, "post-create", nil, "Command to run after workspace creation (repeatable)")
@@ -370,7 +375,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 var projectConfigFlags = []string{
 	"canonical-repo-url", "default-branch", "session-prefix", "model", "permission",
 	"worker-agent", "orchestrator-agent", "agent-rules", "agent-rules-file",
-	"orchestrator-rules", "orchestrator-rules-file", "env", "symlink", "post-create",
+	"orchestrator-rules", "orchestrator-rules-file", "orchestrator-style", "env", "symlink", "post-create",
 	"pre-remove", "tracker-intake", "tracker-repo", "tracker-assignee", "reviewer",
 }
 
@@ -422,6 +427,9 @@ func buildProjectConfig(opts projectSetConfigOptions, changed func(name string) 
 	setIfChanged("tracker-assignee", &cfg.TrackerIntake.Assignee, opts.trackerAssignee)
 	if changed("tracker-intake") {
 		cfg.TrackerIntake.Enabled = opts.trackerIntake
+	}
+	if changed("orchestrator-style") {
+		cfg.OrchestratorStyleDisabled = !opts.orchestratorStyle
 	}
 	if changed("env") {
 		cfg.Env = env

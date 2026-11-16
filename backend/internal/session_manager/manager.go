@@ -6191,6 +6191,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 			return "", err
 		}
 		cfg.OrchestratorRules = rules
+		cfg.OrchestratorStyleDisabled = project.Config.OrchestratorStyleDisabled
 	case domain.KindWorker:
 		if projectID != "" {
 			orchestratorID, ok, err := m.activeOrchestratorSessionID(ctx, projectID)

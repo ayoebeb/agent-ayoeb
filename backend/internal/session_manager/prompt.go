@@ -39,7 +39,11 @@ type systemPromptConfig struct {
 	OrchestratorSessionID string
 	ProjectRules          string
 	OrchestratorRules     string
-	AdditionalSections    []string
+	// OrchestratorStyleDisabled drops the built-in communication style from an
+	// orchestrator prompt. The zero value keeps it on. It has no effect on other
+	// roles, which never carry the style.
+	OrchestratorStyleDisabled bool
+	AdditionalSections        []string
 }
 
 // projectRulesConfig loads standing rules text plus an optional repo-relative
@@ -83,6 +87,9 @@ func buildSystemPromptText(cfg systemPromptConfig) string {
 	switch cfg.Role {
 	case sessionPromptRoleOrchestrator:
 		sections = append(sections, orchestratorSystemPrompt(cfg.Project))
+		if !cfg.OrchestratorStyleDisabled {
+			sections = append(sections, orchestratorCommunicationStylePrompt())
+		}
 		if rules := strings.TrimSpace(cfg.OrchestratorRules); rules != "" {
 			sections = append(sections, "## Project-Specific Orchestrator Rules\n"+rules)
 		}
