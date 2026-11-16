@@ -1433,8 +1433,13 @@ export function reconnectCopy(activity: ConversationActivity): { label: string; 
 	return { label: `Reconnecting… ${match[1]}/${match[2]}`, detail: text ?? (rest || undefined) };
 }
 
-/** How long the agent must be silent before the live row says so. */
-const LIVE_QUIET_AFTER_MS = 30_000;
+/**
+ * How long the agent must be silent before the live row says so. A running tool is
+ * re-announced by the provider about every 30 seconds, so a shorter wait would flash
+ * at that mark on every long command; a minute means the agent has stopped, not that
+ * it is busy.
+ */
+const LIVE_QUIET_AFTER_MS = 60_000;
 
 const LIVE_RECONNECT_CHIP =
 	"inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-surface px-1.5 py-px text-xs tabular-nums text-muted-foreground";

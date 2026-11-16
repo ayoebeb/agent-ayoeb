@@ -268,32 +268,35 @@ describe("LiveResponseStatus quiet cue", () => {
 	const quietProps = { startedAt: "2026-11-16T12:00:00Z", task: "Running npm run build" };
 	const secondsAfterStart = (seconds: number) => new Date(Date.parse("2026-11-16T12:00:00Z") + seconds * 1000);
 
-	it("stays silent while the agent is making progress", () => {
+	it("stays silent while the agent is making progress, and through a provider's 30-second heartbeat", () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(secondsAfterStart(100));
-		render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(90).toISOString()} />);
+		const view = render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(90).toISOString()} />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(41).toISOString()} />);
 		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
 	});
 
-	it("says how long the agent has been quiet once it passes 30 seconds, and keeps counting", () => {
+	it("says how long the agent has been quiet once it passes a minute, and keeps counting", () => {
 		vi.useFakeTimers();
-		vi.setSystemTime(secondsAfterStart(100));
-		render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(55).toISOString()} />);
-		expect(screen.getByTestId("live-working-quiet")).toHaveTextContent("last activity 45s ago");
+		vi.setSystemTime(secondsAfterStart(130));
+		render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(70).toISOString()} />);
+		expect(screen.getByTestId("live-working-quiet")).toHaveTextContent("last activity 1m ago");
 
 		act(() => {
-			vi.advanceTimersByTime(15_000);
+			vi.advanceTimersByTime(60_000);
 		});
-		expect(screen.getByTestId("live-working-quiet")).toHaveTextContent("last activity 1m ago");
+		expect(screen.getByTestId("live-working-quiet")).toHaveTextContent("last activity 2m ago");
 	});
 
 	it("goes away as soon as the agent writes something", () => {
 		vi.useFakeTimers();
-		vi.setSystemTime(secondsAfterStart(100));
+		vi.setSystemTime(secondsAfterStart(130));
 		const view = render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(40).toISOString()} />);
 		expect(screen.getByTestId("live-working-quiet")).toBeInTheDocument();
 
-		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(99).toISOString()} />);
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(129).toISOString()} />);
 		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
 	});
 
