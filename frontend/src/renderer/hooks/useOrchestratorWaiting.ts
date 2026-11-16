@@ -29,16 +29,12 @@ export function useOrchestratorWaiting(): { waiting: OrchestratorWaiting[] } {
 	});
 	// A failed read keeps the last answer rather than dropping a marker the user
 	// may still need; React Query holds the previous data through the error.
-	const waiting = useMemo(
-		() => queries.flatMap((query) => query.data ?? []),
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- the data identities are the dependencies
-		[queries.map((query) => query.data)],
-	);
+	const waiting = queries.flatMap((query) => query.data ?? []);
 	return { waiting };
 }
 
 /** The wait on one project's orchestrator, or undefined when it is not waiting. */
 export function useProjectOrchestratorWaiting(hostId: HostId, projectId: string): OrchestratorWaiting | undefined {
 	const { waiting } = useOrchestratorWaiting();
-	return useMemo(() => waitingForProject(waiting, hostId, projectId), [hostId, projectId, waiting]);
+	return waitingForProject(waiting, hostId, projectId);
 }
