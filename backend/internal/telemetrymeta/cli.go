@@ -181,6 +181,11 @@ var legacyActorlessUserCLICommands = map[string]struct{}{
 	"ao stop":                   {},
 	"ao version":                {},
 
+	// Their own group so the longer keys do not re-align the list above.
+	"ao session approvals":         {},
+	"ao session approvals ls":      {},
+	"ao session approvals resolve": {},
+
 	// Legacy commands observed in PostHog's current billing-period data.
 	"ao handoff":                   {},
 	"ao project orchestration get": {},

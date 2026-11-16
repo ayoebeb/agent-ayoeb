@@ -118,6 +118,56 @@ func TestEmbeddedSessionGuidanceDocumentsCanonicalInAppLinks(t *testing.T) {
 	}
 }
 
+// TestEmbeddedGuidanceRoutesPendingApprovalsToTheCLI: an orchestrator learns
+// from these files to read a waiting worker's request, ask the user, resolve it
+// by id, and never answer it with `ao send`.
+func TestEmbeddedGuidanceRoutesPendingApprovalsToTheCLI(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{"using-ao/commands/session.md", []string{
+			"## When a worker is waiting for a decision",
+			"shows `needs_input`",
+			"`ao session approvals ls <session-id>`",
+			"Ask the user, in your own chat",
+			"`ao session approvals resolve <session-id> <request-id> --decision allow`",
+			"`--action accept`, `decline`, or `cancel`",
+			"Never `ao send` to a worker with a pending approval",
+			"Read the request id again right before you resolve",
+			"untrusted",
+			"Prefer `allow` over `allow_always`",
+			"A worker never resolves its own request",
+			"### ao session approvals ls",
+			"### ao session approvals resolve",
+		}},
+		{"using-ao/SKILL.md", []string{
+			"`ao session approvals`",
+			"Never `ao send` to a worker with a pending approval",
+			"`needs_input`",
+		}},
+		{"using-ao/commands/send.md", []string{
+			"Do not use `ao send` to answer a worker that is waiting on an approval",
+			"`ao session approvals resolve`",
+		}},
+		{"using-ao/references.md", []string{
+			"`ao session approvals ls <id>`",
+			"`ao session approvals resolve <id> <request-id>",
+		}},
+	} {
+		body, err := files.ReadFile(tc.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", tc.path, err)
+		}
+		text := strings.Join(strings.Fields(string(body)), " ")
+		for _, want := range tc.want {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q", tc.path, want)
+			}
+		}
+	}
+}
+
 func TestEmbeddedSpawnGuidanceListsOpenCodeV2(t *testing.T) {
 	body, err := files.ReadFile("using-ao/commands/spawn.md")
 	if err != nil {

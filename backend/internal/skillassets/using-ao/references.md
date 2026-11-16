@@ -31,6 +31,8 @@ Natural-language-to-command mappings for common Orchestrator tasks.
 | Clean up terminated sessions | `ao session cleanup` |
 | Make a Docker container this session starts survive Orchestrator cleanup | `docker run --label ao.session=$AO_SESSION_ID --label ao.spare=true ...` |
 | See a session's details | `ao session get <id>` |
+| See what a waiting (`needs_input`) Chat worker is asking | `ao session approvals ls <id>` |
+| Answer a worker's pending approval or question, for the user | `ao session approvals resolve <id> <request-id> --decision allow\|reject` (input request: `--action accept\|decline\|cancel`) |
 | Set up a VM or headless machine so it shows up on the user's devices | Read [commands/remote-host.md](commands/remote-host.md); install over SSH, then `ao remote-host link` |
 | Open the desktop app | `ao start` |
 | Check the daemon is up | `ao status` |
