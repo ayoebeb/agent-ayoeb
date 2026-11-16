@@ -138,6 +138,8 @@ func TestEmbeddedGuidanceRoutesPendingApprovalsToTheCLI(t *testing.T) {
 			"untrusted",
 			"Prefer `allow` over `allow_always`",
 			"A worker never resolves its own request",
+			"refuses, with exit 2 and without contacting the daemon, when the target is the calling session (`AO_SESSION_ID`)",
+			"a `⏎` marks a line break in the original",
 			"### ao session approvals ls",
 			"### ao session approvals resolve",
 		}},
