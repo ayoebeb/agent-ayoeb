@@ -4872,6 +4872,403 @@ paths:
       summary: Replace a project's per-project config
       tags:
       - projects
+  /api/v1/projects/{id}/jira:
+    delete:
+      operationId: disconnectProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Remove a project's Jira connection, token and ticket links
+      tags:
+      - jira
+    get:
+      operationId: getProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraConnection'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Report whether a project is connected to Jira (never returns the token)
+      tags:
+      - jira
+    put:
+      operationId: connectProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JiraConnectRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraConnection'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Verify and store a project's Jira connection
+      tags:
+      - jira
+  /api/v1/projects/{id}/jira/board:
+    get:
+      operationId: getProjectJiraBoard
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraBoard'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: List the project's Jira tickets grouped into its board columns
+      tags:
+      - jira
+  /api/v1/projects/{id}/jira/test:
+    post:
+      operationId: testProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JiraConnectRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraTestResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Check Jira credentials, project and query without saving them
+      tags:
+      - jira
+  /api/v1/projects/{id}/jira/tickets/{issueKey}/start:
+    post:
+      operationId: startProjectJiraTicket
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Jira ticket key, for example YIA-123.
+        in: path
+        name: issueKey
+        required: true
+        schema:
+          description: Jira ticket key, for example YIA-123.
+          type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraStartResult'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Send a Jira ticket to the project's orchestrator as a new task
+      tags:
+      - jira
   /api/v1/projects/{id}/permissions:
     delete:
       operationId: forgetProjectPermissions
@@ -19388,6 +19785,205 @@ components:
       required:
       - kind
       type: object
+    JiraBoard:
+      properties:
+        accountId:
+          type: string
+        boardName:
+          type: string
+        columns:
+          items:
+            $ref: '#/components/schemas/JiraBoardColumn'
+          type: array
+        fetchedAt:
+          format: date-time
+          type: string
+        jql:
+          type: string
+        projectKey:
+          type: string
+        siteUrl:
+          type: string
+        total:
+          type: integer
+        truncated:
+          type: boolean
+      required:
+      - siteUrl
+      - jql
+      - columns
+      - total
+      - fetchedAt
+      type: object
+    JiraBoardColumn:
+      properties:
+        name:
+          type: string
+        other:
+          type: boolean
+        tickets:
+          items:
+            $ref: '#/components/schemas/JiraTicket'
+          type: array
+      required:
+      - name
+      - tickets
+      type: object
+    JiraConnectRequest:
+      properties:
+        apiToken:
+          description: 'Atlassian API token. Write-only: it is stored locally and
+            never returned. Empty keeps the stored token.'
+          maxLength: 2048
+          type: string
+        boardId:
+          description: Jira board id. Omit to use the project's first board.
+          type: integer
+        email:
+          description: Email address of the Atlassian account that owns the API token.
+          maxLength: 320
+          type: string
+        jql:
+          description: Optional JQL that chooses the tickets. Overrides the project
+            key's default query.
+          maxLength: 4096
+          type: string
+        projectKey:
+          description: Jira project key, for example YIA. Required unless jql is set.
+          maxLength: 32
+          type: string
+        siteUrl:
+          description: Jira Cloud site, for example yourcompany.atlassian.net.
+          maxLength: 512
+          type: string
+      required:
+      - siteUrl
+      - email
+      type: object
+    JiraConnection:
+      properties:
+        accountName:
+          type: string
+        boardId:
+          type: integer
+        connected:
+          type: boolean
+        connectedAt:
+          format: date-time
+          type: string
+        email:
+          type: string
+        jql:
+          type: string
+        projectKey:
+          type: string
+        siteUrl:
+          type: string
+      required:
+      - connected
+      - connectedAt
+      type: object
+    JiraStartResult:
+      properties:
+        duplicate:
+          type: boolean
+        issueKey:
+          type: string
+        orchestratorId:
+          type: string
+        spawned:
+          type: boolean
+      required:
+      - issueKey
+      - orchestratorId
+      type: object
+    JiraTestResult:
+      properties:
+        accountName:
+          type: string
+        jql:
+          type: string
+        projectName:
+          type: string
+        ticketCount:
+          type: integer
+      required:
+      - accountName
+      - jql
+      - ticketCount
+      type: object
+    JiraTicket:
+      properties:
+        acceptanceCriteria:
+          type: string
+        assignee:
+          $ref: '#/components/schemas/JiraTicketUser'
+        description:
+          type: string
+        issueType:
+          type: string
+        key:
+          type: string
+        labels:
+          items:
+            type: string
+          type: array
+        priority:
+          type: string
+        sessions:
+          items:
+            $ref: '#/components/schemas/JiraTicketSession'
+          type: array
+        status:
+          $ref: '#/components/schemas/JiraTicketStatus'
+        summary:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        url:
+          type: string
+      required:
+      - key
+      - summary
+      - url
+      - status
+      - updatedAt
+      type: object
+    JiraTicketSession:
+      properties:
+        sessionId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+      required:
+      - sessionId
+      - startedAt
+      type: object
+    JiraTicketStatus:
+      properties:
+        category:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+      required:
+      - id
+      - name
+      - category
+      type: object
+    JiraTicketUser:
+      properties:
+        accountId:
+          type: string
+        displayName:
+          type: string
+      required:
+      - accountId
+      - displayName
+      type: object
     KillReviewResponse:
       properties:
         reviewerHandleId:
@@ -24877,3 +25473,5 @@ tags:
   name: link-preview
 - description: Local GitHub personal access token storage and repository listing
   name: github
+- description: Per-project Jira Cloud connection, ticket board and start-from-ticket
+  name: jira
