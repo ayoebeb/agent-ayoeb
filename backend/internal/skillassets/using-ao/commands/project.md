@@ -150,6 +150,7 @@ ao project set-config <id> [flags]
 | `--model string` | Agent model override (e.g. `claude-opus-4-5`) | - |
 | `--orchestrator-agent string` | Harness override for orchestrator sessions | - |
 | `--orchestrator-rules string` | Project-specific standing instructions appended to orchestrator session prompts | - |
+| `--orchestrator-style` | Built-in communication style for orchestrator sessions; `--orchestrator-style=false` turns it off for this project | Enabled |
 | `--permission string` | Permission mode: `default`, `accept-edits`, `auto`, `bypass-permissions` | - |
 | `--post-create stringArray` | Command to run after workspace creation (repeatable) | - |
 | `--pre-remove stringArray` | Command to run before workspace removal (repeatable) | - |

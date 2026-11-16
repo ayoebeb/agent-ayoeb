@@ -64,3 +64,17 @@ func TestReviewPromptRequiresInlineCommentsForRequiredChanges(t *testing.T) {
 		t.Fatalf("review prompt still makes inline comments optional:\n%s", prompt)
 	}
 }
+
+// TestReviewTextsCarryNoCommunicationStyle: a reviewer's audience is the
+// orchestrator and the PR, not the human, so the orchestrator communication
+// style never reaches it.
+func TestReviewTextsCarryNoCommunicationStyle(t *testing.T) {
+	prompt, systemPrompt := reviewTexts(launchSpec())
+	for name, text := range map[string]string{"prompt": prompt, "system prompt": systemPrompt} {
+		for _, unwanted := range []string{"## Communication Style", "Lead with the next action or the answer", "read nothing from the workers"} {
+			if strings.Contains(text, unwanted) {
+				t.Fatalf("reviewer %s carries the orchestrator communication style (%q):\n%s", name, unwanted, text)
+			}
+		}
+	}
+}

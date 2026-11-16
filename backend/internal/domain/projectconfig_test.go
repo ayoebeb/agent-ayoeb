@@ -1,6 +1,10 @@
 package domain
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestProjectConfigValidate(t *testing.T) {
 	tests := []struct {
@@ -220,5 +224,37 @@ func TestProjectConfigIsZero(t *testing.T) {
 	}
 	if (ProjectConfig{AutoReview: true}).IsZero() {
 		t.Fatal("config with autoReview enabled should not be zero")
+	}
+}
+
+// The orchestrator communication style is on by default, so the stored flag is
+// an opt-out: an empty config keeps the style, and only an explicit true removes
+// it. The zero value must stay out of the stored JSON.
+func TestProjectConfigOrchestratorStyleDisabled(t *testing.T) {
+	var cfg ProjectConfig
+	if cfg.OrchestratorStyleDisabled || DefaultProjectConfig().OrchestratorStyleDisabled || cfg.WithDefaults().OrchestratorStyleDisabled {
+		t.Fatal("the orchestrator style must default to on")
+	}
+	if data, err := json.Marshal(cfg.WithDefaults()); err != nil || strings.Contains(string(data), "orchestratorStyleDisabled") {
+		t.Fatalf("default config stores the opt-out: %s (err %v)", data, err)
+	}
+
+	off := ProjectConfig{OrchestratorStyleDisabled: true}
+	if off.IsZero() {
+		t.Fatal("a config that only opts out is not empty and must be persisted")
+	}
+	if err := off.Validate(); err != nil {
+		t.Fatalf("opt-out should validate: %v", err)
+	}
+	data, err := json.Marshal(off)
+	if err != nil || !strings.Contains(string(data), `"orchestratorStyleDisabled":true`) {
+		t.Fatalf("marshal = %s (err %v)", data, err)
+	}
+	var back ProjectConfig
+	if err := json.Unmarshal(data, &back); err != nil || !back.OrchestratorStyleDisabled {
+		t.Fatalf("round trip = %+v (err %v)", back, err)
+	}
+	if got := back.WithDefaults(); !got.OrchestratorStyleDisabled {
+		t.Fatal("WithDefaults must not turn an explicit opt-out back on")
 	}
 }

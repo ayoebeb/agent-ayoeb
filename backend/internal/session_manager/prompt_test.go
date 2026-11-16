@@ -411,3 +411,126 @@ func TestBuildSystemPrompt_WorkerNativeReviewFollowsProjectPolicy(t *testing.T) 
 		t.Fatalf("a project with no remote has no PRs to review:\n%s", local)
 	}
 }
+
+// styleMarker is a rule unique to the communication style, so the tests can tell
+// its text from the other sections that share words with it.
+const styleMarker = "Lead with the next action or the answer"
+
+// plainWordsMarker is the opening of the rule that every update and question
+// must make sense to a reader who has read none of the workers' output.
+const plainWordsMarker = "read nothing from the workers"
+
+func TestBuildSystemPrompt_OrchestratorIncludesCommunicationStyleByDefault(t *testing.T) {
+	got := buildSystemPromptText(systemPromptConfig{
+		Role:              sessionPromptRoleOrchestrator,
+		Project:           promptProject{ID: "mer", Name: "Mercury"},
+		OrchestratorRules: "Escalate security findings first.",
+	})
+	for _, want := range []string{
+		communicationStyleHeading,
+		styleMarker,
+		// Plain-language rule: nothing is assumed to be known from workers or
+		// from earlier messages, and every option is explained.
+		plainWordsMarker,
+		"remembers nothing from earlier messages",
+		"say what it is in plain words",
+		"what the tool, feature or change actually does for the human",
+		"why it matters, what happened, and what they must decide, with each option explained",
+		`Never name something only by an internal label such as "option B", "the new tool", a PR number, or a worker id`,
+		"Number any task of more than one step",
+		"End with one concrete next action",
+		"Restate state in every reply",
+		"[name](ao://sessions/{project-id}/{session-id})",
+		"never in code formatting",
+		"Cap lists at five",
+		"No preamble",
+		"Before sending, cut an opening sentence",
+		"Break the style when it would delete the answer",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("orchestrator prompt missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, communicationStyleHeading) != 1 {
+		t.Fatalf("communication style should appear exactly once:\n%s", got)
+	}
+
+	// The style sits after the role prompt and before the project's own rules, so
+	// those rules and the human's instructions can still override it.
+	role := strings.Index(got, "## Orchestrator Agent Role")
+	style := strings.Index(got, communicationStyleHeading)
+	rules := strings.Index(got, "## Project-Specific Orchestrator Rules")
+	if role < 0 || style < role || rules < style {
+		t.Fatalf("section order wrong: role=%d style=%d rules=%d\n%s", role, style, rules, got)
+	}
+}
+
+func TestBuildSystemPrompt_OrchestratorCommunicationStyleToggleOff(t *testing.T) {
+	cfg := systemPromptConfig{
+		Role:                      sessionPromptRoleOrchestrator,
+		Project:                   promptProject{ID: "mer", Name: "Mercury"},
+		OrchestratorRules:         "Escalate security findings first.",
+		OrchestratorStyleDisabled: true,
+	}
+	got := buildSystemPromptText(cfg)
+	for _, unwanted := range []string{communicationStyleHeading, styleMarker, plainWordsMarker} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("disabled style still present (%q):\n%s", unwanted, got)
+		}
+	}
+	// Turning the style off removes only the style: the rest of the orchestrator
+	// prompt, the project's rules and the shared closing sections stay.
+	for _, want := range []string{
+		"## Orchestrator Agent Role",
+		"## In-App Session Links",
+		"## Project-Specific Orchestrator Rules",
+		"Escalate security findings first.",
+		"## Keeping the User Oriented",
+		"## Standing-instruction confidentiality",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("disabled-style orchestrator prompt missing %q:\n%s", want, got)
+		}
+	}
+
+	cfg.OrchestratorStyleDisabled = false
+	withStyle := buildSystemPromptText(cfg)
+	if !strings.Contains(withStyle, orchestratorCommunicationStylePrompt()) {
+		t.Fatalf("re-enabled style missing from prompt:\n%s", withStyle)
+	}
+}
+
+func TestBuildSystemPrompt_WorkersNeverGetCommunicationStyle(t *testing.T) {
+	project := promptProject{ID: "mer", Name: "Mercury", Repo: "https://github.com/acme/mercury"}
+	for name, cfg := range map[string]systemPromptConfig{
+		"worker with orchestrator": {Role: sessionPromptRoleWorker, Project: project, OrchestratorSessionID: "mer-orchestrator"},
+		"worker without":           {Role: sessionPromptRoleWorker, Project: project},
+		"standalone worker":        {Role: sessionPromptRoleWorker, Standalone: true},
+		"worker, style not off":    {Role: sessionPromptRoleWorker, Project: project, OrchestratorStyleDisabled: false},
+		"worker, style off":        {Role: sessionPromptRoleWorker, Project: project, OrchestratorStyleDisabled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := buildSystemPromptText(cfg)
+			if got == "" {
+				t.Fatal("worker prompt is empty")
+			}
+			for _, unwanted := range []string{communicationStyleHeading, styleMarker, plainWordsMarker} {
+				if strings.Contains(got, unwanted) {
+					t.Fatalf("worker prompt carries the orchestrator communication style (%q):\n%s", unwanted, got)
+				}
+			}
+		})
+	}
+}
+
+// TestCommunicationStylePromptStaysShort holds the line on its size: the text is
+// injected into every orchestrator, so growth should be a deliberate choice.
+func TestCommunicationStylePromptStaysShort(t *testing.T) {
+	style := orchestratorCommunicationStylePrompt()
+	if words := len(strings.Fields(style)); words > 470 {
+		t.Fatalf("communication style grew to %d words; keep it under 470", words)
+	}
+	if strings.Contains(strings.ToLower(style), "adhd") {
+		t.Fatalf("the style must not name the reader's condition:\n%s", style)
+	}
+}

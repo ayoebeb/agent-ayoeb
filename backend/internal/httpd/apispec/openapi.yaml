@@ -20317,6 +20317,8 @@ components:
           type: string
         orchestratorRulesFile:
           type: string
+        orchestratorStyleDisabled:
+          type: boolean
         postCreate:
           items:
             type: string

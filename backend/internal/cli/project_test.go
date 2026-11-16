@@ -328,6 +328,54 @@ func TestProjectSetConfig_FlagsUpdateOnlyChangedFields(t *testing.T) {
 	}
 }
 
+// TestProjectSetConfig_OrchestratorStyleFlag: the orchestrator communication
+// style is on by default and --orchestrator-style=false opts one project out. The
+// opt-out survives an edit of any other field, because the CLI reads and writes
+// the whole config.
+func TestProjectSetConfig_OrchestratorStyleFlag(t *testing.T) {
+	const styleOn = `{"sessionPrefix":"old"}`
+	const styleOff = `{"sessionPrefix":"old","orchestratorStyleDisabled":true}`
+	tests := []struct {
+		name         string
+		stored       string
+		args         []string
+		wantDisabled bool
+	}{
+		{"false turns the style off", styleOn, []string{"--orchestrator-style=false"}, true},
+		{"true turns it back on", styleOff, []string{"--orchestrator-style=true"}, false},
+		{"bare flag means on", styleOff, []string{"--orchestrator-style"}, false},
+		{"another flag keeps the opt-out", styleOff, []string{"--session-prefix", "new"}, true},
+		{"another flag leaves the default on", styleOn, []string{"--session-prefix", "new"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := setConfigEnv(t)
+			srv, capture := projectConfigServer(t, `{"status":"ok","project":{"id":"demo","config":`+tt.stored+`}}`)
+			writeRunFileFor(t, cfg, srv)
+
+			args := append([]string{"project", "set-config", "demo"}, tt.args...)
+			if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, args...); err != nil {
+				t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+			}
+			if got := putConfig(t, capture).OrchestratorStyleDisabled; got != tt.wantDisabled {
+				t.Fatalf("OrchestratorStyleDisabled = %v, want %v\nbody=%s", got, tt.wantDisabled, capture.putBody)
+			}
+		})
+	}
+
+	t.Run("config-json carries the opt-out", func(t *testing.T) {
+		cfg := setConfigEnv(t)
+		srv, capture := projectConfigServer(t, `{"status":"ok","project":{"id":"demo"}}`)
+		writeRunFileFor(t, cfg, srv)
+		if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "project", "set-config", "demo", "--config-json", styleOff); err != nil {
+			t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+		}
+		if !putConfig(t, capture).OrchestratorStyleDisabled {
+			t.Fatalf("--config-json dropped the opt-out: %s", capture.putBody)
+		}
+	})
+}
+
 func TestProjectSetConfig_ConfigJSONKeepsEffortAndPreRemove(t *testing.T) {
 	cfg := setConfigEnv(t)
 	srv, capture := projectConfigServer(t, `{"status":"ok","project":{"id":"demo"}}`)

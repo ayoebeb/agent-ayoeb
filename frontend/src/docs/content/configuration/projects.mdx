@@ -55,6 +55,7 @@ ao project rm <project-id>
 | `agentRulesFile` | Repository-relative instructions appended to worker instructions. |
 | `orchestratorRules` | Standing instructions for orchestrators. |
 | `orchestratorRulesFile` | Repository-relative instructions appended to orchestrator instructions. |
+| `orchestratorStyleDisabled` | When `true`, this project's orchestrators do not get the built-in communication style. Unset, they do. See [Orchestrator communication style](#orchestrator-communication-style). |
 | `reviewers` | Harnesses used for Orchestrator review runs. |
 | `trackerIntake` | Opt-in, read-only issue intake that can start workers. Also requires `AO_TRACKER_INTAKE=on` in the daemon environment. |
 | `containerReap` | Project-wide opt-out from Orchestrator's session-container cleanup. |
@@ -118,6 +119,16 @@ The same command list runs on every platform. Use `sh` syntax on macOS/Linux and
 Cleanup steps use `preRemove`. They run in order after processes stop and before permanent worktree removal. They have no execution time limit unless you set one for a step (1 to 120 minutes); a step that runs out of time fails like any other. Daemon shutdown cancels them. A failed step preserves the worktree. Save a fix, then use **Retry cleanup** for terminated sessions. Dirty worktrees remain intact. Replacing an orchestrator is the exception: its cleanup gets 90 seconds, and Orchestrator removes the old worktree even if a step fails or runs out of time. Cleanup does not run on ordinary agent exit or app quit, and it excludes scratch workspaces.
 
 Use `agentRules` or `agentRulesFile` for worker instructions and `orchestratorRules` or `orchestratorRulesFile` for supervision instructions. If both fields for a role are set, Orchestrator combines the inline rules and file contents. Rules files are read when a session starts, so an edit applies to sessions started after it.
+
+### Orchestrator communication style
+
+<span id="orchestrator-communication-style" />
+
+Every orchestrator gets a built-in communication style in its standing instructions, in every project. It shapes how the orchestrator writes to you: every update and question explained as if you had read nothing from the workers and remember nothing from earlier messages (what each thing is in plain words, why it matters, what happened, and what you must decide, with each option explained, never just an internal name such as "option B" or a PR number), the next action first, numbered steps, one concrete next action at the end, the state of each worker restated every reply, errors stated flat, and no preamble or closing pleasantries. Workers and reviewers do not get it, because they write for the orchestrator.
+
+The style is on by default. To turn it off for one project, run `ao project set-config <id> --orchestrator-style=false`, or set `orchestratorStyleDisabled` to `true`. `--orchestrator-style=true` turns it back on. The setting is read when an orchestrator session starts or restores, so it applies to orchestrators started after the change. `orchestratorRules` and your own instructions to the orchestrator override the style where they conflict.
+
+The style is adapted from an MIT-licensed Claude Code plugin; its origin and license notice are in `backend/internal/session_manager/THIRD_PARTY_NOTICES.md`. It does not depend on that plugin or on any other setup, and it does no harm if a similar plugin is also installed.
 
 For example, these fields link local setup files, install dependencies, and load worker rules. This is a configuration fragment; keep any other existing fields when applying it:
 
