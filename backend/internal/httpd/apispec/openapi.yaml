@@ -18137,6 +18137,8 @@ components:
           type: string
         hasMoreBefore:
           type: boolean
+        lastEventAt:
+          type: string
         latestSequence:
           format: int64
           type: integer

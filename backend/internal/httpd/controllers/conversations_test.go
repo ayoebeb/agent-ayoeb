@@ -331,6 +331,74 @@ func TestConversationSnapshotCarriesTheSendersClientMessageID(t *testing.T) {
 	}
 }
 
+// The live row says how long the agent has been quiet, so the snapshot names the
+// newest write among its rows: a streamed reply delta or a command's output chunk
+// moves it, though neither creates a row.
+func TestConversationSnapshotReportsWhenTheNewestRowWasLastWritten(t *testing.T) {
+	start := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	body := conversationSnapshotBody(t, chatsvc.Snapshot{
+		SessionID: domain.SessionID("p1-1"),
+		Messages: []domain.ConversationMessage{
+			{ID: "reply", TurnID: "t1", Sequence: 1, Role: domain.MessageRoleAssistant, Origin: domain.MessageOriginProvider, Text: "hi", CreatedAt: start, UpdatedAt: start.Add(20 * time.Second)},
+		},
+		Activities: []domain.ConversationActivity{
+			{ID: "build", TurnID: "t1", Sequence: 2, Kind: domain.ActivityKindCommand, Status: domain.ActivityStatusRunning, Summary: "npm run build", CreatedAt: start.Add(10 * time.Second), UpdatedAt: start.Add(95 * time.Second)},
+		},
+	})
+	if got, want := body["lastEventAt"], "2026-11-16T12:01:35Z"; got != want {
+		t.Fatalf("lastEventAt = %#v, want %q: the streaming command was written last", got, want)
+	}
+
+	empty := conversationSnapshotBody(t, chatsvc.Snapshot{SessionID: domain.SessionID("p1-1")})
+	if _, exists := empty["lastEventAt"]; exists {
+		t.Fatalf("a page with no rows must omit lastEventAt, got %#v", empty["lastEventAt"])
+	}
+}
+
+// Only some providers report how long a command took. The rest are timed from the
+// row's own life, and only when it settled and took long enough to be worth saying.
+func TestSnapshotTimesACommandTheProviderDidNotTime(t *testing.T) {
+	start := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	reported, err := json.Marshal(map[string]any{"command": "npm test", "durationMs": 7000})
+	if err != nil {
+		t.Fatalf("encode detail: %v", err)
+	}
+	command := func(id string, status domain.ActivityStatus, took time.Duration, detail []byte) domain.ConversationActivity {
+		return domain.ConversationActivity{
+			ID: id, Kind: domain.ActivityKindCommand, Status: status, Summary: id, Detail: detail,
+			CreatedAt: start, UpdatedAt: start.Add(took),
+		}
+	}
+	body := conversationSnapshotBody(t, chatsvc.Snapshot{
+		SessionID: domain.SessionID("p1-1"),
+		Activities: []domain.ConversationActivity{
+			command("untimed", domain.ActivityStatusCompleted, 4200*time.Millisecond, nil),
+			command("instant", domain.ActivityStatusCompleted, 400*time.Millisecond, nil),
+			command("running", domain.ActivityStatusRunning, 30*time.Second, nil),
+			command("reported", domain.ActivityStatusCompleted, 3*time.Second, reported),
+		},
+	})
+
+	durations := map[string]any{}
+	for _, raw := range body["activities"].([]any) {
+		activity := raw.(map[string]any)
+		detail, _ := activity["detail"].(map[string]any)
+		durations[activity["id"].(string)] = detail["durationMs"]
+	}
+	if durations["untimed"] != float64(4200) {
+		t.Errorf("untimed durationMs = %#v, want 4200 from the row's own life", durations["untimed"])
+	}
+	if durations["instant"] != nil {
+		t.Errorf("a command under a second must carry no durationMs, got %#v", durations["instant"])
+	}
+	if durations["running"] != nil {
+		t.Errorf("a command still running has no duration yet, got %#v", durations["running"])
+	}
+	if durations["reported"] != float64(7000) {
+		t.Errorf("reported durationMs = %#v, want the provider's 7000 to win", durations["reported"])
+	}
+}
+
 func TestConversationSnapshotCarriesHumanPromptFactWithoutPagedMessage(t *testing.T) {
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	body := conversationSnapshotBody(t, chatsvc.Snapshot{

@@ -1458,6 +1458,7 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		})
 	}
 
+	var lastEvent time.Time
 	for _, msg := range s.Messages {
 		message := ConversationMessageResponse{
 			Kind:              "message",
@@ -1480,6 +1481,7 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		message.Content, message.EditAvailable = conversationContentSummary(msg)
 		message.EditAvailable = message.EditAvailable && msg.Sequence > s.EditFloorSequence
 		out.Messages = append(out.Messages, message)
+		lastEvent = latestTime(lastEvent, msg.UpdatedAt)
 	}
 	for _, point := range s.BranchPoints {
 		out.BranchPoints = append(out.BranchPoints, ConversationBranchPointResponse{
@@ -1503,8 +1505,20 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 			ProviderItemID: activity.ProviderItemID,
 			CreatedAt:      activity.CreatedAt.UTC().Format(time.RFC3339),
 		})
+		lastEvent = latestTime(lastEvent, activity.UpdatedAt)
+	}
+	if !lastEvent.IsZero() {
+		out.LastEventAt = lastEvent.UTC().Format(time.RFC3339)
 	}
 	return out
+}
+
+// latestTime is the later of two instants; the zero time is "none yet".
+func latestTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 func usageLimitPayload(limit *domain.ConversationUsageLimit) *ConversationUsageLimitResponse {
@@ -1767,6 +1781,21 @@ func activityDetailPayload(activity domain.ConversationActivity) map[string]any 
 		detail[key] = activity.StreamedText
 		if activity.StreamedTextTruncated {
 			detail[truncatedKey] = true
+		}
+	}
+	// Only some providers say how long a command took. For the rest the row's own
+	// life is the same fact: it is created when the command starts and written for
+	// the last time when it settles. Under a second reads as instant, so it is left
+	// off rather than reported as noise.
+	if activity.Kind == domain.ActivityKindCommand &&
+		(activity.Status == domain.ActivityStatusCompleted || activity.Status == domain.ActivityStatusFailed) {
+		if span := activity.UpdatedAt.Sub(activity.CreatedAt); span >= time.Second {
+			if detail == nil {
+				detail = map[string]any{}
+			}
+			if _, reported := detail["durationMs"]; !reported {
+				detail["durationMs"] = span.Milliseconds()
+			}
 		}
 	}
 	return detail

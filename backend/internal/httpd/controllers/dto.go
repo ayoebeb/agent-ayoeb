@@ -3588,6 +3588,12 @@ type ConversationSnapshotResponse struct {
 	LatestSequence int64  `json:"latestSequence"`
 	OldestSequence int64  `json:"oldestSequence,omitempty"`
 	HasMoreBefore  bool   `json:"hasMoreBefore"`
+	// LastEventAt is when the newest message or activity in this page was last
+	// written: a created row, a streamed reply delta, or a command's output chunk.
+	// It is how long the agent has been quiet, which a client cannot tell from row
+	// creation times alone, because one long command streams into a single row.
+	// Absent when the page holds no rows.
+	LastEventAt string `json:"lastEventAt,omitempty"`
 	// AfterSequence echoes the afterSequence floor when the daemon applied it: the
 	// page then holds only rows after it, and hasMoreBefore means rows between the
 	// floor and oldestSequence were left out. Absent means a whole page.

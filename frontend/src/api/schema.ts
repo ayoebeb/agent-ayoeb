@@ -6236,6 +6236,7 @@ export interface components {
             conversationId: string;
             harness?: string;
             hasMoreBefore: boolean;
+            lastEventAt?: string;
             /** Format: int64 */
             latestSequence: number;
             mcpServers?: components["schemas"]["ConversationMCPServerPayload"][];
