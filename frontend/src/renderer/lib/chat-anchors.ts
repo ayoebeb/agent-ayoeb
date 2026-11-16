@@ -58,7 +58,9 @@ export type ChatHeading = { /** Where the heading starts in the message source. 
 // A line that could open a heading: `#` text, or text over a `===`/`---` rule.
 const MAYBE_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)|^[^\n]+\n {0,3}(?:=+|-+)[ \t]*$/m;
 const HEADING_CACHE_LIMIT = 400;
-const headingCache = new Map<string, ChatHeading[]>();
+// One cache per dialect, keyed by the message text itself: the transcript asks again
+// for every message on every streamed delta, and most of them have not changed.
+const headingCaches = { text: new Map<string, ChatHeading[]>(), math: new Map<string, ChatHeading[]>() };
 
 function plainText(node: Nodes): string {
 	switch (node.type) {
@@ -90,14 +92,13 @@ function collectHeadings(node: Nodes, into: ChatHeading[]): void {
  * dialect the message renders in.
  */
 export function extractHeadings(markdown: string, math = false): ChatHeading[] {
-	if (!MAYBE_HEADING.test(markdown)) return [];
-	const key = `${math ? "m" : "t"}:${markdown}`;
-	const cached = headingCache.get(key);
+	const cache = math ? headingCaches.math : headingCaches.text;
+	const cached = cache.get(markdown);
 	if (cached) return cached;
 	const headings: ChatHeading[] = [];
-	collectHeadings((math ? mathParser : parser).parse(markdown), headings);
-	if (headingCache.size >= HEADING_CACHE_LIMIT) headingCache.delete(headingCache.keys().next().value!);
-	headingCache.set(key, headings);
+	if (MAYBE_HEADING.test(markdown)) collectHeadings((math ? mathParser : parser).parse(markdown), headings);
+	if (cache.size >= HEADING_CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+	cache.set(markdown, headings);
 	return headings;
 }
 
