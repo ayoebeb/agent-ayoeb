@@ -3550,6 +3550,8 @@
 	"machines.version.unknown": "バージョン未報告",
 	"machines.version.unknownHint": "もう一方のコンピューターの Ayo はまだバージョンを報告しません。古いリリースか開発ビルドの可能性があります。更新するとバージョンが表示されます。",
 	"machines.version.checking": "バージョンを確認中…",
+	"machines.version.failed": "バージョンを確認できませんでした",
+	"machines.version.lastKnown": "最後に確認したバージョン: Ayo {{version}}",
 	"machines.warning.behind": "{{name}} は Ayo {{host}}、このコンピューターは {{local}} を実行しています。{{name}} の Ayo を更新してから、もう一度確認してください。バージョンが異なるとリモートセッションが壊れることがあります。",
 	"machines.warning.ahead": "{{name}} は Ayo {{host}} を実行しており、このコンピューターの {{local}} より新しいです。こちらの Ayo を更新してから、もう一度確認してください。",
 	"machines.claude.thisComputer": "ここで使う Claude アカウント",

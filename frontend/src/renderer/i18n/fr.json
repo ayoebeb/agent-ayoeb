@@ -3612,6 +3612,8 @@
 	"machines.version.unknown": "Version non communiquée",
 	"machines.version.unknownHint": "L’Ayo de l’autre ordinateur ne signale pas encore sa version. Ce peut être une version plus ancienne ou une version de développement. Mettez-le à jour pour voir la version.",
 	"machines.version.checking": "Vérification de la version…",
+	"machines.version.failed": "Impossible de vérifier la version",
+	"machines.version.lastKnown": "dernière version connue : Ayo {{version}}",
 	"machines.warning.behind": "{{name}} utilise Ayo {{host}}, et cet ordinateur utilise {{local}}. Mettez Ayo à jour sur {{name}}, puis vérifiez à nouveau. Des versions différentes peuvent perturber les sessions à distance.",
 	"machines.warning.ahead": "{{name}} utilise Ayo {{host}}, plus récent que {{local}} sur cet ordinateur. Mettez Ayo à jour ici, puis vérifiez à nouveau.",
 	"machines.claude.thisComputer": "Votre compte Claude ici",

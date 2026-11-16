@@ -97,6 +97,55 @@ describe("MachinesView", () => {
 		expect(screen.queryByTestId("machines-version-warning")).toBeNull();
 	});
 
+	it("says a failed version check failed, instead of calling it a missing version", async () => {
+		// The host answers 503: nothing came back, so nothing is known about its release.
+		stubHealth({ "http://local.test/healthz": probe("0.44.0") });
+		renderView([boxA]);
+		expect(await within(rowFor("a")).findByText("Couldn't check the version")).toBeVisible();
+		expect(rowFor("a")).not.toHaveTextContent("Version not reported");
+		expect(rowFor("a")).not.toHaveTextContent("behind this computer");
+		expect(screen.queryByTestId("machines-version-warning")).toBeNull();
+	});
+
+	it("marks a kept version as last known when a later check fails, and stops comparing it", async () => {
+		const responses: Record<string, unknown> = {
+			"http://local.test/healthz": probe("0.44.0"),
+			"http://host.test/a/healthz": probe("0.43.2"),
+		};
+		stubHealth(responses);
+		renderView([boxA]);
+		expect(await screen.findByTestId("machines-version-warning")).toBeVisible();
+		expect(rowFor("a")).toHaveTextContent("behind this computer");
+
+		// The next check gets no answer; the old reading must not stand in for a current one.
+		delete responses["http://host.test/a/healthz"];
+		const button = await screen.findByRole("button", { name: "Check again" });
+		await waitFor(() => expect(button).toBeEnabled());
+		fireEvent.click(button);
+
+		expect(await within(rowFor("a")).findByText("Couldn't check the version")).toBeVisible();
+		expect(rowFor("a")).toHaveTextContent("last known Ayo 0.43.2");
+		expect(rowFor("a")).not.toHaveTextContent("behind this computer");
+		expect(screen.queryByTestId("machines-version-warning")).toBeNull();
+
+		// A later check that works brings the comparison back.
+		responses["http://host.test/a/healthz"] = probe("0.43.2");
+		await waitFor(() => expect(button).toBeEnabled());
+		fireEvent.click(button);
+		expect(await screen.findByTestId("machines-version-warning")).toBeVisible();
+		expect(rowFor("a")).not.toHaveTextContent("Couldn't check the version");
+	});
+
+	it("compares nothing when this computer's own check fails", async () => {
+		stubHealth({ "http://host.test/a/healthz": probe("0.43.2") });
+		renderView([boxA]);
+		expect(await screen.findByText("Ayo 0.43.2")).toBeVisible();
+		const [thisComputer] = screen.getAllByTestId("machine-row");
+		expect(within(thisComputer).getByText("Couldn't check the version")).toBeVisible();
+		expect(rowFor("a")).not.toHaveTextContent("behind this computer");
+		expect(screen.queryByTestId("machines-version-warning")).toBeNull();
+	});
+
 	it("names why a refused or incompatible computer is not usable", async () => {
 		stubHealth({ "http://local.test/healthz": probe("0.44.0") });
 		renderView([

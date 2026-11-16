@@ -3550,6 +3550,8 @@
 	"machines.version.unknown": "Version nicht gemeldet",
 	"machines.version.unknownHint": "Das Ayo auf dem anderen Computer meldet seine Version noch nicht. Es kann eine ältere Version oder ein Entwicklungs-Build sein. Aktualisiere es, um die Version zu sehen.",
 	"machines.version.checking": "Version wird geprüft…",
+	"machines.version.failed": "Version konnte nicht geprüft werden",
+	"machines.version.lastKnown": "zuletzt bekannt: Ayo {{version}}",
 	"machines.warning.behind": "{{name}} nutzt Ayo {{host}}, dieser Computer {{local}}. Aktualisiere Ayo auf {{name}} und prüfe dann erneut. Gemischte Versionen können Remote-Sitzungen stören.",
 	"machines.warning.ahead": "{{name}} nutzt Ayo {{host}}, neuer als {{local}} auf diesem Computer. Aktualisiere Ayo hier und prüfe dann erneut.",
 	"machines.claude.thisComputer": "Dein Claude-Konto hier",

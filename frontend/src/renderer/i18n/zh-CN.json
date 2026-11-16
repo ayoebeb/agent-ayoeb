@@ -3532,6 +3532,8 @@
 	"machines.version.unknown": "未报告版本",
 	"machines.version.unknownHint": "另一台电脑上的 Ayo 尚不报告版本，可能是较旧的版本或开发版本。更新后即可看到版本。",
 	"machines.version.checking": "正在检查版本…",
+	"machines.version.failed": "无法检查版本",
+	"machines.version.lastKnown": "上次已知：Ayo {{version}}",
 	"machines.warning.behind": "{{name}} 运行 Ayo {{host}}，这台电脑运行 {{local}}。请在 {{name}} 上更新 Ayo，然后重新检查。版本不一致可能导致远程会话出错。",
 	"machines.warning.ahead": "{{name}} 运行 Ayo {{host}}，比这台电脑上的 {{local}} 更新。请在此处更新 Ayo，然后重新检查。",
 	"machines.claude.thisComputer": "此处使用的 Claude 账号",

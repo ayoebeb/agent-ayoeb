@@ -3550,6 +3550,8 @@
 	"machines.version.unknown": "버전 정보 없음",
 	"machines.version.unknownHint": "다른 컴퓨터의 Ayo가 아직 버전을 보고하지 않습니다. 이전 릴리스이거나 개발 빌드일 수 있습니다. 업데이트하면 버전이 표시됩니다.",
 	"machines.version.checking": "버전 확인 중…",
+	"machines.version.failed": "버전을 확인하지 못했습니다",
+	"machines.version.lastKnown": "마지막으로 확인된 버전: Ayo {{version}}",
 	"machines.warning.behind": "{{name}}은(는) Ayo {{host}}를 실행하고 이 컴퓨터는 {{local}}을(를) 실행합니다. {{name}}의 Ayo를 업데이트한 뒤 다시 확인하세요. 버전이 다르면 원격 세션이 깨질 수 있습니다.",
 	"machines.warning.ahead": "{{name}}은(는) 이 컴퓨터의 {{local}}보다 최신인 Ayo {{host}}를 실행합니다. 여기서 Ayo를 업데이트한 뒤 다시 확인하세요.",
 	"machines.claude.thisComputer": "여기서 사용하는 Claude 계정",

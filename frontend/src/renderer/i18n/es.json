@@ -3612,6 +3612,8 @@
 	"machines.version.unknown": "Versión no informada",
 	"machines.version.unknownHint": "El Ayo del otro equipo aún no informa de su versión. Puede ser una versión anterior o una compilación de desarrollo. Actualízalo para ver la versión.",
 	"machines.version.checking": "Comprobando la versión…",
+	"machines.version.failed": "No se pudo comprobar la versión",
+	"machines.version.lastKnown": "última conocida: Ayo {{version}}",
 	"machines.warning.behind": "{{name}} usa Ayo {{host}} y este equipo usa {{local}}. Actualiza Ayo en {{name}} y vuelve a comprobar. Las versiones mezcladas pueden romper las sesiones remotas.",
 	"machines.warning.ahead": "{{name}} usa Ayo {{host}}, más reciente que {{local}} en este equipo. Actualiza Ayo aquí y vuelve a comprobar.",
 	"machines.claude.thisComputer": "Tu cuenta de Claude aquí",

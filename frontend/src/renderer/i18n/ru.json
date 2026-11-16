@@ -3667,6 +3667,8 @@
 	"machines.version.unknown": "Версия не сообщена",
 	"machines.version.unknownHint": "Ayo на другом компьютере пока не сообщает свою версию. Это может быть более старый выпуск или сборка для разработки. Обновите его, чтобы увидеть версию.",
 	"machines.version.checking": "Проверка версии…",
+	"machines.version.failed": "Не удалось проверить версию",
+	"machines.version.lastKnown": "последняя известная: Ayo {{version}}",
 	"machines.warning.behind": "На {{name}} работает Ayo {{host}}, а на этом компьютере — {{local}}. Обновите Ayo на {{name}} и проверьте снова. Разные версии могут нарушить удалённые сеансы.",
 	"machines.warning.ahead": "На {{name}} работает Ayo {{host}}, новее, чем {{local}} на этом компьютере. Обновите Ayo здесь и проверьте снова.",
 	"machines.claude.thisComputer": "Ваша учётная запись Claude здесь",

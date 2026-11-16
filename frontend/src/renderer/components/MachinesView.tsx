@@ -1,4 +1,4 @@
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Laptop, RefreshCw, Server } from "@/components/app-icons";
@@ -41,27 +41,59 @@ function joinParts(parts: ReactNode[]): ReactNode {
 	));
 }
 
-type VersionRead = { version: string | null | undefined; settled: boolean };
+/**
+ * What the latest version check of one computer came back with. A check that
+ * failed is its own answer, not "no version": a timeout or a 503 says nothing
+ * about the release, and must never read as "update it" or as a match.
+ */
+type VersionRead =
+	| { kind: "checking" }
+	| { kind: "version"; version: string }
+	| { kind: "unreported" }
+	/** The latest check failed. `lastKnown` is what an earlier check saw, shown only as such. */
+	| { kind: "failed"; lastKnown: string | null };
+
+function toVersionRead(query: Pick<UseQueryResult<string | null>, "isError" | "data"> | undefined): VersionRead {
+	if (!query) return { kind: "checking" };
+	// A failed refresh keeps the earlier data in the query; the error still wins.
+	if (query.isError) return { kind: "failed", lastKnown: typeof query.data === "string" ? query.data : null };
+	if (typeof query.data === "string") return { kind: "version", version: query.data };
+	if (query.data === null) return { kind: "unreported" };
+	return { kind: "checking" };
+}
+
+/** The release to compare or name: only a check that just succeeded counts. */
+const versionOf = (read: VersionRead): string | undefined => (read.kind === "version" ? read.version : undefined);
 
 function VersionPart({ read, relation }: { read: VersionRead; relation: VersionRelation }) {
 	const { t } = useTranslation();
-	if (read.version) {
-		return (
-			<span className={cn(relation === "behind" || relation === "ahead" ? "text-warning" : undefined)}>
-				<span className="tabular-nums">{t("machines.version", { version: read.version })}</span>
-				{relation === "unknown" ? null : ` · ${t(`machines.version.${relation}`)}`}
-			</span>
-		);
+	switch (read.kind) {
+		case "version":
+			return (
+				<span className={cn(relation === "behind" || relation === "ahead" ? "text-warning" : undefined)}>
+					<span className="tabular-nums">{t("machines.version", { version: read.version })}</span>
+					{relation === "unknown" ? null : ` · ${t(`machines.version.${relation}`)}`}
+				</span>
+			);
+		case "checking":
+			return <span>{t("machines.version.checking")}</span>;
+		case "failed":
+			return (
+				<span>
+					{t("machines.version.failed")}
+					{read.lastKnown ? <span className="tabular-nums">{` · ${t("machines.version.lastKnown", { version: read.lastKnown })}`}</span> : null}
+				</span>
+			);
+		case "unreported":
+			return (
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<span>{t("machines.version.unknown")}</span>
+					</TooltipTrigger>
+					<TooltipContent>{t("machines.version.unknownHint")}</TooltipContent>
+				</Tooltip>
+			);
 	}
-	if (!read.settled) return <span>{t("machines.version.checking")}</span>;
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<span>{t("machines.version.unknown")}</span>
-			</TooltipTrigger>
-			<TooltipContent>{t("machines.version.unknownHint")}</TooltipContent>
-		</Tooltip>
-	);
 }
 
 function RoutePart({ route }: { route: ConnectionRoute }) {
@@ -98,14 +130,11 @@ export function MachinesView() {
 			...hosts.map((host) => machineVersionQueryOptions(host.hostId, host.status === "connected" ? baseUrlForHost(host.hostId) : undefined)),
 		],
 	});
-	const toRead = (index: number): VersionRead => ({
-		version: reads[index]?.data,
-		settled: !reads[index] || reads[index].isFetched || reads[index].isError || reads[index].fetchStatus === "idle",
-	});
-	const local = toRead(0);
+	const local = toVersionRead(reads[0]);
 	const rows = hosts.map((host, index) => {
-		const read = toRead(index + 1);
-		return { host, read, relation: versionRelation(read.version, local.version) };
+		const read = toVersionRead(reads[index + 1]);
+		// Without a fresh answer from both sides there is nothing to compare.
+		return { host, read, relation: versionRelation(versionOf(read), versionOf(local)) };
 	});
 	const mismatched = rows.filter((row) => row.relation === "behind" || row.relation === "ahead");
 	const checking = reads.some((read) => read.isFetching);
@@ -146,8 +175,8 @@ export function MachinesView() {
 									<p key={host.hostId}>
 										{t(relation === "behind" ? "machines.warning.behind" : "machines.warning.ahead", {
 											name: host.label,
-											host: read.version,
-											local: local.version,
+											host: versionOf(read),
+											local: versionOf(local),
 										})}
 									</p>
 								))}
