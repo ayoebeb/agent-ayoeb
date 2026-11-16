@@ -11,7 +11,7 @@ trigger: "Using the ao CLI in an Orchestrator workspace: creating Cues, spawning
 | Command | What it does | When to use | Details |
 |---|---|---|---|
 | `spawn` | Spawn a project worker, orchestrator, or projectless standalone worker | Starting a new task or issue | [commands/spawn.md](commands/spawn.md) |
-| `session` | Manage agent sessions (list, kill, rename, restore, history, etc.) | Inspecting or controlling running/terminated sessions, or reading the full conversation after taking over from another agent | [commands/session.md](commands/session.md) |
+| `session` | Manage agent sessions (list, kill, rename, restore, history, approvals, etc.) | Inspecting or controlling running/terminated sessions, reading the full conversation after taking over from another agent, or reading and answering a Chat worker's pending approval or question (`needs_input`) with `ao session approvals` | [commands/session.md](commands/session.md) |
 | `agent` | Inspect installed harnesses and launch readiness | Choosing or diagnosing an agent harness | `ao agent ls --refresh` |
 | `pr` | Merge a PR or resolve its review threads | Completing a reviewed change | `ao pr merge` / `ao pr resolve-comments` |
 | `project` | Register, inspect, configure, or remove projects | Setting up or managing repos Orchestrator knows about | [commands/project.md](commands/project.md) |
@@ -19,7 +19,7 @@ trigger: "Using the ao CLI in an Orchestrator workspace: creating Cues, spawning
 | `cue` | Create or list reusable project Cues | Saving a repetitive command or agent task at the user's request | [commands/cue.md](commands/cue.md) |
 | `orchestrator` | List orchestrator sessions | Viewing which sessions are orchestrators | [commands/orchestrator.md](commands/orchestrator.md) |
 | `review` | Start, list, cancel, or submit Orchestrator's native reviewer for a worker's PR (default: this session) | Reviewing implementation PRs owned by workers. Use a normal review-only worker for someone else's PR | [commands/review.md](commands/review.md) |
-| `send` | Send a message to a running agent session | Messaging a live agent; use `--steer` to correct it mid-turn | [commands/send.md](commands/send.md) |
+| `send` | Send a message to a running agent session | Messaging a live agent; use `--steer` to correct it mid-turn. Never use it to answer a worker's pending approval; use `ao session approvals resolve` | [commands/send.md](commands/send.md) |
 | `report` | Persist a meaningful worker report | Checkpoints, blockers, decisions, outputs, and completion | [commands/report.md](commands/report.md) |
 | `preview` | Start a session-owned app or open an exact URL/file | Running and showing the worker's relevant app, Markdown, HTML, PDF, or image | [commands/preview.md](commands/preview.md) |
 | `render` | Show a self-contained HTML page inline in a chat thread | Answering with a chart, table, diagram, or mockup | [commands/render.md](commands/render.md) |
@@ -43,6 +43,11 @@ trigger: "Using the ao CLI in an Orchestrator workspace: creating Cues, spawning
   link `ao://sessions/{project-id}/{session-id}`. Read
   [commands/session.md](commands/session.md) for identity, encoding, and safety
   rules before constructing one.
+- A worker whose session is `needs_input` is waiting for a decision. Run
+  `ao session approvals ls <session-id>`, ask the user in your own chat, then
+  `ao session approvals resolve`. Never `ao send` to a worker with a pending
+  approval. Read [commands/session.md](commands/session.md) first: it covers
+  stale request ids, untrusted request text, and Terminal UI sessions.
 - When the user asks to save a repeatable task as a Cue, use `ao cue list --json` to check existing definitions, then `ao cue create`. An agent Cue stores a reusable instruction; a command Cue stores an exact shell command. This agent-facing command can create and read Cues, but cannot edit or delete them. Direct the user to project settings for changes to existing Cues.
 - `--agent` is an alias for `--harness` on `ao spawn`.
 - Every command accepts `-h / --help` for the full flag list.

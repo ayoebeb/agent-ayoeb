@@ -7,6 +7,14 @@ running turn, the message is queued and delivered as its own turn after the
 current turn ends; it does not reach the running turn. To correct or redirect
 an agent mid-turn, use `--steer`.
 
+Do not use `ao send` to answer a worker that is waiting on an approval or a
+question (`needs_input`). A Terminal UI session refuses it with
+`SESSION_AWAITING_DECISION`. In Chat the message is queued behind the request and
+does not answer it, and a send or a steer can cancel the approval and raise it
+again under a new request id. Read it with `ao session approvals ls <id>` and
+answer it with `ao session approvals resolve`; see
+[session.md](session.md#when-a-worker-is-waiting-for-a-decision).
+
 ## Syntax
 
 ```

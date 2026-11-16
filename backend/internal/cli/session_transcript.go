@@ -42,6 +42,9 @@ type transcriptRequest struct {
 	n       int
 	before  int
 	cap     int
+	// outputLimit, when set, asks the daemon to cut each command output to that
+	// many bytes before it sends the page. Zero asks for outputs whole.
+	outputLimit int
 }
 
 type sessionTranscriptResponse struct {
@@ -149,6 +152,9 @@ func (c *commandContext) fetchConversationSnapshot(ctx context.Context, id strin
 	params.Set("limit", strconv.Itoa(req.n))
 	if req.before > 0 {
 		params.Set("beforeSequence", strconv.Itoa(req.before))
+	}
+	if req.outputLimit > 0 {
+		params.Set("outputLimit", strconv.Itoa(req.outputLimit))
 	}
 	var snap conversationSnapshotWire
 	path := apiPath("sessions/"+url.PathEscape(id)+"/conversation", params)
