@@ -80,7 +80,18 @@ export type SettingsModal =
 
 /** Worker detail view toggles — Changes (Git rail) is the default. */
 export type WorkbenchTab = "changes" | "files" | "terminal";
-export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts";
+export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts" | "crew";
+
+/** The tabs of an orchestrator's control room. "session" is the orchestrator's own chat. */
+export type ControlRoomTab = "session" | "changes" | "commits" | "files" | "terminal";
+
+export type ControlRoomState = {
+	tab: ControlRoomTab;
+	/** The worker every tab is scoped to; absent means all agents. */
+	scope?: string;
+};
+
+export const DEFAULT_CONTROL_ROOM: ControlRoomState = { tab: "session" };
 
 export type CloudReviewUiState = {
 	showChanges?: boolean;
@@ -167,6 +178,8 @@ export type UiState = {
 	/** The user's durable sidebar preference. */
 	isSidebarOpen: boolean;
 	inspectorSessions: Record<string, InspectorSessionState>;
+	/** Per orchestrator session: which control-room tab is showing and which worker it is scoped to. */
+	controlRooms: Record<string, ControlRoomState>;
 	isCommandPaletteOpen: boolean;
 	settingsModal: SettingsModal | null;
 	accountLogin: string | null;
@@ -297,7 +310,9 @@ export type UiState = {
 	 * instance. With `remembersFilesSidebar`, a Files sidebar the user left open
 	 * (in an earlier run too) reopens instead of Summary.
 	 */
-	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean, remembersFilesSidebar?: boolean) => void;
+	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean, remembersFilesSidebar?: boolean, opensOnCrew?: boolean) => void;
+	/** `scope: null` returns to all agents; leaving `scope` out keeps the current one. */
+	setControlRoom: (sessionId: string, update: { tab?: ControlRoomTab; scope?: string | null }) => void;
 	setBrowserContentRevealed: (sessionId: string, revealed: boolean) => void;
 	setBrowserUnseen: (sessionId: string, unseen: boolean) => void;
 	setFilesChangedOnly: (sessionId: string, changedOnly: boolean) => void;
@@ -450,6 +465,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 	workbenchTab: "changes",
 	isSidebarOpen: initialSidebarOpen(),
 	inspectorSessions: {},
+	controlRooms: {},
 	isCommandPaletteOpen: false,
 	settingsModal: null,
 	accountLogin: null,
@@ -660,11 +676,19 @@ export const useUiStore = create<UiState>((set, get) => ({
 				},
 			};
 		}),
-	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, remembersFilesSidebar = false) =>
+	setControlRoom: (sessionId, update) =>
 		set((state) => {
-			// Sessions without an inspector (e.g. orchestrator sessions) must not
-			// gain a store entry at all — leave inspectorSessions[sessionId]
-			// undefined so callers that key off its presence stay correct.
+			const current = state.controlRooms[sessionId] ?? DEFAULT_CONTROL_ROOM;
+			const scope = update.scope === undefined ? current.scope : (update.scope ?? undefined);
+			const tab = update.tab ?? current.tab;
+			if (tab === current.tab && scope === current.scope) return state;
+			return { controlRooms: { ...state.controlRooms, [sessionId]: { tab, scope } } };
+		}),
+	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, remembersFilesSidebar = false, opensOnCrew = false) =>
+		set((state) => {
+			// Sessions without an inspector must not gain a store entry at all —
+			// leave inspectorSessions[sessionId] undefined so callers that key off
+			// its presence stay correct.
 			if (!hasInspector) return state;
 			const current = inspectorState(state.inspectorSessions, sessionId);
 			if (current.initialized) return state;
@@ -675,8 +699,9 @@ export const useUiStore = create<UiState>((set, get) => ({
 					[sessionId]: {
 						...current,
 						initialized: true,
-						view: reopenFiles ? "files" : "summary",
-						...(reopenFiles ? { isOpen: true, filesChangedOnly: false } : {}),
+						// An orchestrator opens on its crew: who is doing what is the first thing to see.
+						view: reopenFiles ? "files" : opensOnCrew ? "crew" : "summary",
+						...(reopenFiles ? { isOpen: true, filesChangedOnly: false } : opensOnCrew ? { isOpen: true } : {}),
 						...(remembersFilesSidebar ? { remembersFilesSidebar: true } : {}),
 						browserContentRevealed: current.browserContentRevealed ?? hasBrowserContent,
 					},
