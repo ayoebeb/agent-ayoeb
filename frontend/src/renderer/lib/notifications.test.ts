@@ -876,6 +876,90 @@ describe("createNotificationsTransport", () => {
 		},
 	);
 
+	describe("orchestrator_waiting", () => {
+		const waiting = (overrides: Partial<NotificationDTO> = {}) =>
+			notification({
+				id: "ntf_wait",
+				sessionId: "mer-orchestrator-1",
+				type: "orchestrator_waiting",
+				title: "Mercury: orchestrator wacht op u",
+				body: "Merge PR 42 now, or wait?",
+				target: { kind: "session", sessionId: "mer-orchestrator-1" },
+				...overrides,
+			});
+
+		it("toasts a new wait with its one-line question, and counts it as unresolved until answered", () => {
+			setWindowState({ focused: true, visible: true });
+			const qc = queryClient();
+			createNotificationsTransport(qc).connect();
+
+			EventSourceStub.instances[0].dispatch("notification_created", waiting());
+
+			expect(showNotificationMock).toHaveBeenCalledWith({
+				id: "ntf_wait",
+				title: "Mercury: orchestrator wacht op u",
+				body: "Merge PR 42 now, or wait?",
+				type: "orchestrator_waiting",
+				watched: false,
+			});
+			expect(qc.getQueryData<NotificationsCache>(unreadNotificationsQueryKey)?.pages[0].unresolvedCount).toBe(1);
+
+			EventSourceStub.instances[0].dispatch("notification_resolved", waiting({ resolvedAt: "2026-06-16T10:05:00Z" }));
+			expect(qc.getQueryData<NotificationsCache>(unreadNotificationsQueryKey)?.pages[0].unresolvedCount).toBe(0);
+		});
+
+		// A focused window can be showing anything: only the open orchestrator
+		// conversation counts as looking at the question.
+		it("is watched only while the orchestrator's own conversation is the open route", () => {
+			setWindowState({ focused: true, visible: true });
+			createNotificationsTransport(queryClient(), () => undefined, () => "mer-orchestrator-1").connect();
+			EventSourceStub.instances[0].dispatch("notification_created", waiting());
+			expect(showNotificationMock).toHaveBeenLastCalledWith(expect.objectContaining({ watched: true }));
+
+			createNotificationsTransport(queryClient(), () => undefined, () => "mer-board").connect();
+			EventSourceStub.instances[1].dispatch("notification_created", waiting({ id: "ntf_wait_2" }));
+			expect(showNotificationMock).toHaveBeenLastCalledWith(expect.objectContaining({ id: "ntf_wait_2", watched: false }));
+		});
+
+		it("is not watched when the window is unfocused, even on its own conversation", () => {
+			setWindowState({ focused: false, visible: true });
+			createNotificationsTransport(queryClient(), () => undefined, () => "mer-orchestrator-1").connect();
+			EventSourceStub.instances[0].dispatch("notification_created", waiting());
+			expect(showNotificationMock).toHaveBeenCalledWith(expect.objectContaining({ watched: false }));
+		});
+
+		it("alerts again for the single reminder without inserting a second row", () => {
+			setWindowState({ focused: true, visible: true });
+			const qc = queryClient();
+			createNotificationsTransport(qc).connect();
+			const source = EventSourceStub.instances[0];
+
+			source.dispatch("notification_created", waiting());
+			source.dispatch("notification_reminder", waiting());
+
+			expect(showNotificationMock).toHaveBeenCalledTimes(2);
+			expect(showNotificationMock).toHaveBeenLastCalledWith(expect.objectContaining({ id: "ntf_wait", type: "orchestrator_waiting" }));
+			expect(getCachedNotifications(qc.getQueryData<NotificationsCache>(unreadNotificationsQueryKey))).toHaveLength(1);
+		});
+
+		it("refreshes the open waits only for a wait, never for an unrelated notification", () => {
+			const qc = queryClient();
+			const refetch = vi.spyOn(qc, "refetchQueries").mockResolvedValue(undefined);
+			createNotificationsTransport(qc).connect();
+			const source = EventSourceStub.instances[0];
+			refetch.mockClear();
+
+			source.dispatch("notification_created", notification());
+			expect(refetch).not.toHaveBeenCalled();
+
+			source.dispatch("notification_created", waiting());
+			source.dispatch("notification_reminder", waiting());
+			source.dispatch("notification_resolved", waiting({ resolvedAt: "2026-06-16T10:05:00Z" }));
+			expect(refetch).toHaveBeenCalledTimes(3);
+			expect(refetch).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ["orchestrator-waiting"] }));
+		});
+	});
+
 	it("does not make a new daemon port serve the dead port's backoff delay", () => {
 		vi.useFakeTimers();
 		vi.spyOn(Math, "random").mockReturnValue(0.5);

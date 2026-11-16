@@ -4,6 +4,7 @@ import type { components } from "../../api/schema";
 import { aoBridge } from "./bridge";
 import { apiClient, eventStreamBaseUrl, getApiBaseUrl, subscribeApiBaseUrl } from "./api-client";
 import { computeSseRetryDelayMs } from "./sse-backoff";
+import { NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, refreshOrchestratorWaiting } from "./orchestrator-waiting";
 
 export type NotificationDTO = components["schemas"]["NotificationResponse"];
 export type NotificationsPage = components["schemas"]["ListNotificationsResponse"];
@@ -27,12 +28,15 @@ const MAX_CONFIRMED_NOTIFICATION_DELETIONS = 256;
  * Mirrors NotificationType.NeedsResolution on the backend — used here only to
  * keep `unresolvedCount` accurate on the unread/all caches.
  */
-const UNRESOLVABLE_TYPES = new Set(["needs_input", "ready_to_merge"]);
+const UNRESOLVABLE_TYPES = new Set(["needs_input", "ready_to_merge", NOTIFICATION_TYPE_ORCHESTRATOR_WAITING]);
 
 type NotificationsQueryKey = typeof unreadNotificationsQueryKey | typeof recentNotificationsQueryKey;
 
 type LiveNotificationEvent =
 	| { kind: "created"; notification: NotificationDTO; watched: boolean }
+	// The single reminder for an orchestrator that is still waiting: alert again,
+	// but the row already exists, so nothing is inserted.
+	| { kind: "reminder"; notification: NotificationDTO; watched: boolean }
 	| { kind: "resolved"; notification: NotificationDTO }
 	| { kind: "deleted"; notification: NotificationDTO }
 	| { kind: "cleared"; clear: NotificationClear };
@@ -495,9 +499,21 @@ export function keepLatestNotificationsPage(
 function isWatchingNeedsInputSession(
 	notification: NotificationDTO,
 	visibleAgentSessionId: string | undefined,
+	routeSessionId: string | undefined,
 ): boolean {
-	if (notification.type !== "needs_input") return false;
-	if (!notification.sessionId || notification.sessionId !== visibleAgentSessionId) return false;
+	if (!notification.sessionId) return false;
+	// An orchestrator's wait is watched while its own conversation is the open
+	// route and the window is visible and focused: the question is on screen. The
+	// agent-terminal check does not apply, because an orchestrator in Chat has no
+	// terminal pane. Anywhere else the user is not looking at it, so it must be
+	// loud.
+	const watchedSessionId =
+		notification.type === NOTIFICATION_TYPE_ORCHESTRATOR_WAITING
+			? routeSessionId
+			: notification.type === "needs_input"
+				? visibleAgentSessionId
+				: undefined;
+	if (notification.sessionId !== watchedSessionId) return false;
 	return document.visibilityState === "visible" && document.hasFocus();
 }
 
@@ -505,6 +521,8 @@ export function createNotificationsTransport(
 	queryClient: QueryClient,
 	/** The session whose agent terminal is currently on screen, if any. */
 	getVisibleAgentSessionId: () => string | undefined = () => undefined,
+	/** The local session whose page is the open route, if any. */
+	getRouteSessionId: () => string | undefined = () => undefined,
 ) {
 	return {
 		connect() {
@@ -522,6 +540,23 @@ export function createNotificationsTransport(
 			let pendingLiveEvents: Promise<void> | undefined;
 
 			const applyLiveNotificationEvent = (event: LiveNotificationEvent): Promise<void> | void => {
+				// Which orchestrators are waiting follows a wait being created, reminded
+				// about or answered. Clearing the notification panel does not change it:
+				// a cleared notification is an acknowledged alert, not an answered
+				// question, so those events leave the waits alone.
+				if ("notification" in event && event.notification.type === NOTIFICATION_TYPE_ORCHESTRATOR_WAITING) {
+					refreshOrchestratorWaiting(queryClient);
+				}
+				if (event.kind === "reminder") {
+					void aoBridge.notifications.show({
+						id: event.notification.id,
+						title: event.notification.title,
+						body: event.notification.body || undefined,
+						type: event.notification.type,
+						watched: event.watched,
+					});
+					return;
+				}
 				if (event.kind === "cleared") {
 					return queryClient
 						.cancelQueries({ queryKey: ["notifications", "history"] }, { revert: false })
@@ -652,6 +687,8 @@ export function createNotificationsTransport(
 					source.onopen = () => {
 						retries = 0;
 						invalidateNotifications();
+						// Waits opened or answered while the stream was down.
+						refreshOrchestratorWaiting(queryClient);
 					};
 					source.onerror = () => {
 						if (source?.readyState === EVENTSOURCE_CLOSED) scheduleRetry();
@@ -662,7 +699,18 @@ export function createNotificationsTransport(
 						receiveLiveNotificationEvent({
 							kind: "created",
 							notification,
-							watched: isWatchingNeedsInputSession(notification, getVisibleAgentSessionId()),
+							watched: isWatchingNeedsInputSession(notification, getVisibleAgentSessionId(), getRouteSessionId()),
+						});
+					});
+					// The one reminder for an orchestrator that is still waiting. It is
+					// an alert about a row the caches already hold, so it only shows.
+					source.addEventListener("notification_reminder", (event) => {
+						const notification = parseNotificationEvent(event);
+						if (!notification) return;
+						receiveLiveNotificationEvent({
+							kind: "reminder",
+							notification,
+							watched: isWatchingNeedsInputSession(notification, getVisibleAgentSessionId(), getRouteSessionId()),
 						});
 					});
 					// AO closed the underlying issue (the session got its input, the

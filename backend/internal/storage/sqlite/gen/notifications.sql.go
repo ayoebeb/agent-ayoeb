@@ -47,7 +47,7 @@ SELECT COUNT(*)
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge')
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting')
 `
 
 func (q *Queries) CountUnresolvedNotifications(ctx context.Context) (int64, error) {
@@ -61,7 +61,7 @@ const createNotification = `-- name: CreateNotification :one
 INSERT INTO notifications (
     id, session_id, project_id, pr_url, type, title, body, status, created_at, source_key
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 `
 
 type CreateNotificationParams struct {
@@ -104,6 +104,7 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		&i.ResolvedAt,
 		&i.DismissedAt,
 		&i.SourceKey,
+		&i.RemindedAt,
 	)
 	return i, err
 }
@@ -206,7 +207,7 @@ func (q *Queries) DismissNotification(ctx context.Context, id string) (int64, er
 }
 
 const getNotificationBySourceKey = `-- name: GetNotificationBySourceKey :one
-SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key FROM notifications WHERE source_key = ? LIMIT 1
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at FROM notifications WHERE source_key = ? LIMIT 1
 `
 
 func (q *Queries) GetNotificationBySourceKey(ctx context.Context, sourceKey string) (Notification, error) {
@@ -225,12 +226,13 @@ func (q *Queries) GetNotificationBySourceKey(ctx context.Context, sourceKey stri
 		&i.ResolvedAt,
 		&i.DismissedAt,
 		&i.SourceKey,
+		&i.RemindedAt,
 	)
 	return i, err
 }
 
 const getNotificationForDismissal = `-- name: GetNotificationForDismissal :one
-SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications
 WHERE id = ?
   AND dismissed_at IS NULL
@@ -254,12 +256,13 @@ func (q *Queries) GetNotificationForDismissal(ctx context.Context, id string) (N
 		&i.ResolvedAt,
 		&i.DismissedAt,
 		&i.SourceKey,
+		&i.RemindedAt,
 	)
 	return i, err
 }
 
 const getOpenNotificationByDedupe = `-- name: GetOpenNotificationByDedupe :one
-SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications
 WHERE session_id = ?
   AND type = ?
@@ -290,12 +293,62 @@ func (q *Queries) GetOpenNotificationByDedupe(ctx context.Context, arg GetOpenNo
 		&i.ResolvedAt,
 		&i.DismissedAt,
 		&i.SourceKey,
+		&i.RemindedAt,
 	)
 	return i, err
 }
 
+const listDueOrchestratorWaitingReminders = `-- name: ListDueOrchestratorWaitingReminders :many
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
+FROM notifications
+WHERE type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+  AND reminded_at IS NULL
+  AND created_at <= ?1
+ORDER BY created_at ASC, id ASC
+`
+
+// Open rows the single reminder is due for: not yet reminded, and waiting since
+// before the cutoff.
+func (q *Queries) ListDueOrchestratorWaitingReminders(ctx context.Context, cutoff time.Time) ([]Notification, error) {
+	rows, err := q.db.QueryContext(ctx, listDueOrchestratorWaitingReminders, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Notification{}
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.PRURL,
+			&i.Type,
+			&i.Title,
+			&i.Body,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ResolvedAt,
+			&i.DismissedAt,
+			&i.SourceKey,
+			&i.RemindedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNotificationsPage = `-- name: ListNotificationsPage :many
-SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications
 WHERE dismissed_at IS NULL
   AND (
@@ -335,6 +388,55 @@ func (q *Queries) ListNotificationsPage(ctx context.Context, arg ListNotificatio
 			&i.ResolvedAt,
 			&i.DismissedAt,
 			&i.SourceKey,
+			&i.RemindedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenOrchestratorWaiting = `-- name: ListOpenOrchestratorWaiting :many
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
+FROM notifications
+WHERE type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+ORDER BY created_at DESC, id DESC
+`
+
+// Every orchestrator still waiting on the user. Dismissed rows are included on
+// purpose: clearing the notification panel acknowledges the alert, not the
+// question, so the sidebar marker must outlive it.
+func (q *Queries) ListOpenOrchestratorWaiting(ctx context.Context) ([]Notification, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenOrchestratorWaiting)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Notification{}
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.PRURL,
+			&i.Type,
+			&i.Title,
+			&i.Body,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ResolvedAt,
+			&i.DismissedAt,
+			&i.SourceKey,
+			&i.RemindedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -350,7 +452,7 @@ func (q *Queries) ListNotificationsPage(ctx context.Context, arg ListNotificatio
 }
 
 const listOpenReadyToMergeNotifications = `-- name: ListOpenReadyToMergeNotifications :many
-SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications
 WHERE type = 'ready_to_merge'
   AND resolved_at IS NULL
@@ -382,6 +484,7 @@ func (q *Queries) ListOpenReadyToMergeNotifications(ctx context.Context) ([]Noti
 			&i.ResolvedAt,
 			&i.DismissedAt,
 			&i.SourceKey,
+			&i.RemindedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -397,7 +500,7 @@ func (q *Queries) ListOpenReadyToMergeNotifications(ctx context.Context) ([]Noti
 }
 
 const listUnreadNotificationsPage = `-- name: ListUnreadNotificationsPage :many
-SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications
 WHERE status = 'unread'
   AND dismissed_at IS NULL
@@ -438,6 +541,7 @@ func (q *Queries) ListUnreadNotificationsPage(ctx context.Context, arg ListUnrea
 			&i.ResolvedAt,
 			&i.DismissedAt,
 			&i.SourceKey,
+			&i.RemindedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -453,11 +557,11 @@ func (q *Queries) ListUnreadNotificationsPage(ctx context.Context, arg ListUnrea
 }
 
 const listUnresolvedNotificationsPage = `-- name: ListUnresolvedNotificationsPage :many
-SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge')
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting')
   AND (
     CAST(?1 AS TEXT) = ''
     OR created_at < ?2
@@ -498,6 +602,7 @@ func (q *Queries) ListUnresolvedNotificationsPage(ctx context.Context, arg ListU
 			&i.ResolvedAt,
 			&i.DismissedAt,
 			&i.SourceKey,
+			&i.RemindedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -533,7 +638,7 @@ SET status = 'read'
 WHERE id = ?
   AND status = 'unread'
   AND dismissed_at IS NULL
-RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 `
 
 func (q *Queries) MarkNotificationRead(ctx context.Context, id string) (Notification, error) {
@@ -552,8 +657,103 @@ func (q *Queries) MarkNotificationRead(ctx context.Context, id string) (Notifica
 		&i.ResolvedAt,
 		&i.DismissedAt,
 		&i.SourceKey,
+		&i.RemindedAt,
 	)
 	return i, err
+}
+
+const markNotificationReminded = `-- name: MarkNotificationReminded :one
+UPDATE notifications
+SET reminded_at = ?1
+WHERE id = ?2
+  AND type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+  AND reminded_at IS NULL
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
+`
+
+type MarkNotificationRemindedParams struct {
+	RemindedAt sql.NullTime
+	ID         string
+}
+
+// Claims the reminder: only the call that flips reminded_at from NULL wins, so a
+// row is announced at most once even if two ticks race.
+func (q *Queries) MarkNotificationReminded(ctx context.Context, arg MarkNotificationRemindedParams) (Notification, error) {
+	row := q.db.QueryRowContext(ctx, markNotificationReminded, arg.RemindedAt, arg.ID)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.ProjectID,
+		&i.PRURL,
+		&i.Type,
+		&i.Title,
+		&i.Body,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ResolvedAt,
+		&i.DismissedAt,
+		&i.SourceKey,
+		&i.RemindedAt,
+	)
+	return i, err
+}
+
+const resolveOpenSessionNotificationsByTypeIncludingDismissed = `-- name: ResolveOpenSessionNotificationsByTypeIncludingDismissed :many
+UPDATE notifications
+SET resolved_at = ?1
+WHERE session_id = ?2
+  AND type = ?3
+  AND resolved_at IS NULL
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
+`
+
+type ResolveOpenSessionNotificationsByTypeIncludingDismissedParams struct {
+	ResolvedAt sql.NullTime
+	SessionID  domain.SessionID
+	Type       domain.NotificationType
+}
+
+// An orchestrator's wait outlives the user dismissing its notification, so
+// resolving it must reach dismissed rows too and report them: the sidebar marker
+// comes from the open waits, not from the visible history, and learns the wait
+// ended from the resolved event.
+func (q *Queries) ResolveOpenSessionNotificationsByTypeIncludingDismissed(ctx context.Context, arg ResolveOpenSessionNotificationsByTypeIncludingDismissedParams) ([]Notification, error) {
+	rows, err := q.db.QueryContext(ctx, resolveOpenSessionNotificationsByTypeIncludingDismissed, arg.ResolvedAt, arg.SessionID, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Notification{}
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.PRURL,
+			&i.Type,
+			&i.Title,
+			&i.Body,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ResolvedAt,
+			&i.DismissedAt,
+			&i.SourceKey,
+			&i.RemindedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resolvePRNotificationsByType = `-- name: ResolvePRNotificationsByType :many
@@ -563,7 +763,7 @@ WHERE pr_url = ?2
   AND type = ?3
   AND resolved_at IS NULL
   AND dismissed_at IS NULL
-RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 `
 
 type ResolvePRNotificationsByTypeParams struct {
@@ -594,6 +794,7 @@ func (q *Queries) ResolvePRNotificationsByType(ctx context.Context, arg ResolveP
 			&i.ResolvedAt,
 			&i.DismissedAt,
 			&i.SourceKey,
+			&i.RemindedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -615,7 +816,7 @@ WHERE session_id = ?2
   AND type = ?3
   AND resolved_at IS NULL
   AND dismissed_at IS NULL
-RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 `
 
 type ResolveSessionNotificationsByTypeParams struct {
@@ -646,6 +847,7 @@ func (q *Queries) ResolveSessionNotificationsByType(ctx context.Context, arg Res
 			&i.ResolvedAt,
 			&i.DismissedAt,
 			&i.SourceKey,
+			&i.RemindedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -671,7 +873,7 @@ WHERE type = 'needs_input'
     WHERE is_terminated = TRUE
        OR activity_state NOT IN ('waiting_input', 'blocked')
   )
-RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
 `
 
 // Restart reconciliation: a resolution transition observed while the daemon was
@@ -699,6 +901,55 @@ func (q *Queries) ResolveStaleNeedsInputNotifications(ctx context.Context, resol
 			&i.ResolvedAt,
 			&i.DismissedAt,
 			&i.SourceKey,
+			&i.RemindedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveStaleOrchestratorWaitingNotifications = `-- name: ResolveStaleOrchestratorWaitingNotifications :many
+UPDATE notifications
+SET resolved_at = ?1
+WHERE type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+  AND session_id IN (SELECT id FROM sessions WHERE is_terminated = TRUE)
+RETURNING id, session_id, project_id, pr_url, type, title, body, status, created_at, resolved_at, dismissed_at, source_key, reminded_at
+`
+
+// Restart reconciliation for orchestrator waits: an orchestrator that ended
+// while the daemon was down never reached lifecycle.
+func (q *Queries) ResolveStaleOrchestratorWaitingNotifications(ctx context.Context, resolvedAt sql.NullTime) ([]Notification, error) {
+	rows, err := q.db.QueryContext(ctx, resolveStaleOrchestratorWaitingNotifications, resolvedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Notification{}
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.PRURL,
+			&i.Type,
+			&i.Title,
+			&i.Body,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ResolvedAt,
+			&i.DismissedAt,
+			&i.SourceKey,
+			&i.RemindedAt,
 		); err != nil {
 			return nil, err
 		}

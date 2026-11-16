@@ -180,6 +180,7 @@ var legacyActorlessUserCLICommands = map[string]struct{}{
 	"ao spawn":                  {},
 	"ao stop":                   {},
 	"ao version":                {},
+	"ao notify-user":            {},
 
 	// Their own group so the longer keys do not re-align the list above.
 	"ao session approvals":         {},

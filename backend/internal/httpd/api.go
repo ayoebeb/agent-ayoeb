@@ -26,37 +26,39 @@ import (
 
 // APIDeps bundles every service the API layer's controllers depend on.
 type APIDeps struct {
-	UsageFlush         func(context.Context)
-	Awake              controllers.AwakeService
-	Agents             controllers.AgentCatalog
-	CodexAccounts      controllers.CodexAccountService
-	AgentAccounts      controllers.AgentAccountService
-	Projects           projectsvc.Manager
-	Sessions           controllers.SessionService
-	ArtifactVersions   controllers.ArtifactVersionService
-	Automations        controllers.AutomationService
-	DesktopWorkspaces  controllers.DesktopWorkspaceService
-	Activity           controllers.ActivityRecorder
-	PRRefresh          controllers.PRRefresher
-	NativeSessions     ports.AgentNativeSessionResolver
-	UsageHooks         controllers.UsageHookRecorder
-	UsageSummary       controllers.UsageSummaryService
-	UsageReport        controllers.UsageReportService
-	UsageLimitHistory  controllers.UsageLimitHistoryService
-	UsageLimitSetting  controllers.UsageLimitHistorySetting
-	UsagePrices        controllers.UsagePriceService
-	SessionMemory      controllers.SessionMemoryService
-	SessionSteps       controllers.SessionStepsReader
-	PRs                prsvc.ActionManager
-	Reviews            reviewsvc.Manager
-	Notifications      controllers.NotificationService
-	Reports            controllers.ReportService
-	NotificationStream controllers.NotificationStream
-	Push               controllers.PushRegistry
-	Import             controllers.ImportService
-	SessionImport      controllers.SessionImportService
-	Directories        controllers.DirectoryBrowserService
-	ShellTerminals     controllers.ShellTerminalService
+	UsageFlush        func(context.Context)
+	Awake             controllers.AwakeService
+	Agents            controllers.AgentCatalog
+	CodexAccounts     controllers.CodexAccountService
+	AgentAccounts     controllers.AgentAccountService
+	Projects          projectsvc.Manager
+	Sessions          controllers.SessionService
+	ArtifactVersions  controllers.ArtifactVersionService
+	Automations       controllers.AutomationService
+	DesktopWorkspaces controllers.DesktopWorkspaceService
+	Activity          controllers.ActivityRecorder
+	PRRefresh         controllers.PRRefresher
+	NativeSessions    ports.AgentNativeSessionResolver
+	UsageHooks        controllers.UsageHookRecorder
+	UsageSummary      controllers.UsageSummaryService
+	UsageReport       controllers.UsageReportService
+	UsageLimitHistory controllers.UsageLimitHistoryService
+	UsageLimitSetting controllers.UsageLimitHistorySetting
+	UsagePrices       controllers.UsagePriceService
+	SessionMemory     controllers.SessionMemoryService
+	SessionSteps      controllers.SessionStepsReader
+	PRs               prsvc.ActionManager
+	Reviews           reviewsvc.Manager
+	Notifications     controllers.NotificationService
+	// OrchestratorWaiting records and lists orchestrators waiting for the user.
+	OrchestratorWaiting controllers.OrchestratorWaitingService
+	Reports             controllers.ReportService
+	NotificationStream  controllers.NotificationStream
+	Push                controllers.PushRegistry
+	Import              controllers.ImportService
+	SessionImport       controllers.SessionImportService
+	Directories         controllers.DirectoryBrowserService
+	ShellTerminals      controllers.ShellTerminalService
 	// CommandRuns runs commands from Chat's Run button; CommandRunKey is the
 	// key the local desktop presents for them (see DeriveCommandRunKey).
 	CommandRuns   controllers.CommandRunService
@@ -155,6 +157,7 @@ type API struct {
 	prs           *controllers.PRsController
 	reviews       *controllers.ReviewsController
 	notifications *controllers.NotificationsController
+	orchWaiting   *controllers.OrchestratorWaitingController
 	reports       *controllers.ReportsController
 	push          *controllers.PushController
 	imports       *controllers.ImportController
@@ -223,6 +226,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
+		orchWaiting:   &controllers.OrchestratorWaitingController{Svc: deps.OrchestratorWaiting},
 		reports:       &controllers.ReportsController{Svc: deps.Reports},
 		push:          &controllers.PushController{Registry: deps.Push},
 		imports:       &controllers.ImportController{Svc: deps.Import},
@@ -366,6 +370,7 @@ func (a *API) Register(root chi.Router) {
 			a.prs.Register(r)
 			a.reviews.Register(r)
 			a.notifications.Register(r)
+			a.orchWaiting.Register(r)
 			a.reports.Register(r)
 			a.push.Register(r)
 			a.imports.Register(r)

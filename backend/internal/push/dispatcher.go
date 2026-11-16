@@ -103,9 +103,10 @@ func (d *Dispatcher) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			// Only a new notification buzzes a phone. Resolution events exist so
-			// open dashboards can drop a row; there is nothing to push about.
-			if event.Kind != domain.NotificationCreated {
+			// Only a new notification buzzes a phone, plus the single reminder for
+			// an orchestrator that is still waiting on the user. Resolution events
+			// exist so open dashboards can drop a row; there is nothing to push about.
+			if event.Kind != domain.NotificationCreated && event.Kind != domain.NotificationReminder {
 				continue
 			}
 			d.dispatch(ctx, event.Record)

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -21,17 +22,37 @@ const (
 	NotificationReviewCompleted NotificationType = "review_completed"
 	// NotificationReviewChangesRequested means an AO reviewer found changes to make.
 	NotificationReviewChangesRequested NotificationType = "review_changes_requested"
+	// NotificationOrchestratorWaiting means a project's orchestrator, the user's
+	// main contact, is waiting for the user: a pending approval or question, or a
+	// turn that ended with a question the orchestrator declared with
+	// `ao notify-user --waiting`. It stays open until the user responds.
+	NotificationOrchestratorWaiting NotificationType = "orchestrator_waiting"
 )
 
 // Valid reports whether t is one of the v1 notification kinds.
 func (t NotificationType) Valid() bool {
 	switch t {
 	case NotificationNeedsInput, NotificationReadyToMerge, NotificationPRMerged, NotificationPRClosedUnmerged,
-		NotificationReviewCompleted, NotificationReviewChangesRequested:
+		NotificationReviewCompleted, NotificationReviewChangesRequested, NotificationOrchestratorWaiting:
 		return true
 	default:
 		return false
 	}
+}
+
+// OrchestratorWaitingSourceKeyPrefix starts the source key of every
+// orchestrator_waiting row. The notification table de-duplicates an open row per
+// session and type by also counting unread rows, so a wait the user answered but
+// never opened would swallow the next one. A key of its own per wait gives each
+// its own row.
+const OrchestratorWaitingSourceKeyPrefix = "orchestrator_waiting:"
+
+// OrchestratorWaitingSourceKey is the source key of a wait derived from a
+// session entering the needs-input family at the given time. The same transition
+// always yields the same key, so replaying it cannot notify twice, while a later
+// wait gets a row of its own.
+func OrchestratorWaitingSourceKey(id SessionID, at time.Time) string {
+	return fmt.Sprintf("%s%s:%d", OrchestratorWaitingSourceKeyPrefix, id, at.UnixNano())
 }
 
 // NeedsResolution reports whether t describes an issue that stays open until
@@ -39,7 +60,7 @@ func (t NotificationType) Valid() bool {
 // Terminal facts — a PR that merged or closed — describe something that already
 // happened, so they are surfaced once as unseen and never held as unresolved.
 func (t NotificationType) NeedsResolution() bool {
-	return t == NotificationNeedsInput || t == NotificationReadyToMerge
+	return t == NotificationNeedsInput || t == NotificationReadyToMerge || t == NotificationOrchestratorWaiting
 }
 
 // NotificationStatus is the seen state for a stored notification. The stored
@@ -102,6 +123,10 @@ type NotificationRecord struct {
 	// its input, or the PR stopped waiting on a merge. Zero means still open.
 	// Only AO writes it; there is no user-facing "resolve" action.
 	ResolvedAt time.Time
+	// RemindedAt is when AO re-notified the user about a still-open
+	// orchestrator_waiting row. Zero means no reminder was sent. It makes the
+	// single reminder survive a daemon restart.
+	RemindedAt time.Time
 	// SourceKey identifies the durable transition that produced a terminal
 	// notification. It is internal dedupe metadata and is not exposed over HTTP.
 	SourceKey string
@@ -119,6 +144,10 @@ const (
 	// NotificationResolved announces that a stored notification's underlying
 	// issue went away, so open dashboards can drop it from the unresolved list.
 	NotificationResolved NotificationEventKind = "resolved"
+	// NotificationReminder announces that a still-open orchestrator_waiting row
+	// is being re-notified once. It carries the existing row: clients alert the
+	// user again (toast, sound, push) but do not insert a second row.
+	NotificationReminder NotificationEventKind = "reminder"
 	// NotificationDeleted announces that one stored notification was deleted.
 	NotificationDeleted NotificationEventKind = "deleted"
 	// NotificationCleared announces that notification history was deleted.

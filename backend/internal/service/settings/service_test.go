@@ -28,6 +28,9 @@ func (*hibernationSettingsStore) SetComputerUse(context.Context, bool, time.Time
 func (*hibernationSettingsStore) SetSessionRetentionDays(context.Context, int, time.Time) error {
 	return nil
 }
+func (*hibernationSettingsStore) SetOrchestratorWaiting(context.Context, bool, int, time.Time) error {
+	return nil
+}
 
 func TestChatHibernationGateResetsOnDaemonBoot(t *testing.T) {
 	ctx := context.Background()
@@ -193,6 +196,53 @@ func TestComputerUseNeedsCuaDriverToTurnOn(t *testing.T) {
 	installed = false
 	if snapshot, err := svc.SetComputerUse(ctx, false); err != nil || snapshot.ComputerUse {
 		t.Fatalf("disable after Cua Driver was removed: snapshot=%+v err=%v", snapshot, err)
+	}
+}
+
+type orchestratorWaitingStore struct {
+	hibernationSettingsStore
+	enabled bool
+	minutes int
+}
+
+func (s *orchestratorWaitingStore) GetAppSettings(context.Context) (Snapshot, error) {
+	return Snapshot{OrchestratorWaitingEnabled: s.enabled, OrchestratorWaitingRenotifyMinutes: s.minutes}, s.err
+}
+
+func (s *orchestratorWaitingStore) SetOrchestratorWaiting(_ context.Context, enabled bool, minutes int, _ time.Time) error {
+	s.enabled, s.minutes = enabled, minutes
+	return nil
+}
+
+// The reminder delay is minutes between 0 (never) and a day. Anything else is
+// refused before it is stored, and the answer the notifier reads is a duration.
+func TestOrchestratorWaitingSettings(t *testing.T) {
+	ctx := context.Background()
+	store := &orchestratorWaitingStore{enabled: true, minutes: 10}
+	svc := New(store, nil, Offering{}, nil)
+	for _, minutes := range []int{-1, maxOrchestratorWaitingRenotifyMinutes + 1} {
+		var apiErr *apierr.Error
+		if _, err := svc.SetOrchestratorWaiting(ctx, false, minutes); !errors.As(err, &apiErr) ||
+			apiErr.Code != "ORCHESTRATOR_WAITING_RENOTIFY_INVALID" || !store.enabled || store.minutes != 10 {
+			t.Fatalf("minutes=%d: err=%v stored=%+v, want ORCHESTRATOR_WAITING_RENOTIFY_INVALID and no change", minutes, err, store)
+		}
+	}
+	snapshot, err := svc.SetOrchestratorWaiting(ctx, true, 0)
+	if err != nil || !snapshot.OrchestratorWaitingEnabled || snapshot.OrchestratorWaitingRenotifyMinutes != 0 {
+		t.Fatalf("no reminder: snapshot=%+v err=%v", snapshot, err)
+	}
+	if _, after, err := svc.OrchestratorWaiting(ctx); err != nil || after != 0 {
+		t.Fatalf("reminder off: after=%v err=%v", after, err)
+	}
+	if _, err := svc.SetOrchestratorWaiting(ctx, false, 25); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, after, err := svc.OrchestratorWaiting(ctx); err != nil || enabled || after != 25*time.Minute {
+		t.Fatalf("off with 25 minutes: enabled=%v after=%v err=%v", enabled, after, err)
+	}
+	store.err = errors.New("database unavailable")
+	if _, _, err := svc.OrchestratorWaiting(ctx); err == nil {
+		t.Fatal("an unreadable store must be an error, not a silent off")
 	}
 }
 

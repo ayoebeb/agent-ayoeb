@@ -2,15 +2,55 @@
 import { describe, expect, it } from "vitest";
 import {
 	dockBounceType,
+	lookingAtNotification,
 	osToastChimeControllable,
 	shouldReplaceBounce,
 	shouldSignalAttention,
 	shouldToast,
+	soundEnabledFor,
 	toastSilent,
 	type NotificationType,
 } from "./notification-signals";
 
-const ALL_TYPES: NotificationType[] = ["needs_input", "ready_to_merge", "pr_merged", "pr_closed_unmerged"];
+const ALL_TYPES: NotificationType[] = [
+	"needs_input",
+	"ready_to_merge",
+	"pr_merged",
+	"pr_closed_unmerged",
+	"orchestrator_waiting",
+];
+
+describe("orchestrator_waiting", () => {
+	it("toasts, flashes the taskbar and bounces the dock until the app is opened", () => {
+		expect(shouldToast({ title: "Mercury: orchestrator wacht op u" }, true)).toBe(true);
+		expect(shouldSignalAttention("orchestrator_waiting")).toBe(true);
+		expect(dockBounceType("orchestrator_waiting")).toBe("critical");
+	});
+
+	// A focused window can be showing anything. Only the renderer saying the
+	// orchestrator's own conversation is open counts as looking at the question.
+	it("is only seen when its own conversation is on screen, not merely when the window is focused", () => {
+		expect(lookingAtNotification("orchestrator_waiting", { windowFocused: true, watched: false })).toBe(false);
+		expect(lookingAtNotification("orchestrator_waiting", { windowFocused: true, watched: undefined })).toBe(false);
+		expect(lookingAtNotification("orchestrator_waiting", { windowFocused: false, watched: true })).toBe(true);
+	});
+
+	it("keeps the focused-window rule for every other type", () => {
+		for (const type of ["needs_input", "ready_to_merge", "pr_merged", undefined]) {
+			expect(lookingAtNotification(type, { windowFocused: true, watched: false })).toBe(true);
+			expect(lookingAtNotification(type, { windowFocused: false, watched: true })).toBe(true);
+			expect(lookingAtNotification(type, { windowFocused: false, watched: false })).toBe(false);
+		}
+	});
+
+	it("has its own sound switch, so silencing the general sound does not silence it", () => {
+		expect(soundEnabledFor("orchestrator_waiting", { general: false, orchestratorWaiting: true })).toBe(true);
+		expect(soundEnabledFor("orchestrator_waiting", { general: true, orchestratorWaiting: false })).toBe(false);
+		expect(soundEnabledFor("needs_input", { general: false, orchestratorWaiting: true })).toBe(false);
+		expect(soundEnabledFor("needs_input", { general: true, orchestratorWaiting: false })).toBe(true);
+		expect(soundEnabledFor(undefined, { general: true, orchestratorWaiting: false })).toBe(true);
+	});
+});
 
 describe("shouldToast", () => {
 	it("fires a toast for every backend notification type", () => {
@@ -98,8 +138,12 @@ describe("dockBounceType", () => {
 		expect(dockBounceType("needs_input")).toBe("critical");
 	});
 
+	it("bounces critically for a project orchestrator waiting on the user", () => {
+		expect(dockBounceType("orchestrator_waiting")).toBe("critical");
+	});
+
 	it("bounces once for the other backend types", () => {
-		for (const type of ALL_TYPES.filter((t) => t !== "needs_input")) {
+		for (const type of ALL_TYPES.filter((t) => t !== "needs_input" && t !== "orchestrator_waiting")) {
 			expect(dockBounceType(type)).toBe("informational");
 		}
 	});

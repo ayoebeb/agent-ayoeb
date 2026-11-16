@@ -4502,6 +4502,31 @@ paths:
       summary: Stream notification changes
       tags:
       - notifications
+  /api/v1/orchestrator-waiting:
+    get:
+      operationId: listOrchestratorWaiting
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListOrchestratorWaitingResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the orchestrators that are waiting for the user
+      tags:
+      - notifications
   /api/v1/orchestrators:
     get:
       operationId: listOrchestrators
@@ -11933,6 +11958,113 @@ paths:
       summary: Send a message to a running session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/waiting:
+    delete:
+      operationId: clearOrchestratorWaiting
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearOrchestratorWaitingResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Withdraw this orchestrator's waiting-for-the-user notice
+      tags:
+      - notifications
+    post:
+      operationId: declareOrchestratorWaiting
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclareOrchestratorWaitingRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeclareOrchestratorWaitingResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Tell the user this orchestrator ended its turn waiting for them
+      tags:
+      - notifications
   /api/v1/sessions/{sessionId}/workspace/branches:
     get:
       operationId: listSessionWorkspaceBranches
@@ -13216,6 +13348,44 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Choose which models one harness's pickers offer
+      tags:
+      - settings
+  /api/v1/settings/orchestrator-waiting:
+    patch:
+      operationId: updateOrchestratorWaiting
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateOrchestratorWaitingRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Choose whether and how persistently AO tells you a project orchestrator
+        is waiting for you
       tags:
       - settings
   /api/v1/settings/session-interface:
@@ -16098,6 +16268,13 @@ components:
       - clearEpoch
       - clearSequence
       type: object
+    ClearOrchestratorWaitingResponse:
+      properties:
+        cleared:
+          type: boolean
+      required:
+      - cleared
+      type: object
     CloneDestination:
       properties:
         canUseExisting:
@@ -18523,6 +18700,29 @@ components:
       - createdAt
       - updatedAt
       type: object
+    DeclareOrchestratorWaitingRequest:
+      properties:
+        question:
+          description: One line, at most 240 characters, saying what the user must
+            decide or answer.
+          type: string
+      required:
+      - question
+      type: object
+    DeclareOrchestratorWaitingResponse:
+      properties:
+        outcome:
+          description: 'notified: a new wait was recorded and the user was told. unchanged:
+            the same question was already open. disabled: the user switched this notification
+            off in Settings.'
+          enum:
+          - notified
+          - unchanged
+          - disabled
+          type: string
+      required:
+      - outcome
+      type: object
     DegradedProject:
       properties:
         id:
@@ -19570,6 +19770,15 @@ components:
       - unreadCount
       - unresolvedCount
       type: object
+    ListOrchestratorWaitingResponse:
+      properties:
+        waiting:
+          items:
+            $ref: '#/components/schemas/OrchestratorWaitingResponse'
+          type: array
+      required:
+      - waiting
+      type: object
     ListPRFilesResponse:
       properties:
         commits:
@@ -20051,6 +20260,7 @@ components:
           - pr_closed_unmerged
           - review_completed
           - review_changes_requested
+          - orchestrator_waiting
           type: string
       required:
       - id
@@ -20141,6 +20351,33 @@ components:
       required:
       - id
       - projectId
+      type: object
+    OrchestratorWaitingResponse:
+      properties:
+        notificationId:
+          type: string
+        projectId:
+          type: string
+        question:
+          type: string
+        reminded:
+          description: True once the single reminder has been sent.
+          type: boolean
+        sessionId:
+          type: string
+        since:
+          format: date-time
+          type: string
+        title:
+          type: string
+      required:
+      - notificationId
+      - sessionId
+      - projectId
+      - title
+      - question
+      - since
+      - reminded
       type: object
     PRReviewState:
       properties:
@@ -22309,6 +22546,17 @@ components:
           type: object
         localEnabled:
           type: boolean
+        orchestratorWaitingEnabled:
+          description: When on, a project orchestrator waiting for the user raises
+            a distinct notification (toast, sound, phone push, badge and a sidebar
+            marker) until the user responds.
+          type: boolean
+        orchestratorWaitingRenotifyMinutes:
+          description: Minutes a question stays unanswered before it is announced
+            a second time; 0 turns the reminder off.
+          maximum: 1440
+          minimum: 0
+          type: integer
         sessionRetentionDays:
           description: Days an archived session whose worktree is released is kept
             before the daemon deletes it permanently; 0 keeps it.
@@ -22328,6 +22576,8 @@ components:
       - versionRefresh
       - computerUse
       - sessionRetentionDays
+      - orchestratorWaitingEnabled
+      - orchestratorWaitingRenotifyMinutes
       - cloudEnabled
       - cloudControlPlaneUrl
       - trackerIntakeEnabled
@@ -23671,6 +23921,24 @@ components:
           - array
       required:
       - disabledModels
+      type: object
+    UpdateOrchestratorWaitingRequest:
+      properties:
+        enabled:
+          type:
+          - "null"
+          - boolean
+        renotifyMinutes:
+          description: Minutes before a still-unanswered question is announced a second
+            time; 0 turns the reminder off.
+          maximum: 1440
+          minimum: 0
+          type:
+          - "null"
+          - integer
+      required:
+      - enabled
+      - renotifyMinutes
       type: object
     UpdateProjectSettingsInput:
       properties:

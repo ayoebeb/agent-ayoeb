@@ -20,7 +20,7 @@ func enrich(intent Intent) (domain.NotificationRecord, error) {
 	if !intent.Type.Valid() {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationType
 	}
-	if intent.Type != domain.NotificationNeedsInput && rec.PRURL == "" {
+	if intent.Type != domain.NotificationNeedsInput && intent.Type != domain.NotificationOrchestratorWaiting && rec.PRURL == "" {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationRecord
 	}
 	rec.Title = titleForIntent(intent)
@@ -51,10 +51,31 @@ func titleForIntent(intent Intent) string {
 		return fmt.Sprintf("Review complete for %s", prLabel(intent))
 	case domain.NotificationReviewChangesRequested:
 		return fmt.Sprintf("Review found changes for %s", prLabel(intent))
+	case domain.NotificationOrchestratorWaiting:
+		return OrchestratorWaitingTitle(intent.ProjectName, string(intent.ProjectID))
 	default:
 		return "Notification"
 	}
 }
+
+// OrchestratorWaitingTitle is the title of the notification that says a
+// project's orchestrator is waiting for the user: "<project>: orchestrator wacht
+// op u". It follows the user's own wording and is the same text on every
+// surface (desktop toast, notification center, phone push).
+func OrchestratorWaitingTitle(projectName, projectID string) string {
+	name := strings.TrimSpace(projectName)
+	if name == "" {
+		name = strings.TrimSpace(projectID)
+	}
+	if name == "" {
+		name = "project"
+	}
+	return name + ": orchestrator wacht op u"
+}
+
+// orchestratorWaitingFallbackBody is shown when the wait is a pending approval
+// or input request, which has no declared one-line question.
+const orchestratorWaitingFallbackBody = "De orchestrator wacht op uw antwoord of goedkeuring."
 
 func bodyForIntent(intent Intent) string {
 	switch intent.Type {
@@ -83,6 +104,11 @@ func bodyForIntent(intent Intent) string {
 		return "Orchestrator finished reviewing this pull request and approved it."
 	case domain.NotificationReviewChangesRequested:
 		return "Orchestrator finished reviewing this pull request and found changes to address."
+	case domain.NotificationOrchestratorWaiting:
+		if detail := strings.TrimSpace(intent.Detail); detail != "" {
+			return detail
+		}
+		return orchestratorWaitingFallbackBody
 	default:
 		return ""
 	}

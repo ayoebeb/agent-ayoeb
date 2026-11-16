@@ -73,6 +73,7 @@ type Service struct {
 	onModelChanged   func(domain.SessionID, string)
 	stopProviderHost func(context.Context, domain.SessionID) error
 	reports          *reportsvc.Coordinator
+	replyObserver    HumanReplyObserver
 	renders          RenderFiles
 	dataDir          string
 	reconcileOutput  func(context.Context, domain.SessionID) error
@@ -132,6 +133,32 @@ type Service struct {
 // has constructed both services.
 func (s *Service) SetReportCoordinator(coordinator *reportsvc.Coordinator) {
 	s.reports = coordinator
+}
+
+// HumanReplyObserver hears that the human sent a message to a session. The
+// orchestrator-waiting tracker uses it to close the question the message
+// answers.
+type HumanReplyObserver interface {
+	UserReplied(ctx context.Context, id domain.SessionID)
+}
+
+// SetHumanReplyObserver registers who hears of every message the human sends.
+func (s *Service) SetHumanReplyObserver(observer HumanReplyObserver) {
+	s.replyObserver = observer
+}
+
+// notifyHumanReply tells the observer a message from the human was accepted.
+// Messages AO sent on its own behalf (an automation) and messages another
+// session authored are not replies: a worker steering its orchestrator arrives
+// with human origin too, and is told apart by the session that sent it.
+func (s *Service) notifyHumanReply(ctx context.Context, id domain.SessionID, msg ports.ChatUserMessage) {
+	if s.replyObserver == nil {
+		return
+	}
+	if (msg.Origin != "" && msg.Origin != domain.MessageOriginHuman) || strings.TrimSpace(msg.SenderSessionID) != "" {
+		return
+	}
+	s.replyObserver.UserReplied(ctx, id)
 }
 
 // controllerGate serializes start/stop for one session without making provider
@@ -1461,6 +1488,9 @@ func (s *Service) Send(
 		if err := s.reports.AcceptPiggyback(ctx, reports); err != nil {
 			return domain.ConversationTurn{}, fmt.Errorf("acknowledge worker reports: %w", err)
 		}
+	}
+	if turn.ID != "" {
+		s.notifyHumanReply(ctx, id, msg)
 	}
 	return turn, nil
 }
