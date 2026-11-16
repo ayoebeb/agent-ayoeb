@@ -23,8 +23,13 @@ ao://sessions/{project-id}/{session-id}
   `/artifacts/{path}`, where `{path}` is relative to that directory and each
   segment is percent-encoded: `ao://sessions/{project-id}/{session-id}/artifacts/{path}`.
   Opening it navigates to the session and opens the artifact.
-- Emit only these navigation routes. Do not append query strings, fragments,
-  action names, credentials, authorities, or extra path segments.
+- To land on a heading in that session's chat, append `#{anchor}` to the session
+  link: `ao://sessions/{project-id}/{session-id}#{anchor}`. The anchor is the
+  heading in lowercase, punctuation removed, spaces turned into hyphens; a
+  repeated heading gets `-1`, `-2`. Inside the same chat, a plain `#{anchor}`
+  markdown link does the same.
+- Emit only these navigation routes. Do not append query strings, other
+  fragments, action names, credentials, authorities, or extra path segments.
 - The link is handled only inside a currently running Orchestrator desktop app. It is not
   an operating-system protocol link and must not be described as supporting
   cold launch or navigation from external applications.
