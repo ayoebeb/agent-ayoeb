@@ -87,6 +87,11 @@ function ProjectScreenContent() {
 		router.push({ pathname: "/spawn", params: { projectId: id, hostId: routeHostId } });
 	}, [hostMatches, id, routeHostId, router]);
 	const canStartTask = hostMatches && !!row;
+	// Jira is connected on the desktop; this only reads the machine's board.
+	const openJira = useCallback(() => {
+		if (!hostMatches) return;
+		router.push({ pathname: "/jira/[projectId]", params: { projectId: id, hostId: routeHostId } });
+	}, [hostMatches, id, routeHostId, router]);
 
 	// Memoized on what the items show. hostStates is replaced on every poll, and
 	// each new toolbar element would register the header's options again.
@@ -174,12 +179,17 @@ function ProjectScreenContent() {
 					refreshing={refreshing}
 					onRefresh={onRefresh}
 					ListHeaderComponent={
-						<ProjectPageHeader
-							row={row}
+						<>
+							<ProjectPageHeader
+								row={row}
 							stats={stats}
 							busy={busyProjects.has(hostedRowKey(currentHostId ?? "", row.project.id))}
 							onPress={openOrchestrator}
-						/>
+							/>
+							<View style={styles.jiraRow}>
+								<Button title="Jira tickets" variant="secondary" icon="list" onPress={openJira} />
+							</View>
+						</>
 					}
 					ListEmptyComponent={
 						<View>
@@ -204,4 +214,5 @@ const makeStyles = (t: Theme) =>
 		screen: { flex: 1, backgroundColor: t.bgBase },
 		center: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 },
 		floatingBanner: { position: "absolute", start: 0, end: 0, zIndex: 1 },
+		jiraRow: { flexDirection: "row", paddingHorizontal: space.lg, paddingBottom: space.md },
 	});

@@ -19870,7 +19870,9 @@ components:
           type: boolean
         connectedAt:
           format: date-time
-          type: string
+          type:
+          - "null"
+          - string
         email:
           type: string
         jql:
@@ -19881,7 +19883,6 @@ components:
           type: string
       required:
       - connected
-      - connectedAt
       type: object
     JiraStartResult:
       properties:
@@ -19940,7 +19941,9 @@ components:
           type: string
         updatedAt:
           format: date-time
-          type: string
+          type:
+          - "null"
+          - string
         url:
           type: string
       required:
@@ -19948,7 +19951,6 @@ components:
       - summary
       - url
       - status
-      - updatedAt
       type: object
     JiraTicketSession:
       properties:

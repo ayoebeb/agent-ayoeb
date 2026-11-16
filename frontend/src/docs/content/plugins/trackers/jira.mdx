@@ -1,0 +1,31 @@
+---
+title: Jira board
+description: Show a project's Jira tickets next to its agents and send a ticket to the orchestrator.
+---
+
+A project can show its Jira Cloud tickets as a second board. Each ticket has a **Start with orchestrator** button that sends the ticket to the project's orchestrator as a new task. Jira is read-only here: Orchestrator never changes a ticket's status and never posts a comment.
+
+## Connect a project
+
+1. In Jira, open your Atlassian account, then **Security**, then **API tokens**, and create a token.
+2. In Orchestrator, open the project's settings and find the **Jira** section.
+3. Enter the Jira site (for example `yourcompany.atlassian.net`), the email address of your Atlassian account, the API token, and the project key (for example `YIA`).
+4. Select **Test connection**. It checks the sign-in, the project and the query, and shows how many tickets it found.
+5. Select **Connect**.
+
+Two optional fields narrow or shape the board. **JQL** replaces the default query, which shows the project's open tickets and what finished in the last week, for example `project = YIA AND assignee = currentUser()`. **Board ID** picks a specific Jira board; without it, the project's first board is used. When no board can be read, columns follow each ticket's status.
+
+The API token is write-only. It is stored in an owner-only file in the data directory of the machine that runs the project, it is used only to read your Jira site, and it is never shown again, logged or sent anywhere else. **Disconnect** removes it.
+
+## Use the Jira board
+
+The project's board has an **Agents** and a **Jira** view; Orchestrator remembers which one you left open. The Jira view shows the tickets in the columns of your Jira board, with the key, title, assignee, type and priority, and a link that opens the ticket in your browser. It refreshes every minute and has a refresh button. **Assigned to me** narrows it to your tickets.
+
+Select a ticket to read its description and acceptance criteria. Both the card and the detail have the same buttons:
+
+- **Start with orchestrator** sends the ticket (key, title, description, acceptance criteria and link) to the project's orchestrator, starting the orchestrator first if it is not running. The card then shows that the ticket was sent, and any worker started for the ticket appears on it.
+- **Start a worker directly** opens New task with the ticket already filled in, so you choose the agent and model yourself.
+
+## On your phone
+
+With the phone paired to this machine, open a project and select **Jira tickets**. The tickets and the **Start with orchestrator** button work the same; connecting Jira stays on the desktop.

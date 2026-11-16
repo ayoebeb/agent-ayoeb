@@ -67,6 +67,9 @@ vi.mock("../hooks/useWorkspaceQuery", () => ({
 }));
 
 vi.mock("./ProjectImportOffer", () => ({ ProjectImportOffer: () => null }));
+vi.mock("./JiraBoardView", () => ({
+	JiraBoardView: (props: { projectId: string; onOpenSettings: () => void }) => <div data-testid="jira-board-stub" data-project-id={props.projectId}><button type="button" onClick={props.onOpenSettings}>stub-connect</button></div>,
+}));
 
 vi.mock("./SessionTopbarActions", async (importOriginal) => ({ ...(await importOriginal<typeof import("./SessionTopbarActions")>()), SessionTopbarActions: () => null }));
 
@@ -1984,3 +1987,67 @@ function terminatedSession(overrides: Partial<WorkspaceSession> = {}): Workspace
 		...overrides,
 	};
 }
+
+describe("SessionsBoard Jira toggle", () => {
+	const worker = () => boardSession({ id: "s1", title: "Fix login", status: "working" });
+	const openProject = () => workspaceQueryMock.mockReturnValue({ data: [workspaceWithSessions([worker()])], isSuccess: true, isError: false });
+
+	beforeEach(() => window.localStorage.clear());
+
+	it("offers an Agents and a Jira view on a project's board, opening on Agents", () => {
+		openProject();
+		renderBoard("p1");
+
+		expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute("aria-selected", "true");
+		expect(screen.getByRole("tab", { name: "Jira" })).toHaveAttribute("aria-selected", "false");
+		expect(screen.getByText("Fix login")).toBeInTheDocument();
+		expect(screen.queryByTestId("jira-board-stub")).not.toBeInTheDocument();
+	});
+
+	it("switches to the Jira board and back without losing the agents", async () => {
+		openProject();
+		renderBoard("p1");
+
+		await userEvent.click(screen.getByRole("tab", { name: "Jira" }));
+		expect(screen.getByTestId("jira-board-stub")).toHaveAttribute("data-project-id", "p1");
+		expect(screen.queryByText("Fix login")).not.toBeInTheDocument();
+		expect(screen.getByRole("tab", { name: "Jira" })).toHaveAttribute("aria-selected", "true");
+
+		await userEvent.click(screen.getByRole("tab", { name: "Agents" }));
+		expect(screen.queryByTestId("jira-board-stub")).not.toBeInTheDocument();
+		expect(screen.getByText("Fix login")).toBeInTheDocument();
+	});
+
+	it("remembers the choice for the project", async () => {
+		openProject();
+		renderBoard("p1");
+		await userEvent.click(screen.getByRole("tab", { name: "Jira" }));
+		cleanup();
+
+		renderBoard("p1");
+		expect(screen.getByTestId("jira-board-stub")).toBeInTheDocument();
+	});
+
+	it("opens project settings from the Jira view's connect action", async () => {
+		openProject();
+		const openProjectSettings = vi.spyOn(useUiStore.getState(), "openProjectSettings").mockImplementation(() => undefined);
+		renderBoard("p1");
+		await userEvent.click(screen.getByRole("tab", { name: "Jira" }));
+		await userEvent.click(screen.getByRole("button", { name: "stub-connect" }));
+
+		expect(openProjectSettings).toHaveBeenCalledWith("p1", undefined);
+		openProjectSettings.mockRestore();
+	});
+
+	it("shows no toggle on the all-projects board or for a guest of a shared project", () => {
+		openProject();
+		renderBoard();
+		expect(screen.queryByRole("tab", { name: "Jira" })).not.toBeInTheDocument();
+		cleanup();
+
+		const shared = boardSession({ id: "s2", title: "Shared work", status: "working", cloud: { orgId: "org-elsewhere", shared: true } });
+		workspaceQueryMock.mockReturnValue({ data: [{ ...workspaceWithSessions([shared]), kind: "cloud", cloudOrgId: "org-elsewhere", shared: { byName: "Asha" } }], isSuccess: true });
+		renderBoard("p1");
+		expect(screen.queryByRole("tab", { name: "Jira" })).not.toBeInTheDocument();
+	});
+});

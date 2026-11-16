@@ -6805,7 +6805,7 @@ export interface components {
             boardId?: number;
             connected: boolean;
             /** Format: date-time */
-            connectedAt: string;
+            connectedAt?: null | string;
             email?: string;
             jql?: string;
             projectKey?: string;
@@ -6835,7 +6835,7 @@ export interface components {
             status: components["schemas"]["JiraTicketStatus"];
             summary: string;
             /** Format: date-time */
-            updatedAt: string;
+            updatedAt?: null | string;
             url: string;
         };
         JiraTicketSession: {

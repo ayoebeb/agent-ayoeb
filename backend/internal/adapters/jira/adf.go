@@ -87,7 +87,7 @@ func writeBlock(b *strings.Builder, n adfNode, indent string) {
 		b.WriteString(indent + "---\n\n")
 	case "table":
 		for _, row := range n.Content {
-			var cells []string
+			cells := make([]string, 0, len(row.Content))
 			for _, cell := range row.Content {
 				var inner strings.Builder
 				writeBlocks(&inner, cell.Content, "")

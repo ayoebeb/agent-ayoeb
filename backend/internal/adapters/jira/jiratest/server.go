@@ -238,8 +238,9 @@ func adf(text string) any {
 	if text == "" {
 		return nil
 	}
-	var content []map[string]any
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	content := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
 		para := map[string]any{"type": "paragraph"}
 		if line != "" {
 			para["content"] = []map[string]any{{"type": "text", "text": line}}

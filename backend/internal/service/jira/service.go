@@ -113,14 +113,14 @@ func New(deps Deps) *Service {
 // Connection is a project's Jira connection as the API shows it. It has no
 // field for the token: whether one is stored is just Connected.
 type Connection struct {
-	Connected   bool      `json:"connected"`
-	SiteURL     string    `json:"siteUrl,omitempty"`
-	Email       string    `json:"email,omitempty"`
-	ProjectKey  string    `json:"projectKey,omitempty"`
-	BoardID     int       `json:"boardId,omitempty"`
-	JQL         string    `json:"jql,omitempty"`
-	AccountName string    `json:"accountName,omitempty"`
-	ConnectedAt time.Time `json:"connectedAt,omitzero"`
+	Connected   bool       `json:"connected"`
+	SiteURL     string     `json:"siteUrl,omitempty"`
+	Email       string     `json:"email,omitempty"`
+	ProjectKey  string     `json:"projectKey,omitempty"`
+	BoardID     int        `json:"boardId,omitempty"`
+	JQL         string     `json:"jql,omitempty"`
+	AccountName string     `json:"accountName,omitempty"`
+	ConnectedAt *time.Time `json:"connectedAt,omitempty"`
 }
 
 // ConnectInput is what a person enters to connect a project. An empty APIToken
@@ -176,7 +176,7 @@ type Ticket struct {
 	IssueType          string          `json:"issueType,omitempty"`
 	Priority           string          `json:"priority,omitempty"`
 	Labels             []string        `json:"labels,omitempty"`
-	UpdatedAt          time.Time       `json:"updatedAt,omitzero"`
+	UpdatedAt          *time.Time      `json:"updatedAt,omitempty"`
 	Sessions           []TicketSession `json:"sessions,omitempty"`
 }
 
@@ -241,9 +241,10 @@ func (s *Service) Status(ctx context.Context, projectID string) (Connection, err
 }
 
 func publicConnection(c storedConnection) Connection {
+	connectedAt := c.ConnectedAt
 	return Connection{
 		Connected: true, SiteURL: c.SiteURL, Email: c.Email, ProjectKey: c.ProjectKey,
-		BoardID: c.BoardID, JQL: c.JQL, AccountName: c.AccountName, ConnectedAt: c.ConnectedAt,
+		BoardID: c.BoardID, JQL: c.JQL, AccountName: c.AccountName, ConnectedAt: &connectedAt,
 	}
 }
 
@@ -573,7 +574,11 @@ func toTicket(issue jiraclient.Issue, url string, sessions []TicketSession) Tick
 	t := Ticket{
 		Key: issue.Key, Summary: issue.Summary, Description: issue.Description, AcceptanceCriteria: issue.AcceptanceCriteria,
 		URL: url, Status: TicketStatus{ID: issue.Status.ID, Name: issue.Status.Name, Category: issue.Status.Category},
-		IssueType: issue.IssueType, Priority: issue.Priority, Labels: issue.Labels, UpdatedAt: issue.Updated, Sessions: sessions,
+		IssueType: issue.IssueType, Priority: issue.Priority, Labels: issue.Labels, Sessions: sessions,
+	}
+	if !issue.Updated.IsZero() {
+		updated := issue.Updated
+		t.UpdatedAt = &updated
 	}
 	if issue.Assignee != nil {
 		t.Assignee = &TicketUser{AccountID: issue.Assignee.AccountID, DisplayName: issue.Assignee.DisplayName}
@@ -590,7 +595,7 @@ func columnsFromBoard(tickets []Ticket, board jiraclient.Board) []BoardColumn {
 			byStatus[id] = i
 		}
 	}
-	var other []Ticket
+	other := make([]Ticket, 0, len(tickets))
 	for _, t := range tickets {
 		if i, ok := byStatus[t.Status.ID]; ok {
 			columns[i].Tickets = append(columns[i].Tickets, t)
@@ -607,7 +612,7 @@ func columnsFromBoard(tickets []Ticket, board jiraclient.Board) []BoardColumn {
 func columnsFromStatuses(tickets []Ticket) []BoardColumn {
 	byName := map[string]*BoardColumn{}
 	rank := map[string]int{}
-	var order []string
+	order := make([]string, 0, len(tickets))
 	for _, t := range tickets {
 		name := t.Status.Name
 		if name == "" {
