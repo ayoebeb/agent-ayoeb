@@ -147,6 +147,12 @@ export type WorkspaceFileOpenRequest = {
 	nonce: number;
 };
 
+/**
+ * Asks a session's chat to scroll to a heading, from an `ao://sessions/{project}/{session}#{anchor}`
+ * link. `sessionId` is the chat's `sessionUiKey`; `at` lets a request that nothing picked up expire.
+ */
+export type ChatAnchorRequest = { sessionId: string; anchor: string; nonce: number; at: number };
+
 /** Asks a local session's chat to scroll to one message, e.g. a palette chat hit. */
 export type ChatMessageFocusRequest = {
 	sessionId: string;
@@ -231,6 +237,7 @@ export type UiState = {
 	/** Transient one-shot request to reveal a path in a session's existing Files UI. */
 	workspaceFileOpenRequest: WorkspaceFileOpenRequest | null;
 	chatMessageFocusRequest: ChatMessageFocusRequest | null;
+	chatAnchorRequest: ChatAnchorRequest | null;
 	// Bumps to ask the sidebar's create-project flow to open (the ⌘N fallback
 	// when no project is in scope).
 	createProjectNonce: number;
@@ -325,6 +332,8 @@ export type UiState = {
 	clearWorkspaceFileOpenRequest: (nonce: number) => void;
 	requestChatMessageFocus: (sessionId: string, messageId: string, text: string, reviewId?: string) => void;
 	clearChatMessageFocusRequest: (nonce: number) => void;
+	requestChatAnchor: (sessionId: string, anchor: string) => void;
+	clearChatAnchorRequest: (nonce: number) => void;
 	requestCreateProject: () => void;
 	requestCreateProjectFromPath: (path: string) => void;
 	requestNewShellTerminal: () => void;
@@ -484,6 +493,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 	setFirstRunPromptActive: (active) => set({ firstRunPromptActive: active }),
 	workspaceFileOpenRequest: null,
 	chatMessageFocusRequest: null,
+	chatAnchorRequest: null,
 	createProjectNonce: 0,
 	folderDropRequest: null,
 	newShellTerminalNonce: 0,
@@ -914,6 +924,12 @@ export const useUiStore = create<UiState>((set, get) => ({
 		set((state) => state.chatMessageFocusRequest?.nonce === nonce
 			? { chatMessageFocusRequest: null }
 			: state),
+	requestChatAnchor: (sessionId, anchor) =>
+		set((state) => ({
+			chatAnchorRequest: { sessionId, anchor, nonce: (state.chatAnchorRequest?.nonce ?? 0) + 1, at: Date.now() },
+		})),
+	clearChatAnchorRequest: (nonce) =>
+		set((state) => state.chatAnchorRequest?.nonce === nonce ? { chatAnchorRequest: null } : state),
 	requestCreateProject: () => set((state) => ({ createProjectNonce: state.createProjectNonce + 1 })),
 	requestCreateProjectFromPath: (path) =>
 		set((state) => ({ folderDropRequest: { path, nonce: (state.folderDropRequest?.nonce ?? 0) + 1 } })),

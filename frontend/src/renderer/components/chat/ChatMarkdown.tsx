@@ -31,7 +31,7 @@ import {
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
 } from "react";
-import Markdown, { defaultUrlTransform, type Components, type Options } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
 import type { Processor } from "unified";
@@ -49,6 +49,8 @@ import { EMOJI_GRAPHEME, rehypeStreamFade } from "../../lib/rehype-stream-fade";
 import { isInlineMath, remarkMath } from "../../lib/remark-math";
 import { useUiStore } from "../../stores/ui-store";
 import { artifactLinkForPath, findSessionLinks, isAoLink, isSessionLink, remarkSessionLinks } from "../../lib/session-links";
+import { anchorFromHref, chatAnchorDomId, type HeadingAnchors } from "../../lib/chat-anchors";
+import { ChatAnchorNavContext, useMessageHeadingAnchors } from "./chat-anchor-context";
 import { useSessionLinkSource } from "../../lib/use-session-link-navigation";
 import {
 	isPotentialWorkspaceFileLink,
@@ -107,6 +109,8 @@ const FADE_SHED_MS = 450;
  * and re-parse every message on every poll.
  */
 const StreamingProse = createContext(false);
+/** The anchors of this message's headings, and where the chunk being drawn starts in its source. */
+const HeadingScope = createContext<{ anchors: HeadingAnchors; start: number } | undefined>(undefined);
 const InsideMarkdownLink = createContext(false);
 const SafeOriginContent = createContext(false);
 const REMOTE_PREVIEW_UNAVAILABLE = "This link points to the remote host. Preview is unavailable on this device.";
@@ -193,8 +197,14 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 	className,
 	safeOrigin = false,
 	remarkPlugins,
+	messageId,
 }: {
 	text: string;
+	/**
+	 * The transcript message these words are. Only then do headings carry an
+	 * anchor id that a `#anchor` link in the chat can scroll to.
+	 */
+	messageId?: string;
 	streaming?: boolean;
 	/**
 	 * Prose that is not the answer. Reasoning is the case: it reads alongside the
@@ -217,6 +227,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 	const chatOpening = useContext(ChatOpeningRef);
 	const [settledOffset] = useState(() => (chatOpening.current ? text.length : 0));
 	const renderMath = useUiStore((state) => state.renderMath);
+	const headingAnchors = useMessageHeadingAnchors(messageId);
 	const plugins = useMemo(() => {
 		const base = renderMath ? MATH_PLUGINS : PLUGINS;
 		return remarkPlugins ? [...base, ...remarkPlugins] : base;
@@ -258,6 +269,8 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 						fading={animate && index === blocks.blocks.length - 1}
 						settledOffset={Math.max(0, settledOffset - block.start)}
 						remarkPlugins={plugins}
+						headingAnchors={headingAnchors}
+						start={block.start}
 					/>
 				))}
 			</div>
@@ -267,14 +280,18 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 
 // No wrapper DOM: list/table layout, image galleries and prose spacing keep
 // their existing parent. Only the changing chunk enters react-markdown again.
-const MarkdownChunk = memo(function MarkdownChunk({ source, repairInline, streaming, fading, settledOffset, remarkPlugins }: {
+const MarkdownChunk = memo(function MarkdownChunk({ source, repairInline, streaming, fading, settledOffset, remarkPlugins, headingAnchors, start }: {
 	source: string;
 	repairInline: boolean;
 	streaming: boolean;
 	fading: boolean;
 	settledOffset: number;
 	remarkPlugins: Options["remarkPlugins"];
+	headingAnchors?: HeadingAnchors;
+	/** Where this chunk begins in the message's source. */
+	start: number;
 }) {
+	const headingScope = useMemo(() => headingAnchors ? { anchors: headingAnchors, start } : undefined, [headingAnchors, start]);
 	const repaired = useMemo(() => streaming && repairInline ? remend(source, {
 		linkMode: "text-only", images: false, htmlTags: false,
 		katex: false, setextHeadings: false, comparisonOperators: false,
@@ -282,9 +299,11 @@ const MarkdownChunk = memo(function MarkdownChunk({ source, repairInline, stream
 	const plugins = useMemo<Options["rehypePlugins"]>(() =>
 		fading ? [[rehypeStreamFade, { settledOffset }]] : undefined, [fading, settledOffset]);
 	return <StreamingProse.Provider value={streaming}>
-		<Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={COMPONENTS} urlTransform={chatUrlTransform}>
-			{repaired}
-		</Markdown>
+		<HeadingScope.Provider value={headingScope}>
+			<Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={COMPONENTS} urlTransform={chatUrlTransform}>
+				{repaired}
+			</Markdown>
+		</HeadingScope.Provider>
 	</StreamingProse.Provider>;
 });
 
@@ -392,14 +411,34 @@ function compactEmoji(children: ReactNode): ReactNode {
 	return children;
 }
 
+const MARKDOWN_LINK_CLASS = "text-markdown-link underline decoration-markdown-link/45 underline-offset-2 transition-colors hover:text-markdown-link-hover hover:decoration-markdown-link-hover/75";
+
 function MarkdownLink({ href, children, className, menuPath }: { href?: string; children?: ReactNode; className?: string; menuPath?: string }) {
 	const safeOriginContent = useContext(SafeOriginContent);
 	const { open: onLinkOpen, openFile: onFileOpen, openSession: onSessionLinkOpen, remoteHost, sessionLinkHostId, sessionLinkSourceKind, workspacePaths, findFile } = useContext(OpenChatLink);
 	const filePath = href && onFileOpen
 		? workspaceFilePath(href, workspacePaths) ?? findFile(href) ?? explicitWorkspaceFilePath(href)
 		: undefined;
+	const goToAnchor = useContext(ChatAnchorNavContext);
 	const sessionLink = Boolean(href && isAoLink(href));
 	if (safeOriginContent && !sessionLink) return <>{children}</>;
+	// `[Which database?](#which-database)`: a heading somewhere in this chat. Never a
+	// real navigation (the app's own hash route would change); the transcript scrolls.
+	const anchor = href ? anchorFromHref(href) : undefined;
+	if (anchor !== undefined) {
+		return (
+			<AppLink
+				href={href}
+				onClick={(event) => {
+					event.preventDefault();
+					goToAnchor?.(anchor);
+				}}
+				className={className ?? MARKDOWN_LINK_CLASS}
+			>
+				{children}
+			</AppLink>
+		);
+	}
 	const openInFiles = filePath && href && !/\.html?$/i.test(filePath) ? workspaceFileOpenTarget(href, filePath) : undefined;
 	if (remoteHost && href && (isHostLocalWebLink(href) || (isPotentialWorkspaceFileLink(href) && !openInFiles))) {
 		const unavailable = <span className="text-muted-foreground" title={REMOTE_PREVIEW_UNAVAILABLE}>
@@ -443,7 +482,7 @@ function MarkdownLink({ href, children, className, menuPath }: { href?: string; 
 			}}
 			target="_blank"
 			rel="noreferrer noopener"
-			className={className ?? "text-markdown-link underline decoration-markdown-link/45 underline-offset-2 transition-colors hover:text-markdown-link-hover hover:decoration-markdown-link-hover/75"}
+			className={className ?? MARKDOWN_LINK_CLASS}
 		>
 			<ChatImageLinkScope>
 				<InsideMarkdownLink.Provider value>{children}</InsideMarkdownLink.Provider>
@@ -612,29 +651,44 @@ function InlineCode({ children, className }: { children?: ReactNode; className?:
 	);
 }
 
+/**
+ * A heading, with the anchor id a `#anchor` link in this chat scrolls to. The id
+ * is looked up by where the heading starts in the message source, so it is the
+ * one `lib/chat-anchors.ts` assigned, collisions across the chat included.
+ */
+function ChatHeading({ as: Tag, className, node, children }: ExtraProps & { as: "h3" | "h4" | "h5" | "h6"; className?: string; children?: ReactNode }) {
+	const scope = useContext(HeadingScope);
+	const offset = node?.position?.start.offset;
+	const anchor = scope && offset !== undefined ? scope.anchors.get(scope.start + offset) : undefined;
+	return <Tag id={anchor === undefined ? undefined : chatAnchorDomId(anchor)} className={className}>{children}</Tag>;
+}
+
 const COMPONENTS: Components = {
 	// Headings step down in size but stay in the conversation's voice — an agent's
 	// "## Findings" is a paragraph label, not a page title.
-	h1: ({ children }) => (
-		<h3 className="mb-1.5 mt-4 text-subtitle font-semibold leading-snug text-foreground first:mt-0">
+	h1: ({ children, node }) => (
+		<ChatHeading as="h3" node={node} className="mb-1.5 mt-4 text-subtitle font-semibold leading-snug text-foreground first:mt-0">
 			{children}
-		</h3>
+		</ChatHeading>
 	),
-	h2: ({ children }) => (
-		<h4 className="mb-1.5 mt-3.5 text-sm font-semibold leading-snug text-foreground first:mt-0">
+	h2: ({ children, node }) => (
+		<ChatHeading as="h4" node={node} className="mb-1.5 mt-3.5 text-sm font-semibold leading-snug text-foreground first:mt-0">
 			{children}
-		</h4>
+		</ChatHeading>
 	),
-	h3: ({ children }) => (
-		<h5 className="mb-1 mt-3 text-sm font-semibold leading-snug text-foreground first:mt-0">
+	h3: ({ children, node }) => (
+		<ChatHeading as="h5" node={node} className="mb-1 mt-3 text-sm font-semibold leading-snug text-foreground first:mt-0">
 			{children}
-		</h5>
+		</ChatHeading>
 	),
-	h4: ({ children }) => (
-		<h6 className="mb-1 mt-3 text-xs font-semibold text-muted-foreground first:mt-0">
+	h4: ({ children, node }) => (
+		<ChatHeading as="h6" node={node} className="mb-1 mt-3 text-xs font-semibold text-muted-foreground first:mt-0">
 			{children}
-		</h6>
+		</ChatHeading>
 	),
+	// Deeper headings keep the browser's own look; they only gain the anchor id.
+	h5: ({ children, node }) => <ChatHeading as="h5" node={node}>{children}</ChatHeading>,
+	h6: ({ children, node }) => <ChatHeading as="h6" node={node}>{children}</ChatHeading>,
 
 	// A paragraph of nothing but images is a set of pictures, not prose.
 	p: ({ children, node }) =>
