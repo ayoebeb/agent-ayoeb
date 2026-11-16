@@ -1490,6 +1490,12 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		})
 	}
 
+	turnCompletedAt := make(map[string]time.Time, len(s.Turns))
+	for _, turn := range s.Turns {
+		if turn.CompletedAt != nil {
+			turnCompletedAt[turn.ID] = *turn.CompletedAt
+		}
+	}
 	for _, activity := range s.Activities {
 		out.Activities = append(out.Activities, ConversationActivityResponse{
 			Kind:           "activity",
@@ -1500,7 +1506,7 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 			ActivityKind:   string(activity.Kind),
 			Status:         string(activity.Status),
 			Summary:        activity.Summary,
-			Detail:         activityDetailPayload(activity),
+			Detail:         activityDetailPayload(activity, turnCompletedAt),
 			RequestID:      activity.RequestID,
 			ProviderItemID: activity.ProviderItemID,
 			CreatedAt:      activity.CreatedAt.UTC().Format(time.RFC3339),
@@ -1756,7 +1762,7 @@ func mcpServersPayload(servers []domain.ConversationMCPServer) []ConversationMCP
 // tick-1..tick-8 lost tick-1 from the delta stream and from the aggregate alike --
 // so outputMayBePartial stays set either way. `outputSource` exists so the UI can
 // explain WHY it is partial instead of hedging identically about both.
-func activityDetailPayload(activity domain.ConversationActivity) map[string]any {
+func activityDetailPayload(activity domain.ConversationActivity, turnCompletedAt map[string]time.Time) map[string]any {
 	detail := decodeDetail(activity.Detail)
 	if activity.CommandOutput != "" {
 		if detail == nil {
@@ -1786,10 +1792,14 @@ func activityDetailPayload(activity domain.ConversationActivity) map[string]any 
 	// Only some providers say how long a command took. For the rest the row's own
 	// life is the same fact: it is created when the command starts and written for
 	// the last time when it settles. Under a second reads as instant, so it is left
-	// off rather than reported as noise.
+	// off rather than reported as noise. A row written after its own turn finished
+	// was rewritten later (a resumed session replays its history), so its last write
+	// is no longer when the command ended and the span is not reported.
 	if activity.Kind == domain.ActivityKindCommand &&
 		(activity.Status == domain.ActivityStatusCompleted || activity.Status == domain.ActivityStatusFailed) {
-		if span := activity.UpdatedAt.Sub(activity.CreatedAt); span >= time.Second {
+		done, turnDone := turnCompletedAt[activity.TurnID]
+		rewritten := turnDone && activity.UpdatedAt.After(done.Add(time.Second))
+		if span := activity.UpdatedAt.Sub(activity.CreatedAt); span >= time.Second && !rewritten {
 			if detail == nil {
 				detail = map[string]any{}
 			}

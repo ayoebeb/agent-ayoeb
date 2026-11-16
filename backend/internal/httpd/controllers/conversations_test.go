@@ -369,9 +369,16 @@ func TestSnapshotTimesACommandTheProviderDidNotTime(t *testing.T) {
 			CreatedAt: start, UpdatedAt: start.Add(took),
 		}
 	}
+	// A resumed session replays its history, which rewrites settled rows: this one was
+	// last written two days after its turn finished, so its span is not its run time.
+	turnDone := start.Add(30 * time.Second)
+	replayed := command("replayed", domain.ActivityStatusCompleted, 48*time.Hour, nil)
+	replayed.TurnID = "t-old"
 	body := conversationSnapshotBody(t, chatsvc.Snapshot{
 		SessionID: domain.SessionID("p1-1"),
+		Turns:     []domain.ConversationTurn{{ID: "t-old", CompletedAt: &turnDone}},
 		Activities: []domain.ConversationActivity{
+			replayed,
 			command("untimed", domain.ActivityStatusCompleted, 4200*time.Millisecond, nil),
 			command("instant", domain.ActivityStatusCompleted, 400*time.Millisecond, nil),
 			command("running", domain.ActivityStatusRunning, 30*time.Second, nil),
@@ -387,6 +394,9 @@ func TestSnapshotTimesACommandTheProviderDidNotTime(t *testing.T) {
 	}
 	if durations["untimed"] != float64(4200) {
 		t.Errorf("untimed durationMs = %#v, want 4200 from the row's own life", durations["untimed"])
+	}
+	if durations["replayed"] != nil {
+		t.Errorf("a row rewritten after its turn finished must carry no durationMs, got %#v", durations["replayed"])
 	}
 	if durations["instant"] != nil {
 		t.Errorf("a command under a second must carry no durationMs, got %#v", durations["instant"])
