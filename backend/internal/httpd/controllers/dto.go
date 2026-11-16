@@ -3535,7 +3535,10 @@ type ConversationActivityResponse struct {
 	//
 	// The keys that depend on the kind:
 	//
-	//   command      command, rawCommand, cwd, exitCode, durationMs, processId,
+	//   command      command, rawCommand, cwd, exitCode, durationMs (reported by
+	//                the provider, else the span from startedAt to the row's last
+	//                write), startedAt (when it first began running, set by the
+	//                store, absent when that was never observed), processId,
 	//                output (+ outputSource, outputMayBePartial, outputTruncated,
 	//                and outputBytes when outputLimit kept only its head and tail),
 	//                terminalInput -- the keystrokes the agent sent to the PTY, kept
@@ -3588,6 +3591,14 @@ type ConversationSnapshotResponse struct {
 	LatestSequence int64  `json:"latestSequence"`
 	OldestSequence int64  `json:"oldestSequence,omitempty"`
 	HasMoreBefore  bool   `json:"hasMoreBefore"`
+	// LastEventAt is when the newest message or activity in this page was last
+	// written: a created row, a streamed reply delta, or a command's output chunk.
+	// It is how long the agent has been quiet, which a client cannot tell from row
+	// creation times alone, because one long command streams into a single row.
+	// Absent when the page holds no rows, and while a running activity has hit its
+	// output or streamed-text cap: the store then skips every later write to it, so
+	// its last write no longer says how fresh the agent is.
+	LastEventAt string `json:"lastEventAt,omitempty"`
 	// AfterSequence echoes the afterSequence floor when the daemon applied it: the
 	// page then holds only rows after it, and hasMoreBefore means rows between the
 	// floor and oldestSequence were left out. Absent means a whole page.

@@ -6,8 +6,12 @@ import {
 	ActivityRow,
 	AdaptiveStreamPacingContext,
 	AssistantMessage,
+	calendarDayKey,
 	ChatHostId,
+	DaySeparator,
+	formatDayLabel,
 	HumanMessage,
+	humanBubbleClass,
 	LiveResponseStatus,
 	liveTaskLabel,
 	ProviderSwitchMarker,
@@ -257,6 +261,163 @@ describe("LiveResponseStatus", () => {
 		// The old label fades out before it leaves.
 		await waitFor(() => expect(screen.queryByTestId("live-working-task")).not.toBeInTheDocument());
 		expect(screen.getByTestId("live-working-timer")).toBeInTheDocument();
+	});
+});
+
+describe("LiveResponseStatus quiet cue", () => {
+	const quietProps = { startedAt: "2026-11-16T12:00:00Z", task: "Running npm run build" };
+	const secondsAfterStart = (seconds: number) => new Date(Date.parse("2026-11-16T12:00:00Z") + seconds * 1000);
+
+	it("stays silent while the agent is making progress, and through a provider's 30-second heartbeat", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(secondsAfterStart(100));
+		const view = render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(90).toISOString()} />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(41).toISOString()} />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+	});
+
+	it("says how long the agent has been quiet once it passes a minute, and keeps counting", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(secondsAfterStart(130));
+		render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(70).toISOString()} />);
+		expect(screen.getByTestId("live-working-quiet")).toHaveTextContent("last activity 1m ago");
+
+		act(() => {
+			vi.advanceTimersByTime(60_000);
+		});
+		expect(screen.getByTestId("live-working-quiet")).toHaveTextContent("last activity 2m ago");
+	});
+
+	it("goes away as soon as the agent writes something", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(secondsAfterStart(130));
+		const view = render(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(40).toISOString()} />);
+		expect(screen.getByTestId("live-working-quiet")).toBeInTheDocument();
+
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(129).toISOString()} />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+	});
+
+	it("is not said during setup, a provider retry or a failure, which explain their own silence", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(secondsAfterStart(100));
+		const quiet = secondsAfterStart(0).toISOString();
+		const view = render(<LiveResponseStatus {...quietProps} lastActivityAt={quiet} startupLabel="Starting your agent" />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={quiet} reconnect={{ label: "Reconnecting… 1/5" }} />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={quiet} failed />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+	});
+
+	it("says nothing when it has no time to go on, or one that cannot be right", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(secondsAfterStart(100));
+		const view = render(<LiveResponseStatus {...quietProps} />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt="not a time" />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+
+		// A host whose clock runs ahead sends a time that is still to come.
+		view.rerender(<LiveResponseStatus {...quietProps} lastActivityAt={secondsAfterStart(500).toISOString()} />);
+		expect(screen.queryByTestId("live-working-quiet")).not.toBeInTheDocument();
+	});
+});
+
+describe("day separators", () => {
+	// Local time throughout: the reader's day is the one that matters.
+	const now = new Date(2026, 10, 16, 15, 0);
+	const local = (day: number, hour: number, minute = 0) => new Date(2026, 10, day, hour, minute).toISOString();
+
+	it("names today, yesterday and any earlier day", () => {
+		expect(formatDayLabel(local(16, 1), now)).toBe("Today");
+		expect(formatDayLabel(local(15, 23, 59), now)).toBe("Yesterday");
+		expect(formatDayLabel(local(12, 9), now)).toMatch(/12.*2026|2026.*12/);
+		expect(formatDayLabel("not a time", now)).toBe("");
+	});
+
+	it("tells one calendar day from the next, whatever the hour", () => {
+		expect(calendarDayKey(local(16, 0, 1))).toBe(calendarDayKey(local(16, 23, 59)));
+		expect(calendarDayKey(local(16, 0, 1))).not.toBe(calendarDayKey(local(15, 23, 59)));
+		expect(calendarDayKey("not a time")).toBe("");
+	});
+
+	it("is a labelled separator, and draws nothing for a time it cannot read", () => {
+		const view = render(<DaySeparator createdAt={new Date().toISOString()} />);
+		expect(screen.getByRole("separator", { name: "Today" })).toBeInTheDocument();
+		view.unmount();
+
+		const unreadable = render(<DaySeparator createdAt="not a time" />);
+		expect(unreadable.container).toBeEmptyDOMElement();
+	});
+});
+
+describe("the user's bubble", () => {
+	it("rounds three corners at the routine radius and squares the bottom-right one", () => {
+		const bubble = humanBubbleClass();
+		expect(bubble).toContain("rounded-lg");
+		expect(bubble).toContain("rounded-br-xs");
+		expect(bubble).not.toContain("rounded-[10px]");
+	});
+
+	it("keeps the same shape while queued, only dashed and unfilled", () => {
+		const queued = humanBubbleClass(true);
+		expect(queued).toContain("rounded-br-xs");
+		expect(queued).toContain("border-dashed");
+	});
+});
+
+describe("a long command output", () => {
+	const lines = (count: number) => Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
+	const row = (output: string) => (
+		<ActivityRow
+			activity={{
+				kind: "activity",
+				id: "activity-1",
+				sequence: 1,
+				revision: 0,
+				activityKind: "command",
+				status: "completed",
+				summary: "npm run build",
+				detail: { command: "npm run build", cwd: "/work", exitCode: 0, output },
+				createdAt: "2026-11-16T12:00:00Z",
+			}}
+		/>
+	);
+	const open = async (output: string) => {
+		render(row(output));
+		fireEvent.click(screen.getByRole("button", { name: /Built project/ }));
+		return screen.findByText(/line 1\b/);
+	};
+
+	it("folds to its newest lines behind Show all, faded by the existing edge fade", async () => {
+		const pre = await open(lines(30));
+		expect(pre).toHaveClass("edge-fade", "overflow-hidden");
+		expect(pre).toHaveAttribute("data-fade-start");
+		expect(screen.getByRole("button", { name: "Show all 30 lines" })).toHaveAttribute("aria-expanded", "false");
+	});
+
+	it("opens to the whole output, and folds again", async () => {
+		const pre = await open(lines(30));
+		fireEvent.click(screen.getByRole("button", { name: "Show all 30 lines" }));
+		expect(pre).not.toHaveClass("edge-fade");
+		expect(pre).not.toHaveAttribute("data-fade-start");
+		const fewer = screen.getByRole("button", { name: "Show fewer lines" });
+		expect(fewer).toHaveAttribute("aria-expanded", "true");
+
+		fireEvent.click(fewer);
+		expect(pre).toHaveClass("edge-fade");
+	});
+
+	it("leaves twelve lines or fewer whole, with nothing to open", async () => {
+		const pre = await open(lines(12));
+		expect(pre).not.toHaveClass("edge-fade");
+		expect(screen.queryByRole("button", { name: /Show (all|fewer)/ })).not.toBeInTheDocument();
 	});
 });
 

@@ -45,7 +45,7 @@ function commandActivity(
 describe("TurnChangedFiles", () => {
 	it("shows the bordered summary with files visible", () => {
 		render(<TurnChangedFiles diff={diff()} />);
-		expect(screen.getByText("2 Files Changed")).toBeInTheDocument();
+		expect(screen.getByText("2 files changed")).toBeInTheDocument();
 		expect(screen.getByText("a.ts")).toBeInTheDocument();
 		expect(screen.getByText("new.ts")).toBeInTheDocument();
 		expect(screen.getByText("+12")).toBeInTheDocument();
@@ -218,7 +218,7 @@ describe("TurnChangedFiles", () => {
 				}}
 			/>,
 		);
-		expect(screen.getByText("1 File Changed")).toBeInTheDocument();
+		expect(screen.getByText("1 file changed")).toBeInTheDocument();
 		expect(screen.getByText("new.ts")).toBeInTheDocument();
 		await user.hover(screen.getByText("new.ts"));
 		expect(await screen.findByRole("tooltip")).toHaveTextContent("src/old.ts → src/new.ts");

@@ -6572,3 +6572,81 @@ describe("sent message recall", () => {
 		expect(readChatSessionDraft("recall-alpha").composer.text).toBe("");
 	});
 });
+
+describe("the open fold and the days between turns", () => {
+	const minute = 60_000;
+	function settledTurn(turnId: string, startedAt: string, firstSequence: number): { turn: ConversationSnapshot["turns"][number]; items: ConversationItem[] } {
+		const done = new Date(Date.parse(startedAt) + minute).toISOString();
+		return {
+			turn: { id: turnId, state: "completed", requestedAt: startedAt, startedAt, completedAt: done },
+			items: [
+				{ kind: "message", id: `${turnId}-prompt`, turnId, sequence: firstSequence, revision: 0, role: "user", origin: "human", text: `Ask ${turnId}`, streaming: false, createdAt: startedAt },
+				{ kind: "message", id: `${turnId}-answer`, turnId, sequence: firstSequence + 1, revision: 0, role: "assistant", origin: "provider", text: `Answer ${turnId}`, streaming: false, createdAt: done },
+			],
+		};
+	}
+	function conversation(...turns: ReturnType<typeof settledTurn>[]): ConversationSnapshot {
+		return {
+			...chatFixtureEmpty,
+			latestSequence: turns.length * 2,
+			turns: turns.map(({ turn }) => turn),
+			items: turns.flatMap(({ items }) => items),
+		};
+	}
+	const separators = () => [...document.querySelectorAll("[data-chat-turn] [role='separator']")];
+
+	it("puts the day above a turn that began on a different day from the turn before it", () => {
+		render(<ChatWorkspace snapshot={conversation(settledTurn("t1", "2026-11-14T06:00:00Z", 1), settledTurn("t2", "2026-11-16T06:00:00Z", 3))} />);
+		expect(separators()).toHaveLength(1);
+		// Above the second turn, not the first: the line says "from here, a later day".
+		expect(separators()[0]!.closest("[data-chat-turn]")).toContainElement(screen.getByText("Ask t2"));
+	});
+
+	it("draws nothing between two turns on the same day, and nothing above the first turn", () => {
+		render(<ChatWorkspace snapshot={conversation(settledTurn("t1", "2026-11-16T06:00:00Z", 1), settledTurn("t2", "2026-11-16T07:00:00Z", 3))} />);
+		expect(separators()).toHaveLength(0);
+	});
+
+	it("gathers the steps in an open fold into one surface and leaves the agent's narration as prose", async () => {
+		const user = userEvent.setup();
+		const turnId = "t-fold";
+		const command = (id: string, sequence: number, line: string, durationMs: number): ConversationActivity => ({
+			kind: "activity", id, turnId, sequence, revision: 0, activityKind: "command", status: "completed",
+			summary: line, detail: { command: line, cwd: "/work", exitCode: 0, durationMs, output: "ok\n" },
+			createdAt: `2026-11-16T06:0${sequence}:00Z`,
+		});
+		const message = (id: string, sequence: number, role: "user" | "assistant", text: string): ConversationMessage => ({
+			kind: "message", id, turnId, sequence, revision: 0, role, origin: role === "user" ? "human" : "provider", text, streaming: false,
+			createdAt: `2026-11-16T06:0${sequence}:00Z`,
+		});
+		render(
+			<ChatWorkspace
+				snapshot={{
+					...chatFixtureEmpty,
+					latestSequence: 7,
+					turns: [{ id: turnId, state: "completed", requestedAt: "2026-11-16T06:00:00Z", startedAt: "2026-11-16T06:00:00Z", completedAt: "2026-11-16T06:08:00Z" }],
+					items: [
+						message("prompt", 1, "user", "Ship it"),
+						message("narration-1", 2, "assistant", "First I will build and test."),
+						command("build", 3, "npm run build", 18_200),
+						command("tests", 4, "npm test", 4_180),
+						message("narration-2", 5, "assistant", "Now the lint pass."),
+						command("lint", 6, "npm run lint", 2_000),
+						message("answer", 7, "assistant", "All green."),
+					],
+				}}
+			/>,
+		);
+
+		await user.click(screen.getByRole("button", { name: /Worked for/ }));
+		const narration = await screen.findByText("Now the lint pass.");
+		const surfaces = [...document.querySelectorAll("[data-step-surface]")];
+		// Two stretches of steps, with the second bit of narration between them.
+		expect(surfaces).toHaveLength(2);
+		expect(narration.closest("[data-step-surface]")).toBeNull();
+		expect(screen.getByText("First I will build and test.").closest("[data-step-surface]")).toBeNull();
+		// The lone step after the narration is a row of the second surface, with what ran and how long.
+		expect(surfaces[1]).toContainElement(screen.getByText("npm run lint"));
+		expect(surfaces[1]).toHaveTextContent("2s");
+	});
+});

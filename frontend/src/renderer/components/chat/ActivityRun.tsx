@@ -14,13 +14,14 @@
  * Only a call that failed shows without being asked for, under the line that folds it.
  */
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ChevronRight, Loader2 } from "@/components/app-icons";
 import { cn } from "../../lib/utils";
 import { Pressable } from "../ui/pressable";
 import { ActivityRow, ActivityTransition } from "./ChatTimelineItems";
 import { useChatEntrance } from "./chat-entrance";
+import { STEP_LIST_CLASS, StepSurface, useInStepSurface } from "./step-surface";
 import {
 	ACTIVITY_SUMMARY_BUTTON_CLASS,
 	commandCategory,
@@ -148,7 +149,7 @@ export function ActivityRun({
 						transition={{ duration: reducedMotion ? 0 : 0.2, ease: [0.22, 1, 0.36, 1] }}
 						className="overflow-hidden"
 					>
-						<div className="flex flex-col gap-1 pt-1">
+						<RunList>
 							{subgroups.length === 1
 								? subgroups[0]!.activities.map((activity) => {
 										const node = nodesByActivityID.get(activity.id);
@@ -168,12 +169,26 @@ export function ActivityRun({
 											nodesByActivityID={nodesByActivityID}
 										/>
 								  ))}
-						</div>
+						</RunList>
 					</motion.div>
 				) : null}
 			</AnimatePresence>
 			<FailedCalls activities={activities} folded={!open} />
 		</motion.div>
+	);
+}
+
+/**
+ * The calls of an open run. Inside an open fold they are more rows of the fold's own
+ * surface, set off from the run's header by a hairline; on their own they are the
+ * surface, so a card is never drawn inside a card.
+ */
+function RunList({ children }: { children: ReactNode }) {
+	const inSurface = useInStepSurface();
+	return inSurface ? (
+		<div className={cn(STEP_LIST_CLASS, "border-t border-border/50")}>{children}</div>
+	) : (
+		<StepSurface className="mt-1.5">{children}</StepSurface>
 	);
 }
 
@@ -295,7 +310,7 @@ function ActivitySubgroup({
 						transition={{ duration: reducedMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
 						className="overflow-hidden"
 					>
-						<div className="flex flex-col gap-1">
+						<RunList>
 							{activities.map((activity) => {
 								const node = nodesByActivityID.get(activity.id);
 								return node ? (
@@ -304,7 +319,7 @@ function ActivitySubgroup({
 									<ActivityRow key={activity.id} activity={activity} />
 								);
 							})}
-						</div>
+						</RunList>
 					</motion.div>
 				) : null}
 			</AnimatePresence>

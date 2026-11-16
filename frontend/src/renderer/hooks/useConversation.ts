@@ -1910,6 +1910,7 @@ export function toSnapshot(wire: WireSnapshot): ConversationSnapshot {
 		mode: wire.mode as SessionMode,
 		controller: { state: wire.controller as ControllerState },
 		latestSequence: wire.latestSequence,
+		lastEventAt: wire.lastEventAt || undefined,
 		oldestSequence: wire.oldestSequence ?? wire.latestSequence + 1,
 		hasMoreBefore: wire.hasMoreBefore ?? false,
 		nativeForkAvailableAfterSequence: wire.nativeForkAvailableAfterSequence ?? 0,

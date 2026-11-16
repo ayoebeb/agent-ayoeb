@@ -4,6 +4,7 @@ import { occurrenceKey, type FindOccurrence } from "../../lib/chat-find";
 import "./chat-find.css";
 import type { ChatFileReference, OpenFileAnnotation } from "../../../shared/chat-file-reference";
 import { TurnWorkSummary } from "./TurnWorkSummary";
+import { StepSurface } from "./step-surface";
 import { TurnSettleSnapshot } from "./TurnSettleSnapshot";
 import { useChatDraftTranslation } from "../../lib/chat-draft-messages";
 import { cloudChatStartingInPlace } from "../../lib/cloud-lifecycle";
@@ -132,6 +133,8 @@ import {
 	ProviderSwitchMarker,
 	ContinuedMarker,
 	HumanMessage,
+	calendarDayKey,
+	DaySeparator,
 	humanBubbleClass,
 	humanVisibleText,
 	OriginMessage,
@@ -4908,6 +4911,7 @@ export function Timeline({
 								data-chat-scroll-anchor={groupHasHumanPrompt(group) ? "" : undefined}
 								data-chat-turn={group.key}
 							>
+								{startOfDay(groups[index - 1], group) ? <DaySeparator createdAt={startOfDay(groups[index - 1], group)!} /> : null}
 								{group.key === findGapGroupKey ? <div role="note" className="py-3 text-center text-caption text-muted-foreground">{t("chat.find.gap")}</div> : null}
 								<WorkerUpdateIndexContext.Provider value={workerUpdateIndex}>
 								<BatchedReportsContext.Provider value={batchedReports}>
@@ -4915,6 +4919,7 @@ export function Timeline({
 									group={group}
 									harness={snapshot.harness}
 									workerUpdates={workerUpdates}
+									lastEventAt={group.live ? snapshot.lastEventAt : undefined}
 									startup={group.key === startupGroupKey ? rowStartup : undefined}
 									onSelectAnnotation={selectAnnotation}
 									activityDisclosureOverrides={activityDisclosureOverrides}
@@ -5241,6 +5246,7 @@ const TurnGroup = memo(function TurnGroup({
 	startup,
 	onSelectAnnotation,
 	workerUpdates = false,
+	lastEventAt,
 }: {
 	group: TimelineGroup;
 	harness: string;
@@ -5283,6 +5289,8 @@ const TurnGroup = memo(function TurnGroup({
 	startup?: ComponentProps<typeof SessionStartup> & { label?: string };
 	onSelectAnnotation?: (annotation: { text: string; messageId?: string; revision?: number }) => void;
 	workerUpdates?: boolean;
+	/** When the daemon last wrote any row of the live turn. Only that turn is given it, so a streamed chunk does not re-render the settled ones. */
+	lastEventAt?: string;
 }) {
 	const hostId = useContext(ChatHostId);
 	const batched = useContext(BatchedReportsContext);
@@ -5479,6 +5487,7 @@ const TurnGroup = memo(function TurnGroup({
 			<LiveResponseStatus
 				entranceKey={`live:${group.key}`}
 				startedAt={group.liveStartedAt}
+				lastActivityAt={lastEventAt}
 				startupLabel={startup ? startup.label ?? t(startup.failed ? "chat.startup.failed" : "chat.startup.running") : group.liveStartupLabel}
 				failed={startup?.failed}
 				// Between steps the agent is still working out what to do next, so the row
@@ -5505,7 +5514,31 @@ const TurnGroup = memo(function TurnGroup({
 	const spawned = workerUpdates && outcome ? spawnedSessionIds(group.items) : [];
 	const spawnedLine = spawned.length > 0 ? <SpawnedAgents key="spawned" sessionIds={spawned} /> : null;
 	const hasFoldedWork = foldedRuns.length > 0 || spawnedLine !== null;
-	const foldedWork = (): ReactNode[] => [...foldedRuns.flatMap(renderWorkerRun), ...(spawnedLine ? [spawnedLine] : [])];
+	// The steps in the fold are one list on one surface. The agent's own words between
+	// them stay prose, so a stretch of steps ends where its narration begins.
+	const foldedWork = (): ReactNode[] => {
+		const nodes: ReactNode[] = [];
+		let steps: ReactNode[] = [];
+		let stepsKey = "";
+		const endSteps = () => {
+			if (steps.length > 0) nodes.push(<StepSurface key={`${stepsKey}:steps`}>{steps}</StepSurface>);
+			steps = [];
+		};
+		for (const run of foldedRuns) {
+			const drawn = renderWorkerRun(run);
+			const parts = (Array.isArray(drawn) ? drawn : [drawn]).filter((part) => part !== null && part !== undefined);
+			if (run.kind === "activities") {
+				if (parts.length > 0 && steps.length === 0) stepsKey = run.key;
+				steps.push(...parts);
+			} else {
+				endSteps();
+				nodes.push(...parts);
+			}
+		}
+		endSteps();
+		if (spawnedLine) nodes.push(spawnedLine);
+		return nodes;
+	};
 	const showsWorked = Boolean(
 		outcome && !onlyRead && (hasFoldedWork || workedDurationMs !== undefined),
 	);
@@ -6068,6 +6101,19 @@ function groupPreview(group: TimelineGroup): GroupPreview {
 			: firstActivity?.detail?.text || firstActivity?.detail?.output || firstActivity?.summary;
 	const detail = detailSource ? previewText(detailSource, 240) : undefined;
 	return { title, detail: detail && detail !== title ? detail : undefined };
+}
+
+/**
+ * When this turn began, if that is a different calendar day from the turn before it.
+ * The first turn of a chat never starts a day: a "Today" above a single day's chat
+ * would say nothing.
+ */
+function startOfDay(previous: TimelineGroup | undefined, group: TimelineGroup): string | undefined {
+	const began = group.items[0]?.createdAt;
+	const before = previous?.items[0]?.createdAt;
+	if (!began || !before) return undefined;
+	const day = calendarDayKey(began);
+	return day !== "" && calendarDayKey(before) !== "" && day !== calendarDayKey(before) ? began : undefined;
 }
 
 function groupHasHumanPrompt(group: TimelineGroup): boolean {

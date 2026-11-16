@@ -2857,7 +2857,13 @@ html.sidebar-reordering * {
 .cursor-chat-timeline .cursor-chat-human-message,
 .cursor-chat-timeline .cursor-chat-origin-message > p {
 	font-size: var(--chat-readable-font-size);
-	line-height: 1.58;
+	line-height: 1.65;
+}
+
+/* Prose never runs wider than 72 characters, so a wide window does not stretch the
+   line a reader's eye has to track. Code blocks, tables and diffs keep the whole column. */
+.cursor-chat-timeline .chat-md > :is(p, ul, ol, blockquote, h3, h4, h5, h6) {
+	max-width: 72ch;
 }
 
 .cursor-chat-timeline .chat-md h3 {

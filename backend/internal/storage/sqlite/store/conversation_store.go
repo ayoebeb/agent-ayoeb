@@ -3306,6 +3306,9 @@ func (s *Store) UpsertActivity(
 				aoActionStatusSettled(row.Status) {
 				return nil
 			}
+			if activity.Kind == domain.ActivityKindCommand {
+				detail = withCommandStart(detail, row.DetailJson, row.Status == domain.ActivityStatusRunning, activity.Status, now)
+			}
 			if settleErr := q.SettleConversationActivity(ctx,
 				gen.SettleConversationActivityParams{
 					Status:         activity.Status,
@@ -3358,6 +3361,9 @@ func (s *Store) UpsertActivity(
 		}
 	}
 
+	if activity.Kind == domain.ActivityKindCommand {
+		detail = withCommandStart(detail, "", false, activity.Status, now)
+	}
 	turnID := s.turnIDFor(ctx, conversationID, providerTurnID)
 	return s.inTx(ctx, "insert activity", func(q *gen.Queries) error {
 		sequence, seqErr := q.NextConversationSequence(ctx, gen.NextConversationSequenceParams{

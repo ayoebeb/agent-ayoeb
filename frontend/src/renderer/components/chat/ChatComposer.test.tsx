@@ -1,6 +1,6 @@
 import { appI18n } from "../../i18n/instance";
 import { purgeFileAttachmentsForSession } from "../../hooks/useFileAttachments";
-import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { Activity, Profiler } from "react";
@@ -2993,6 +2993,48 @@ describe("attachments", () => {
 });
 
 /* ---- disabled and busy states ------------------------------------------- */
+
+describe("the prompt of a chat with no message yet", () => {
+	const PROMPT = "Fix a failing test in this project";
+
+	it("teaches what / and @ open, after the starter prompt", () => {
+		const { field } = renderComposer({ emptyPlaceholder: PROMPT, skills: SKILLS, filePaths: FILES });
+		expect(field).toHaveAttribute("aria-placeholder", `${PROMPT} · / for commands, @ for files`);
+	});
+
+	it("says only what is true: a sigil with nothing behind it is left out", () => {
+		const skillsOnly = renderComposer({ emptyPlaceholder: PROMPT, skills: SKILLS });
+		expect(skillsOnly.field).toHaveAttribute("aria-placeholder", `${PROMPT} · / for commands`);
+		cleanup();
+
+		const filesOnly = renderComposer({ emptyPlaceholder: PROMPT, filePaths: FILES });
+		expect(filesOnly.field).toHaveAttribute("aria-placeholder", `${PROMPT} · @ for files`);
+		cleanup();
+
+		const neither = renderComposer({ emptyPlaceholder: PROMPT });
+		expect(neither.field).toHaveAttribute("aria-placeholder", PROMPT);
+	});
+
+	it("counts a workspace whose files are searched as it is typed, which lists none up front", () => {
+		const { field } = renderComposer({ emptyPlaceholder: PROMPT, onFileQuery: vi.fn() });
+		expect(field).toHaveAttribute("aria-placeholder", `${PROMPT} · @ for files`);
+	});
+
+	it("is the plain prompt once the chat has a message, with the hint gone", () => {
+		const { field } = renderComposer({ skills: SKILLS, filePaths: FILES });
+		expect(field).toHaveAttribute("aria-placeholder", "Message the agent");
+	});
+
+	it("still says a mid-turn message will be held, ahead of any hint", () => {
+		const { field } = renderComposer({ emptyPlaceholder: PROMPT, skills: SKILLS, filePaths: FILES, willQueue: true });
+		expect(field).toHaveAttribute("aria-placeholder", "Next message you send will be queued");
+	});
+
+	it("shortens with an ellipsis in a narrow chat instead of wrapping under the controls", () => {
+		renderComposer({ emptyPlaceholder: PROMPT, skills: SKILLS, filePaths: FILES });
+		expect(screen.getByText(`${PROMPT} · / for commands, @ for files`)).toHaveClass("truncate");
+	});
+});
 
 describe("unavailable states", () => {
 	it("keeps approval actions available below an attached notice and queue", async () => {

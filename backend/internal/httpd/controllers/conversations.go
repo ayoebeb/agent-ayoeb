@@ -1458,6 +1458,8 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		})
 	}
 
+	var lastEvent time.Time
+	freshnessUnknown := false
 	for _, msg := range s.Messages {
 		message := ConversationMessageResponse{
 			Kind:              "message",
@@ -1480,6 +1482,7 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		message.Content, message.EditAvailable = conversationContentSummary(msg)
 		message.EditAvailable = message.EditAvailable && msg.Sequence > s.EditFloorSequence
 		out.Messages = append(out.Messages, message)
+		lastEvent = latestTime(lastEvent, msg.UpdatedAt)
 	}
 	for _, point := range s.BranchPoints {
 		out.BranchPoints = append(out.BranchPoints, ConversationBranchPointResponse{
@@ -1488,6 +1491,12 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 		})
 	}
 
+	turnCompletedAt := make(map[string]time.Time, len(s.Turns))
+	for _, turn := range s.Turns {
+		if turn.CompletedAt != nil {
+			turnCompletedAt[turn.ID] = *turn.CompletedAt
+		}
+	}
 	for _, activity := range s.Activities {
 		out.Activities = append(out.Activities, ConversationActivityResponse{
 			Kind:           "activity",
@@ -1498,13 +1507,47 @@ func conversationSnapshotResponse(s chatsvc.Snapshot) ConversationSnapshotRespon
 			ActivityKind:   string(activity.Kind),
 			Status:         string(activity.Status),
 			Summary:        activity.Summary,
-			Detail:         activityDetailPayload(activity),
+			Detail:         activityDetailPayload(activity, turnCompletedAt),
 			RequestID:      activity.RequestID,
 			ProviderItemID: activity.ProviderItemID,
 			CreatedAt:      activity.CreatedAt.UTC().Format(time.RFC3339),
 		})
+		lastEvent = latestTime(lastEvent, activity.UpdatedAt)
+		freshnessUnknown = freshnessUnknown || streamIsCapped(activity)
+	}
+	// A capped running stream no longer moves its row's last write, so a command that
+	// is still printing would read as silent. With nothing to say how fresh the page
+	// is, say nothing rather than a quiet time that grows while the agent is busy.
+	if !lastEvent.IsZero() && !freshnessUnknown {
+		out.LastEventAt = lastEvent.UTC().Format(time.RFC3339)
 	}
 	return out
+}
+
+// commandStartedAt reads when a command first began running from its detail.
+func commandStartedAt(detail map[string]any) (time.Time, bool) {
+	raw, _ := detail["startedAt"].(string)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	started, err := time.Parse(time.RFC3339Nano, raw)
+	return started, err == nil
+}
+
+// streamIsCapped reports whether a running activity has stopped retaining its stream:
+// once its output or streamed text hits the cap the store skips every later write, so
+// the row's last write stops moving while the activity is still producing.
+func streamIsCapped(activity domain.ConversationActivity) bool {
+	return activity.Status == domain.ActivityStatusRunning &&
+		(activity.CommandOutputTruncated || activity.StreamedTextTruncated)
+}
+
+// latestTime is the later of two instants; the zero time is "none yet".
+func latestTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 func usageLimitPayload(limit *domain.ConversationUsageLimit) *ConversationUsageLimitResponse {
@@ -1742,7 +1785,7 @@ func mcpServersPayload(servers []domain.ConversationMCPServer) []ConversationMCP
 // tick-1..tick-8 lost tick-1 from the delta stream and from the aggregate alike --
 // so outputMayBePartial stays set either way. `outputSource` exists so the UI can
 // explain WHY it is partial instead of hedging identically about both.
-func activityDetailPayload(activity domain.ConversationActivity) map[string]any {
+func activityDetailPayload(activity domain.ConversationActivity, turnCompletedAt map[string]time.Time) map[string]any {
 	detail := decodeDetail(activity.Detail)
 	if activity.CommandOutput != "" {
 		if detail == nil {
@@ -1767,6 +1810,28 @@ func activityDetailPayload(activity domain.ConversationActivity) map[string]any 
 		detail[key] = activity.StreamedText
 		if activity.StreamedTextTruncated {
 			detail[truncatedKey] = true
+		}
+	}
+	// Only some providers say how long a command took. For the rest it is the span from
+	// when the command first began running (the store records that in startedAt, not
+	// created_at: a provider announces a tool call before the approval it may wait on,
+	// so created_at would count that wait as run time) to its last write, when it
+	// settled. A command with no recorded start, one that went straight from pending to
+	// settled or ran before the start was recorded, is left untimed rather than
+	// guessed. Under a second reads as instant, so it is left off rather than reported
+	// as noise. A row written after its own turn finished was rewritten later (a
+	// resumed session replays its history), so its last write is no longer when the
+	// command ended and the span is not reported.
+	if activity.Kind == domain.ActivityKindCommand &&
+		(activity.Status == domain.ActivityStatusCompleted || activity.Status == domain.ActivityStatusFailed) {
+		if _, reported := detail["durationMs"]; !reported {
+			if started, ok := commandStartedAt(detail); ok {
+				done, turnDone := turnCompletedAt[activity.TurnID]
+				rewritten := turnDone && activity.UpdatedAt.After(done.Add(time.Second))
+				if span := activity.UpdatedAt.Sub(started); span >= time.Second && !rewritten {
+					detail["durationMs"] = span.Milliseconds()
+				}
+			}
 		}
 	}
 	return detail

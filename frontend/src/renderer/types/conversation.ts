@@ -910,6 +910,13 @@ export interface ConversationSnapshot {
 	/** Already ordered by sequence. The renderer does not re-sort. */
 	items: ConversationItem[];
 	latestSequence: number;
+	/**
+	 * When the daemon last wrote any of these rows: a new row, a reply streaming in, a
+	 * command's output arriving. How long the agent has been quiet, which row creation
+	 * times cannot say, since one long command streams into a single row. Absent for a
+	 * conversation with no rows, and from a daemon that predates it.
+	 */
+	lastEventAt?: string;
 	oldestSequence: number;
 	hasMoreBefore: boolean;
 	/** The first provider-backed prompt in the active provider scope. */

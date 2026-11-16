@@ -331,6 +331,143 @@ func TestConversationSnapshotCarriesTheSendersClientMessageID(t *testing.T) {
 	}
 }
 
+// The live row says how long the agent has been quiet, so the snapshot names the
+// newest write among its rows: a streamed reply delta or a command's output chunk
+// moves it, though neither creates a row.
+func TestConversationSnapshotReportsWhenTheNewestRowWasLastWritten(t *testing.T) {
+	start := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	body := conversationSnapshotBody(t, chatsvc.Snapshot{
+		SessionID: domain.SessionID("p1-1"),
+		Messages: []domain.ConversationMessage{
+			{ID: "reply", TurnID: "t1", Sequence: 1, Role: domain.MessageRoleAssistant, Origin: domain.MessageOriginProvider, Text: "hi", CreatedAt: start, UpdatedAt: start.Add(20 * time.Second)},
+		},
+		Activities: []domain.ConversationActivity{
+			{ID: "build", TurnID: "t1", Sequence: 2, Kind: domain.ActivityKindCommand, Status: domain.ActivityStatusRunning, Summary: "npm run build", CreatedAt: start.Add(10 * time.Second), UpdatedAt: start.Add(95 * time.Second)},
+		},
+	})
+	if got, want := body["lastEventAt"], "2026-11-16T12:01:35Z"; got != want {
+		t.Fatalf("lastEventAt = %#v, want %q: the streaming command was written last", got, want)
+	}
+
+	empty := conversationSnapshotBody(t, chatsvc.Snapshot{SessionID: domain.SessionID("p1-1")})
+	if _, exists := empty["lastEventAt"]; exists {
+		t.Fatalf("a page with no rows must omit lastEventAt, got %#v", empty["lastEventAt"])
+	}
+}
+
+// The live cue reads the newest write on the page. Once a running activity hits its
+// output or streamed-text cap the store skips every later write to it, so its row stops
+// moving while it is still producing: the page cannot then say how fresh the agent is,
+// and a quiet time that grows while a command prints would be wrong.
+func TestConversationSnapshotOmitsLastEventWhileARunningStreamIsCapped(t *testing.T) {
+	start := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	reply := domain.ConversationMessage{ID: "reply", TurnID: "t1", Sequence: 1, Role: domain.MessageRoleAssistant, Origin: domain.MessageOriginProvider, Text: "hi", CreatedAt: start, UpdatedAt: start.Add(5 * time.Second)}
+	lastEvent := func(activity domain.ConversationActivity) (any, bool) {
+		activity.ID, activity.TurnID, activity.Sequence = "act", "t1", 2
+		activity.CreatedAt, activity.UpdatedAt = start.Add(10*time.Second), start.Add(20*time.Second)
+		body := conversationSnapshotBody(t, chatsvc.Snapshot{
+			SessionID:  domain.SessionID("p1-1"),
+			Messages:   []domain.ConversationMessage{reply},
+			Activities: []domain.ConversationActivity{activity},
+		})
+		got, present := body["lastEventAt"]
+		return got, present
+	}
+
+	for name, activity := range map[string]domain.ConversationActivity{
+		"capped command output":       {Kind: domain.ActivityKindCommand, Status: domain.ActivityStatusRunning, CommandOutputTruncated: true},
+		"capped reasoning stream":     {Kind: domain.ActivityKindReasoning, Status: domain.ActivityStatusRunning, StreamedTextTruncated: true},
+		"capped command terminal I/O": {Kind: domain.ActivityKindCommand, Status: domain.ActivityStatusRunning, StreamedTextTruncated: true},
+	} {
+		if got, present := lastEvent(activity); present {
+			t.Errorf("%s: lastEventAt = %#v, want it omitted: the row no longer moves while the activity is busy", name, got)
+		}
+	}
+
+	// Anything that still moves its row keeps the time: a running command under its cap,
+	// and a capped one that has settled (its last write is then its end).
+	for name, activity := range map[string]domain.ConversationActivity{
+		"running under the cap": {Kind: domain.ActivityKindCommand, Status: domain.ActivityStatusRunning},
+		"capped but settled":    {Kind: domain.ActivityKindCommand, Status: domain.ActivityStatusCompleted, CommandOutputTruncated: true},
+	} {
+		if got, present := lastEvent(activity); !present || got != "2026-11-16T12:00:20Z" {
+			t.Errorf("%s: lastEventAt = %#v (present %v), want 2026-11-16T12:00:20Z", name, got, present)
+		}
+	}
+}
+
+// Only some providers report how long a command took. The rest are timed from when the
+// command first began running (startedAt, recorded by the store), never from when the
+// row was created: a provider announces a tool call before the approval it may wait on,
+// so a command that waited ten minutes and ran for a second must not read ten minutes.
+func TestSnapshotTimesACommandFromWhenItBeganRunning(t *testing.T) {
+	start := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	detail := func(extra map[string]any, startedAt *time.Time) []byte {
+		fields := map[string]any{"command": "npm test"}
+		for key, value := range extra {
+			fields[key] = value
+		}
+		if startedAt != nil {
+			fields["startedAt"] = startedAt.Format(time.RFC3339Nano)
+		}
+		encoded, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatalf("encode detail: %v", err)
+		}
+		return encoded
+	}
+	ranAt := func(offset time.Duration) *time.Time { at := start.Add(offset); return &at }
+	command := func(id string, status domain.ActivityStatus, detail []byte, updated time.Duration) domain.ConversationActivity {
+		return domain.ConversationActivity{
+			ID: id, Kind: domain.ActivityKindCommand, Status: status, Summary: id, Detail: detail,
+			CreatedAt: start, UpdatedAt: start.Add(updated),
+		}
+	}
+	// A resumed session replays its history, which rewrites settled rows: this one was
+	// last written two days after its turn finished, so its span is not its run time.
+	turnDone := start.Add(30 * time.Second)
+	replayed := command("replayed", domain.ActivityStatusCompleted, detail(nil, ranAt(0)), 48*time.Hour)
+	replayed.TurnID = "t-old"
+	body := conversationSnapshotBody(t, chatsvc.Snapshot{
+		SessionID: domain.SessionID("p1-1"),
+		Turns:     []domain.ConversationTurn{{ID: "t-old", CompletedAt: &turnDone}},
+		Activities: []domain.ConversationActivity{
+			replayed,
+			// Created at 12:00:00, approved and started at 12:10:00, settled 4.2s later.
+			command("after-approval", domain.ActivityStatusCompleted, detail(nil, ranAt(10*time.Minute)), 10*time.Minute+4200*time.Millisecond),
+			command("no-start", domain.ActivityStatusCompleted, detail(nil, nil), 10*time.Minute),
+			command("instant", domain.ActivityStatusCompleted, detail(nil, ranAt(0)), 400*time.Millisecond),
+			command("running", domain.ActivityStatusRunning, detail(nil, ranAt(0)), 30*time.Second),
+			command("reported", domain.ActivityStatusCompleted, detail(map[string]any{"durationMs": 7000}, ranAt(0)), 3*time.Second),
+		},
+	})
+
+	durations := map[string]any{}
+	for _, raw := range body["activities"].([]any) {
+		activity := raw.(map[string]any)
+		detail, _ := activity["detail"].(map[string]any)
+		durations[activity["id"].(string)] = detail["durationMs"]
+	}
+	if durations["after-approval"] != float64(4200) {
+		t.Errorf("after-approval durationMs = %#v, want 4200 from when it began running, not the 604200 since it was created", durations["after-approval"])
+	}
+	if durations["no-start"] != nil {
+		t.Errorf("a command with no recorded start must carry no durationMs rather than a guess, got %#v", durations["no-start"])
+	}
+	if durations["replayed"] != nil {
+		t.Errorf("a row rewritten after its turn finished must carry no durationMs, got %#v", durations["replayed"])
+	}
+	if durations["instant"] != nil {
+		t.Errorf("a command under a second must carry no durationMs, got %#v", durations["instant"])
+	}
+	if durations["running"] != nil {
+		t.Errorf("a command still running has no duration yet, got %#v", durations["running"])
+	}
+	if durations["reported"] != float64(7000) {
+		t.Errorf("reported durationMs = %#v, want the provider's 7000 to win", durations["reported"])
+	}
+}
+
 func TestConversationSnapshotCarriesHumanPromptFactWithoutPagedMessage(t *testing.T) {
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	body := conversationSnapshotBody(t, chatsvc.Snapshot{
