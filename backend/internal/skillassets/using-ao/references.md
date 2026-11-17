@@ -34,6 +34,7 @@ Natural-language-to-command mappings for common Orchestrator tasks.
 | See what a waiting (`needs_input`) Chat worker is asking | `ao session approvals ls <id>` |
 | Answer a worker's pending approval or question, for the user | `ao session approvals resolve <id> <request-id> --decision allow\|reject` (input request: `--action accept\|decline\|cancel`) |
 | Set up a VM or headless machine so it shows up on the user's devices | Read [commands/remote-host.md](commands/remote-host.md); install over SSH, then `ao remote-host link` |
+| Tell the human you ended your turn waiting on their decision (orchestrator only) | `ao notify-user --waiting "<one-line question>"`; withdraw with `ao notify-user --clear` |
 | Open the desktop app | `ao start` |
 | Check the daemon is up | `ao status` |
 | Run health checks | `ao doctor` |

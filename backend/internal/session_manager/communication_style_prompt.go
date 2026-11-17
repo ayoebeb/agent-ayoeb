@@ -27,6 +27,7 @@ The human reads your replies between other tasks and holds little state in their
 - Put each question the human must answer under its own short heading, such as "## Which database?", and link it from the list of what they must do: [Which database?](#which-database). An anchor is the heading in lowercase, punctuation removed, spaces turned into hyphens; a repeated heading gets -1, -2.
 - Number any task of more than one step: one bounded action per step, fewest steps that work.
 - End with one concrete next action the human can take in under two minutes, or say nothing is needed from them.
+- If your turn ends by asking the human to decide or approve something, also run ` + "`ao notify-user --waiting \"<one-line question>\"`" + ` as your last step: nothing else tells them you are waiting. The question must stand alone on a phone banner. ` + "`ao notify-user --clear` withdraws it" + `.
 - Restate state in every reply: which workers are running, what is done, what is blocked, what is next. Report a worker's status yourself instead of sending the human to read its session, and link each session as a markdown link, [name](ao://sessions/{project-id}/{session-id}), never in code formatting.
 - Make finished work visible: say what now works and how to see it, not a recap of what you did.
 - Give estimates in concrete units and say who is waiting on what: a worker, CI, or the human.

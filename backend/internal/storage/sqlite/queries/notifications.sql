@@ -28,7 +28,7 @@ SELECT *
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge')
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting')
   AND (
     CAST(sqlc.arg(before_id) AS TEXT) = ''
     OR created_at < sqlc.arg(before_created_at)
@@ -60,7 +60,7 @@ SELECT COUNT(*)
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge');
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting');
 
 -- name: MarkNotificationRead :one
 UPDATE notifications
@@ -146,6 +146,60 @@ WHERE type = 'needs_input'
     WHERE is_terminated = TRUE
        OR activity_state NOT IN ('waiting_input', 'blocked')
   );
+
+-- Every orchestrator still waiting on the user. Dismissed rows are included on
+-- purpose: clearing the notification panel acknowledges the alert, not the
+-- question, so the sidebar marker must outlive it.
+-- name: ListOpenOrchestratorWaiting :many
+SELECT *
+FROM notifications
+WHERE type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+ORDER BY created_at DESC, id DESC;
+
+-- Open rows the single reminder is due for: not yet reminded, and waiting since
+-- before the cutoff.
+-- name: ListDueOrchestratorWaitingReminders :many
+SELECT *
+FROM notifications
+WHERE type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+  AND reminded_at IS NULL
+  AND created_at <= sqlc.arg(cutoff)
+ORDER BY created_at ASC, id ASC;
+
+-- Claims the reminder: only the call that flips reminded_at from NULL wins, so a
+-- row is announced at most once even if two ticks race.
+-- name: MarkNotificationReminded :one
+UPDATE notifications
+SET reminded_at = sqlc.arg(reminded_at)
+WHERE id = sqlc.arg(id)
+  AND type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+  AND reminded_at IS NULL
+RETURNING *;
+
+-- An orchestrator's wait outlives the user dismissing its notification, so
+-- resolving it must reach dismissed rows too and report them: the sidebar marker
+-- comes from the open waits, not from the visible history, and learns the wait
+-- ended from the resolved event.
+-- name: ResolveOpenSessionNotificationsByTypeIncludingDismissed :many
+UPDATE notifications
+SET resolved_at = sqlc.arg(resolved_at)
+WHERE session_id = sqlc.arg(session_id)
+  AND type = sqlc.arg(type)
+  AND resolved_at IS NULL
+RETURNING *;
+
+-- Restart reconciliation for orchestrator waits: an orchestrator that ended
+-- while the daemon was down never reached lifecycle.
+-- name: ResolveStaleOrchestratorWaitingNotifications :many
+UPDATE notifications
+SET resolved_at = sqlc.arg(resolved_at)
+WHERE type = 'orchestrator_waiting'
+  AND resolved_at IS NULL
+  AND session_id IN (SELECT id FROM sessions WHERE is_terminated = TRUE)
+RETURNING *;
 
 -- name: GetOpenNotificationByDedupe :one
 SELECT *

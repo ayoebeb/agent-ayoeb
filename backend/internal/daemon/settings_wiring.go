@@ -28,8 +28,15 @@ func (s settingsStore) GetAppSettings(ctx context.Context) (settingssvc.Snapshot
 		VersionRefresh:       row.VersionRefresh,
 		ComputerUse:          row.ComputerUse,
 		SessionRetentionDays: row.SessionRetentionDays,
-		UpdatedAt:            row.UpdatedAt,
+
+		OrchestratorWaitingEnabled:         row.OrchestratorWaitingEnabled,
+		OrchestratorWaitingRenotifyMinutes: row.OrchestratorWaitingRenotifyMinutes,
+		UpdatedAt:                          row.UpdatedAt,
 	}, nil
+}
+
+func (s settingsStore) SetOrchestratorWaiting(ctx context.Context, enabled bool, renotifyMinutes int, now time.Time) error {
+	return s.store.SetOrchestratorWaiting(ctx, enabled, renotifyMinutes, now)
 }
 
 func (s settingsStore) SetDefaultSessionMode(

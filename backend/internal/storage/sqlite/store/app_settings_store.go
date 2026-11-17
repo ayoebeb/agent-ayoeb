@@ -33,7 +33,13 @@ type AppSettings struct {
 	// SessionRetentionDays is how long an archived session is kept before the
 	// daemon deletes it; 0 keeps it.
 	SessionRetentionDays int
-	UpdatedAt            time.Time
+	// OrchestratorWaitingEnabled turns the distinct "orchestrator is waiting for
+	// you" notification on or off.
+	OrchestratorWaitingEnabled bool
+	// OrchestratorWaitingRenotifyMinutes is how long a question stays unanswered
+	// before it is announced a second time; 0 turns the reminder off.
+	OrchestratorWaitingRenotifyMinutes int
+	UpdatedAt                          time.Time
 }
 
 // GetAppSettings reads the preference row.
@@ -54,7 +60,10 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 		VersionRefresh:       row.VersionRefresh,
 		ComputerUse:          row.ComputerUse,
 		SessionRetentionDays: int(row.SessionRetentionDays),
-		UpdatedAt:            row.UpdatedAt,
+
+		OrchestratorWaitingEnabled:         row.OrchestratorWaitingEnabled != 0,
+		OrchestratorWaitingRenotifyMinutes: int(row.OrchestratorWaitingRenotifyMinutes),
+		UpdatedAt:                          row.UpdatedAt,
 	}, nil
 }
 
@@ -109,6 +118,25 @@ func (s *Store) SetSessionRetentionDays(ctx context.Context, days int, now time.
 		UpdatedAt:            now,
 	}); err != nil {
 		return fmt.Errorf("set session retention: %w", err)
+	}
+	return nil
+}
+
+// SetOrchestratorWaiting persists the orchestrator-waiting notification
+// preferences: whether it is on, and the minutes before the one reminder.
+func (s *Store) SetOrchestratorWaiting(ctx context.Context, enabled bool, renotifyMinutes int, now time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var flag int64
+	if enabled {
+		flag = 1
+	}
+	if err := s.qw.SetOrchestratorWaiting(ctx, gen.SetOrchestratorWaitingParams{
+		OrchestratorWaitingEnabled:         flag,
+		OrchestratorWaitingRenotifyMinutes: int64(renotifyMinutes),
+		UpdatedAt:                          now,
+	}); err != nil {
+		return fmt.Errorf("set orchestrator waiting: %w", err)
 	}
 	return nil
 }

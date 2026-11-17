@@ -187,6 +187,18 @@ preview. Agents must not create it automatically. Static HTML and Markdown use
 the direct file preview and must not cause package-manager scaffolding,
 dependency installation, or a development server to be introduced.
 
+`ao notify-user --waiting "<one-line question>"` is how a project orchestrator
+tells the human it ended its turn waiting for them (a pending approval or input
+request already does this on its own). It resolves the session from
+`AO_SESSION_ID` and is refused for a worker. The daemon records one open
+`orchestrator_waiting` notification per wait: a toast and sound, a phone push,
+the app badge and a sidebar marker, all titled "<project>: orchestrator is
+waiting for you" (the daemon stores it in English; the desktop app shows it in
+the user's own language). It closes when the human replies (a worker's message does not count), when
+the orchestrator runs `ao notify-user --clear`, or when the session ends; it is
+announced once more after the delay set in Settings (10 minutes by default) and
+never again. Declaring the same question while it is open is a no-op.
+
 When a browser-displayable file is the requested artifact, agents should call
 `ao preview <workspace-path>` immediately after creating or materially updating
 the primary output. Markdown, HTML, PDF, SVG, and common images can be served

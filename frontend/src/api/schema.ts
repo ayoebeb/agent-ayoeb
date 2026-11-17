@@ -1820,6 +1820,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orchestrator-waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the orchestrators that are waiting for the user */
+        get: operations["listOrchestratorWaiting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orchestrators": {
         parameters: {
             query?: never;
@@ -4129,6 +4146,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tell the user this orchestrator ended its turn waiting for them */
+        post: operations["declareOrchestratorWaiting"];
+        /** Withdraw this orchestrator's waiting-for-the-user notice */
+        delete: operations["clearOrchestratorWaiting"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/workspace/branches": {
         parameters: {
             query?: never;
@@ -4451,6 +4486,23 @@ export interface paths {
         head?: never;
         /** Choose which models one harness's pickers offer */
         patch: operations["updateHarnessDefault"];
+        trace?: never;
+    };
+    "/api/v1/settings/orchestrator-waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Choose whether and how persistently AO tells you a project orchestrator is waiting for you */
+        patch: operations["updateOrchestratorWaiting"];
         trace?: never;
     };
     "/api/v1/settings/session-interface": {
@@ -5568,6 +5620,9 @@ export interface components {
              */
             clearedCount: number;
         };
+        ClearOrchestratorWaitingResponse: {
+            cleared: boolean;
+        };
         CloneDestination: {
             canUseExisting: boolean;
             exists: boolean;
@@ -6500,6 +6555,17 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        DeclareOrchestratorWaitingRequest: {
+            /** @description One line, at most 240 characters, saying what the user must decide or answer. */
+            question: string;
+        };
+        DeclareOrchestratorWaitingResponse: {
+            /**
+             * @description notified: a new wait was recorded and the user was told. unchanged: the same question was already open. disabled: the user switched this notification off in Settings.
+             * @enum {string}
+             */
+            outcome: "notified" | "unchanged" | "disabled";
+        };
         DegradedProject: {
             id: string;
             /** @enum {string} */
@@ -6967,6 +7033,9 @@ export interface components {
             unreadCount: number;
             unresolvedCount: number;
         };
+        ListOrchestratorWaitingResponse: {
+            waiting: components["schemas"]["OrchestratorWaitingResponse"][];
+        };
         ListPRFilesResponse: {
             commits: components["schemas"]["WorkspaceCommitSummary"][];
             /** @description True when older commits were left out of commits: the list keeps the newest 250, and stops at the last commit whose changes fit the daemon's size cap. */
@@ -7149,7 +7218,7 @@ export interface components {
             target: components["schemas"]["NotificationTarget"];
             title: string;
             /** @enum {string} */
-            type: "needs_input" | "ready_to_merge" | "pr_merged" | "pr_closed_unmerged" | "review_completed" | "review_changes_requested";
+            type: "needs_input" | "ready_to_merge" | "pr_merged" | "pr_closed_unmerged" | "review_completed" | "review_changes_requested" | "orchestrator_waiting";
         };
         NotificationTarget: {
             /** @enum {string} */
@@ -7183,6 +7252,17 @@ export interface components {
             id: string;
             projectId: string;
             projectName?: string;
+        };
+        OrchestratorWaitingResponse: {
+            notificationId: string;
+            projectId: string;
+            question: string;
+            /** @description True once the single reminder has been sent. */
+            reminded: boolean;
+            sessionId: string;
+            /** Format: date-time */
+            since: string;
+            title: string;
         };
         PRReviewState: {
             latestRun?: components["schemas"]["ReviewRun"];
@@ -8059,6 +8139,10 @@ export interface components {
                 [key: string]: components["schemas"]["HarnessDefault"];
             };
             localEnabled: boolean;
+            /** @description When on, a project orchestrator waiting for the user raises a distinct notification (toast, sound, phone push, badge and a sidebar marker) until the user responds. */
+            orchestratorWaitingEnabled: boolean;
+            /** @description Minutes a question stays unanswered before it is announced a second time; 0 turns the reminder off. */
+            orchestratorWaitingRenotifyMinutes: number;
             /** @description Days an archived session whose worktree is released is kept before the daemon deletes it permanently; 0 keeps it. */
             sessionRetentionDays: number;
             trackerIntakeEnabled: boolean;
@@ -8582,6 +8666,11 @@ export interface components {
         };
         UpdateHarnessDefaultRequest: {
             disabledModels: null | string[];
+        };
+        UpdateOrchestratorWaitingRequest: {
+            enabled: null | boolean;
+            /** @description Minutes before a still-unanswered question is announced a second time; 0 turns the reminder off. */
+            renotifyMinutes: null | number;
         };
         UpdateProjectSettingsInput: {
             config: components["schemas"]["ProjectConfig"];
@@ -14934,6 +15023,44 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": string;
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listOrchestratorWaiting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListOrchestratorWaitingResponse"];
                 };
             };
             /** @description Internal Server Error */
@@ -24496,6 +24623,146 @@ export interface operations {
             };
         };
     };
+    declareOrchestratorWaiting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclareOrchestratorWaitingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeclareOrchestratorWaitingResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    clearOrchestratorWaiting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearOrchestratorWaitingResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     listSessionWorkspaceBranches: {
         parameters: {
             query?: never;
@@ -25758,6 +26025,57 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    updateOrchestratorWaiting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrchestratorWaitingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

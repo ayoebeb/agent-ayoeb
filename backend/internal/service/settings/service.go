@@ -29,6 +29,7 @@ type Store interface {
 	SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error
 	SetComputerUse(ctx context.Context, enabled bool, now time.Time) error
 	SetSessionRetentionDays(ctx context.Context, days int, now time.Time) error
+	SetOrchestratorWaiting(ctx context.Context, enabled bool, renotifyMinutes int, now time.Time) error
 }
 
 // Snapshot is the current preference set.
@@ -46,7 +47,15 @@ type Snapshot struct {
 	// released is kept before the daemon deletes it (Settings, General). 0, the
 	// default, keeps it.
 	SessionRetentionDays int
-	UpdatedAt            time.Time
+	// OrchestratorWaitingEnabled is whether AO gives the user a distinct,
+	// hard-to-miss notification when a project's orchestrator is waiting for them
+	// (Settings, General). On by default.
+	OrchestratorWaitingEnabled bool
+	// OrchestratorWaitingRenotifyMinutes is how long such a question stays
+	// unanswered before it is announced a second time. 0 turns the reminder off;
+	// the default is 10.
+	OrchestratorWaitingRenotifyMinutes int
+	UpdatedAt                          time.Time
 }
 
 // Offering reports which AO offerings this daemon exposes to clients. It is
@@ -235,6 +244,39 @@ func (s *Service) SetSessionRetentionDays(ctx context.Context, days int) (Snapsh
 		return Snapshot{}, apierr.Invalid("SESSION_RETENTION_INVALID", fmt.Sprintf("days must be between 0 and %d", maxSessionRetentionDays), nil)
 	}
 	if err := s.store.SetSessionRetentionDays(ctx, days, s.now()); err != nil {
+		return Snapshot{}, err
+	}
+	return s.Get(ctx)
+}
+
+// maxOrchestratorWaitingRenotifyMinutes bounds the reminder delay to a day.
+const maxOrchestratorWaitingRenotifyMinutes = 24 * 60
+
+// OrchestratorWaiting reports whether the orchestrator-waiting notification is
+// on and how long a question stays unanswered before it is announced again
+// (0: never). It is read each time a wait is declared and on every reminder
+// tick, so a change in Settings applies to the next one. An unreadable store is
+// an error: the caller decides, rather than this guessing "off" and silencing
+// the user's most important link.
+func (s *Service) OrchestratorWaiting(ctx context.Context) (bool, time.Duration, error) {
+	snapshot, err := s.store.GetAppSettings(ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	return snapshot.OrchestratorWaitingEnabled,
+		time.Duration(snapshot.OrchestratorWaitingRenotifyMinutes) * time.Minute, nil
+}
+
+// SetOrchestratorWaiting sets whether the orchestrator-waiting notification is
+// on and the minutes before its one reminder (0 turns the reminder off).
+func (s *Service) SetOrchestratorWaiting(ctx context.Context, enabled bool, renotifyMinutes int) (Snapshot, error) {
+	if renotifyMinutes < 0 || renotifyMinutes > maxOrchestratorWaitingRenotifyMinutes {
+		return Snapshot{}, apierr.Invalid(
+			"ORCHESTRATOR_WAITING_RENOTIFY_INVALID",
+			fmt.Sprintf("renotifyMinutes must be between 0 and %d", maxOrchestratorWaitingRenotifyMinutes), nil,
+		)
+	}
+	if err := s.store.SetOrchestratorWaiting(ctx, enabled, renotifyMinutes, s.now()); err != nil {
 		return Snapshot{}, err
 	}
 	return s.Get(ctx)

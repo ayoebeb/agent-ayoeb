@@ -37,6 +37,7 @@ describe("shared UI locale schema", () => {
 		expect(DEFAULT_UI_SETTINGS).toEqual({
 			locale: "en",
 			soundNotificationsEnabled: true,
+			orchestratorWaitingSoundEnabled: true,
 			terminalShell: { kind: "auto" },
 		});
 		expect(coerceUiSettings({ locale: "en", soundNotificationsEnabled: false })).toEqual({
@@ -57,6 +58,19 @@ describe("shared UI locale schema", () => {
 		expect(coerceUiSettings({ locale: "en", soundNotificationsEnabled: null })).toEqual({
 			...DEFAULT_UI_SETTINGS,
 		});
+	});
+
+	// The orchestrator is the user's main contact, so its sound is on by default and
+	// has its own switch: turning off the general sound must not turn it off.
+	it("keeps the orchestrator-waiting sound on by default and independent of the general sound", () => {
+		expect(DEFAULT_UI_SETTINGS.orchestratorWaitingSoundEnabled).toBe(true);
+		expect(coerceUiSettings({ locale: "en", soundNotificationsEnabled: false }).orchestratorWaitingSoundEnabled).toBe(true);
+		expect(coerceUiSettings({ locale: "en", orchestratorWaitingSoundEnabled: false })).toEqual({
+			...DEFAULT_UI_SETTINGS,
+			orchestratorWaitingSoundEnabled: false,
+		});
+		expect(coerceUiSettings({ locale: "en", orchestratorWaitingSoundEnabled: "no" }).orchestratorWaitingSoundEnabled).toBe(true);
+		expect(coerceUiSettings({ locale: "en", orchestratorWaitingSoundEnabled: null }).orchestratorWaitingSoundEnabled).toBe(true);
 	});
 
 	it("accepts supported terminal shells and normalizes custom paths", () => {

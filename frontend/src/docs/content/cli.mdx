@@ -189,6 +189,17 @@ ao report --done --note "Focused tests passed"
 
 `ao report` must run in a worker environment that provides `AO_SESSION_ID`.
 
+### `ao notify-user`
+
+Run by a project orchestrator, as the last step of a turn that ends by asking you to decide or approve something. You get a distinct notification titled "&lt;project&gt;: orchestrator is waiting for you" (in your own language) with the one-line question (a toast with sound, a phone push, the app badge, and a marker in the sidebar) until you reply. It is announced once more after the delay you choose in Settings, and never again. A pending approval already raises it on its own.
+
+```bash
+ao notify-user --waiting "Merge PR 42 now, or wait for the second review?"
+ao notify-user --clear
+```
+
+It needs `AO_SESSION_ID` and is refused for a worker, which asks its orchestrator with `ao report --needs-input`.
+
 ## Pull requests and reviews
 
 | Command | Purpose |

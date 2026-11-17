@@ -20,12 +20,18 @@ type NotificationIntent struct {
 
 	// Enrichment hints. These avoid storage reads on the hot path.
 	SessionDisplayName string
-	PRNumber           int
-	PRTitle            string
-	PRSourceBranch     string
-	PRTargetBranch     string
-	Provider           string
-	Repo               string
+	// ProjectName and Detail enrich an orchestrator_waiting intent: the project
+	// the orchestrator belongs to, and the one-line question it is waiting on.
+	// ProjectName is optional (the manager looks it up when empty); an empty
+	// Detail means the wait came from a pending approval or input request.
+	ProjectName    string
+	Detail         string
+	PRNumber       int
+	PRTitle        string
+	PRSourceBranch string
+	PRTargetBranch string
+	Provider       string
+	Repo           string
 }
 
 // NotificationResolution is the lifecycle-to-notification-producer contract for

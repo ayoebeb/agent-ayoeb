@@ -431,17 +431,44 @@ func (m *Manager) mutate(ctx context.Context, id domain.SessionID, fn func(domai
 // just made stale. A session that stopped waiting on the user — because the
 // input arrived, or because the session ended — has nothing left to resolve.
 func needsInputResolutions(prev, next domain.SessionRecord, now time.Time) []ports.NotificationResolution {
-	if !prev.Activity.State.NeedsInput() {
-		return nil
+	var out []ports.NotificationResolution
+	if prev.Activity.State.NeedsInput() && (!next.Activity.State.NeedsInput() || next.IsTerminated) {
+		out = append(out, ports.NotificationResolution{
+			Type:       domain.NotificationNeedsInput,
+			SessionID:  next.ID,
+			ResolvedAt: now,
+		})
+		// An orchestrator's wait is the same fact under its own notification kind
+		// (the kind depends on a setting that may have changed while it waited), so
+		// it closes with it.
+		if next.Kind == domain.KindOrchestrator {
+			out = append(out, ports.NotificationResolution{
+				Type:       domain.NotificationOrchestratorWaiting,
+				SessionID:  next.ID,
+				ResolvedAt: now,
+			})
+		}
 	}
-	if next.Activity.State.NeedsInput() && !next.IsTerminated {
-		return nil
+	// An orchestrator that ended has nobody left to wait for, whether it was
+	// waiting on an approval or on a question it declared.
+	if next.Kind == domain.KindOrchestrator && next.IsTerminated && !prev.IsTerminated &&
+		!(prev.Activity.State.NeedsInput()) {
+		out = append(out, ports.NotificationResolution{
+			Type:       domain.NotificationOrchestratorWaiting,
+			SessionID:  next.ID,
+			ResolvedAt: now,
+		})
 	}
-	return []ports.NotificationResolution{{
-		Type:       domain.NotificationNeedsInput,
-		SessionID:  next.ID,
-		ResolvedAt: now,
-	}}
+	return out
+}
+
+func hasResolution(list []ports.NotificationResolution, typ domain.NotificationType) bool {
+	for _, res := range list {
+		if res.Type == typ {
+			return true
+		}
+	}
+	return false
 }
 
 // ApplyRuntimeObservation only writes when runtime liveness is unambiguous. A
@@ -1077,10 +1104,30 @@ retryProjection:
 			CreatedAt:          next.Activity.LastActivityAt,
 			SessionDisplayName: next.DisplayName,
 		}
+		// The orchestrator is the user's main contact: its wait gets the distinct
+		// notification. The notify manager turns it back into an ordinary
+		// needs-input row when that notification is switched off.
+		if next.Kind == domain.KindOrchestrator {
+			intent.Type = domain.NotificationOrchestratorWaiting
+			intent.SourceKey = domain.OrchestratorWaitingSourceKey(next.ID, next.Activity.LastActivityAt)
+		}
 	}
 	// Leaving the needs-input family is the user answering: the notification
 	// that pinged them has nothing left to resolve.
 	resolutions := needsInputResolutions(rec, next, now)
+	// A prompt the human submitted answers a question the orchestrator declared
+	// at the end of its last turn. A prompt AO coordinated (a worker's message)
+	// does not: the question is still open. A wrongly cleared wait heals itself,
+	// because the orchestrator declares again when its next turn ends.
+	if next.Kind == domain.KindOrchestrator && s.Event == "user-prompt-submit" &&
+		s.ConversationCheckpointOrigin != domain.ConversationCheckpointOriginCoordination &&
+		!hasResolution(resolutions, domain.NotificationOrchestratorWaiting) {
+		resolutions = append(resolutions, ports.NotificationResolution{
+			Type:       domain.NotificationOrchestratorWaiting,
+			SessionID:  next.ID,
+			ResolvedAt: now,
+		})
+	}
 	waitingEvents := m.waitingInputEvents(next, prevState, prevAt, now)
 	m.mu.Unlock()
 	if nativeSessionChanged {

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/sentryobs"
 	usagepipeline "github.com/aoagents/agent-orchestrator/backend/internal/observe/usage"
+	"github.com/aoagents/agent-orchestrator/backend/internal/orchestratorwait"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/presence"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
@@ -326,7 +328,31 @@ func Run(buildVersion string) error {
 	notifier := notificationsvc.New(notificationsvc.Deps{
 		Store: store, Publisher: notificationHub, Barrier: notificationBarrier, Logger: log,
 	})
-	notificationWriter := notify.New(notify.Deps{Store: store, Publisher: notificationHub, Barrier: notificationBarrier})
+	// The settings service is built further down, once the chat drivers exist;
+	// the notification writer needs two of its answers before that, so it reads
+	// them through this late-bound reference.
+	var settingsRef atomic.Pointer[settingssvc.Service]
+	notificationWriter := notify.New(notify.Deps{
+		Store: store, Publisher: notificationHub, Barrier: notificationBarrier,
+		ProjectName: func(ctx context.Context, id domain.ProjectID) string {
+			project, ok, err := store.GetProject(ctx, string(id))
+			if err != nil || !ok {
+				return ""
+			}
+			return project.DisplayName
+		},
+		// Until settings are wired (or when they cannot be read) the distinct
+		// notification stays on: an orchestrator waiting on the user must not go
+		// quiet because of a settings hiccup.
+		WaitingEnabled: func(ctx context.Context) bool {
+			svc := settingsRef.Load()
+			if svc == nil {
+				return true
+			}
+			enabled, _, err := svc.OrchestratorWaiting(ctx)
+			return err != nil || enabled
+		},
+	})
 	// Resolution transitions that happened while the daemon was down never
 	// reached lifecycle, so re-check open notifications against the durable
 	// session/PR facts before serving. Best-effort: a failure here only leaves
@@ -387,6 +413,17 @@ func Run(buildVersion string) error {
 		settingssvc.OfferingFromConfig(cfg),
 		func() time.Time { return time.Now().UTC() },
 	)
+	settingsRef.Store(settingsSvc)
+
+	// Tells the user when a project's orchestrator is waiting for them, and once
+	// more if it still is after the configured delay.
+	orchestratorWaiting := orchestratorwait.New(orchestratorwait.Deps{
+		Store: store, Notifier: notificationWriter, Settings: settingsSvc,
+	})
+	go func() {
+		defer sentryobs.RecoverBackground()
+		orchestratorWaiting.RunReminders(ctx)
+	}()
 
 	// Chat service. The driver registry is the capability gate: a harness with no
 	// registered driver cannot start in chat mode, so an unsupported request fails
@@ -773,6 +810,7 @@ func Run(buildVersion string) error {
 		Delivery: reportSemanticDelivery{chat: chatSvc, sessions: reportSessions, store: store},
 	})
 	chatSvc.SetReportCoordinator(reportCoordinator)
+	chatSvc.SetHumanReplyObserver(orchestratorWaiting)
 	reportDeliveryDone := reportCoordinator.Start(ctx)
 	defer func() {
 		stop()
@@ -1183,6 +1221,7 @@ func Run(buildVersion string) error {
 		PRs:                    prActions,
 		Reviews:                reviewSvc,
 		Notifications:          notifier,
+		OrchestratorWaiting:    orchestratorWaiting,
 		Reports:                reportSvc,
 		NotificationStream:     notificationHub,
 		Push:                   pushRegistry,

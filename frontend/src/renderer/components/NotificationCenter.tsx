@@ -55,6 +55,9 @@ import { Pressable } from "./ui/pressable";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { TooltipProvider } from "./ui/tooltip";
 import { useCloudNotifications } from "../hooks/useCloudNotifications";
+import { useOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
+import { localizedNotificationCopy, NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, waitsBeyondUnread } from "../lib/orchestrator-waiting";
+import { labelForHost } from "../lib/host-clients";
 import { clearRemoteNotification, clearRemoteNotifications, connectRemoteNotificationStreams, fetchRemoteNotificationsPage, markRemoteNotificationsRead, remoteNotificationsQueryKey, useRemoteNotificationHosts } from "../hooks/useRemoteNotifications";
 import type { CloudCpNotification } from "../lib/cloud-cp/types";
 
@@ -188,7 +191,19 @@ export function NotificationRuntime() {
 	const { openPrimary } = useNotificationTargetNavigation();
 	const unreadQuery = useNotificationsQuery("unread");
 	const remoteUnread = useRemoteNotificationHosts("unread");
-	const unreadCount = getCachedUnreadCount(unreadQuery.data) + remoteUnread.totalUnreadCount;
+	const { waiting } = useOrchestratorWaiting();
+	// An orchestrator still waiting keeps the badge lit after its notification
+	// was opened or cleared: the question is unanswered, whatever was seen.
+	const unreadNotificationIds = useMemo(() => {
+		const ids = new Set<string>();
+		for (const item of getCachedNotifications(unreadQuery.data)) ids.add(`${LOCAL_HOST}:${item.id}`);
+		for (const host of remoteUnread.hosts) {
+			for (const item of host.data?.notifications ?? []) ids.add(`${host.hostId}:${item.id}`);
+		}
+		return ids;
+	}, [remoteUnread.hosts, unreadQuery.data]);
+	const unreadCount =
+		getCachedUnreadCount(unreadQuery.data) + remoteUnread.totalUnreadCount + waitsBeyondUnread(waiting, unreadNotificationIds);
 	const params = useParams({ strict: false }) as { hostId?: string; sessionId?: string };
 	const routeRef = useRef(params);
 	routeRef.current = params;
@@ -206,11 +221,37 @@ export function NotificationRuntime() {
 		return useUiStore.getState().visibleTerminalKindBySession[sessionId] === "worker" ? sessionId : undefined;
 	}, []);
 
+	// The local session whose page is open. An orchestrator in Chat has no agent
+	// terminal pane, so the route is what says its conversation is on screen.
+	const getRouteSessionId = useCallback(() => {
+		const { hostId, sessionId } = routeRef.current;
+		return hostId ? undefined : sessionId;
+	}, []);
+
 	useEffect(
-		() => createNotificationsTransport(queryClient, getVisibleAgentSessionId).connect(),
-		[getVisibleAgentSessionId, queryClient],
+		() => createNotificationsTransport(queryClient, getVisibleAgentSessionId, getRouteSessionId).connect(),
+		[getRouteSessionId, getVisibleAgentSessionId, queryClient],
 	);
-	useEffect(() => connectRemoteNotificationStreams(queryClient), [queryClient]);
+	// The single reminder for a remote orchestrator that is still waiting. It
+	// shows the same alert as the first one; the click lookup finds the row the
+	// first alert cached.
+	const showRemoteReminder = useCallback((hostId: string, notification: NotificationDTO) => {
+		const id = `${REMOTE_NOTIFICATION_PREFIX}${notificationKey(hostId, notification.id)}`;
+		shownRemoteNotifications.current.set(id, notification);
+		const { hostId: routeHost, sessionId } = routeRef.current;
+		const watched =
+			routeHost === hostId && sessionId === notification.sessionId &&
+			document.visibilityState === "visible" && document.hasFocus();
+		const copy = localizedNotificationCopy(notification);
+		void aoBridge.notifications.show({
+			id,
+			title: `${labelForHost(hostId) ?? hostId}: ${copy.title}`,
+			body: copy.body || undefined,
+			type: notification.type,
+			watched,
+		});
+	}, []);
+	useEffect(() => connectRemoteNotificationStreams(queryClient, showRemoteReminder), [queryClient, showRemoteReminder]);
 
 	// Keep the OS launcher badge in sync in the persistent shell runtime;
 	// topbar controls can remount as the visible page changes.
@@ -235,13 +276,20 @@ export function NotificationRuntime() {
 					shownRemoteNotifications.current.delete(shownRemoteNotifications.current.keys().next().value!);
 				}
 				const { hostId, sessionId } = routeRef.current;
-				const watched = notification.type === "needs_input" && hostId === host.hostId &&
-					sessionId === notification.sessionId && document.visibilityState === "visible" && document.hasFocus() &&
-					useUiStore.getState().visibleTerminalKindBySession[sessionUiKey(sessionId, hostId)] === "worker";
+				const onScreen = hostId === host.hostId && sessionId === notification.sessionId &&
+					document.visibilityState === "visible" && document.hasFocus();
+				// An orchestrator's wait is watched while its conversation is open; a
+				// worker's needs-input only while its agent terminal is on screen.
+				const watched = onScreen && (
+					notification.type === NOTIFICATION_TYPE_ORCHESTRATOR_WAITING ||
+					(notification.type === "needs_input" &&
+						useUiStore.getState().visibleTerminalKindBySession[sessionUiKey(sessionId ?? "", hostId)] === "worker")
+				);
+				const copy = localizedNotificationCopy(notification);
 				void aoBridge.notifications.show({
 					id,
-					title: `${host.label}: ${notification.title}`,
-					body: notification.body || undefined,
+					title: `${host.label}: ${copy.title}`,
+					body: copy.body || undefined,
 					type: notification.type,
 					watched,
 				});
@@ -1320,6 +1368,8 @@ function notificationPRTitleLink(
 }
 
 function notificationCopy(notification: NotificationDTO, sessionName?: string): NotificationCopy {
+	// An orchestrator wait reads in the user's own language; the daemon stores English.
+	if (notification.type === NOTIFICATION_TYPE_ORCHESTRATOR_WAITING) return localizedNotificationCopy(notification);
 	if (notification.type !== "ready_to_merge") {
 		return { title: notification.title, body: notification.body };
 	}
@@ -1358,6 +1408,8 @@ function notificationIcon(type: string) {
 	switch (type) {
 		case "needs_input":
 			return MessageSquareDot;
+		case NOTIFICATION_TYPE_ORCHESTRATOR_WAITING:
+			return CircleAlert;
 		case "review_feedback":
 		case "review_changes_requested":
 			return MessageSquareDiff;
@@ -1388,6 +1440,9 @@ function notificationIconClass(type: string): string {
 		case "review_changes_requested":
 			return "text-warning";
 		case "agent_failed":
+		// The orchestrator is the user's main contact: its wait reads as "needs
+		// you now", the red alert the sidebar marker uses.
+		case NOTIFICATION_TYPE_ORCHESTRATOR_WAITING:
 			return "text-error";
 		case "agent_completed":
 		case "pr_opened":

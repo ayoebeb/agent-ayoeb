@@ -176,7 +176,8 @@ import { isLinuxPlatform, isMacPlatform } from "../lib/platform";
 import { useCloudSession } from "../lib/cloud-session";
 import type { RemoteHost } from "../hooks/useRemoteHosts";
 import { sessionNavigateTarget } from "../lib/navigate-to-session";
-import { sessionUiKey } from "../lib/hosts";
+import { LOCAL_HOST, sessionUiKey } from "../lib/hosts";
+import { useProjectOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
 import { RemoteHostsSection } from "./RemoteHostsSection";
 import { beginSessionRowDrag } from "../lib/pane-drag";
 import { MAX_SPLIT_PANES, paneDragKey, sessionPaneKey, type SelectionKind, type SessionPaneRef } from "../lib/session-split";
@@ -1952,6 +1953,9 @@ const ProjectItem = memo(function ProjectItem({
 	// button: navigate to it when present, otherwise spawn one first.
 	const orchestrator = newestActiveOrchestrator(workspace.sessions);
 	const canResumeOrchestrator = useCanResumeAgent(orchestrator, workspace.hostId);
+	// The project's orchestrator is waiting for the user (an approval, a question
+	// in the dock, or a question it declared). The marker stays until they respond.
+	const orchestratorWaiting = Boolean(useProjectOrchestratorWaiting(workspace.hostId ?? LOCAL_HOST, workspace.id));
 	const orchestratorReply = useOrchestratorReplyState({
 		projectId: workspace.id,
 		hostId: workspace.hostId,
@@ -2317,7 +2321,7 @@ const ProjectItem = memo(function ProjectItem({
 										className="relative z-[1] hidden size-8 items-center justify-center group-data-[collapsible=icon]:inline-flex"
 									>
 										<ProjectIcon avatarUrl={avatarUrl} className="size-5" expanded={expanded} name={workspace.name} seed={workspace.path || workspace.id} />
-										{projectNeedsInput ? (
+										{projectNeedsInput || orchestratorWaiting ? (
 											<span
 												className="absolute right-0.5 top-0.5 size-2 rounded-full bg-destructive ring-2 ring-sidebar"
 												data-project-marker="attention"
@@ -2330,6 +2334,19 @@ const ProjectItem = memo(function ProjectItem({
 									>
 										{workspace.name}
 									</span>
+									{/* The project's orchestrator is waiting for the user. The red alert is
+									    the "needs you now" glyph the session rows use; the label keeps the
+									    colour from being the only signal. */}
+									{orchestratorWaiting ? (
+										<span
+											aria-label={t("shell.orchestratorWaitingForYou")}
+											className="sidebar-expanded-chrome relative z-[1] inline-flex shrink-0 group-data-[collapsible=icon]:hidden"
+											data-project-marker="orchestrator-waiting"
+											role="img"
+										>
+											<SessionMarkerIcon marker="attention" />
+										</span>
+									) : null}
 									{workspace.shared ? <SharedProjectMark share={workspace.shared} /> : null}
 									{/* The host badge shrinks and truncates in narrow sidebars so it never
 									    runs under the row actions; half the row stays for the name. */}
@@ -2418,6 +2435,7 @@ const ProjectItem = memo(function ProjectItem({
 																	}),
 															orchestratorReply,
 															t,
+															orchestratorWaiting,
 														)}
 															className={cn(HOVER_ACTION_CLASS, orchestratorActive && "text-foreground")}
 															disabled={isSpawning || isProjectProvisioning || isProjectRestarting}
@@ -2428,6 +2446,7 @@ const ProjectItem = memo(function ProjectItem({
 															reply={orchestratorReply}
 															strokeWidth={orchestratorActive ? 2.5 : 2}
 															surface="sidebar"
+															waiting={orchestratorWaiting}
 														/>
 													</Button>
 												</span>
@@ -2438,7 +2457,7 @@ const ProjectItem = memo(function ProjectItem({
 														: isSpawning
 														? t("shell.spawning")
 														: orchestrator
-															? orchestratorReplyLabel(t("shell.orchestrator"), orchestratorReply, t)
+															? orchestratorReplyLabel(t("shell.orchestrator"), orchestratorReply, t, orchestratorWaiting)
 															: t("shell.spawnOrchestratorLower")}
 											</TooltipContent>
 										</Tooltip>

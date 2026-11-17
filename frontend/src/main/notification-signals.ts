@@ -9,7 +9,19 @@
  */
 
 /** The notification types defined by `backend/internal/domain/notification.go`. */
-export type NotificationType = "needs_input" | "ready_to_merge" | "pr_merged" | "pr_closed_unmerged";
+export type NotificationType =
+	| "needs_input"
+	| "ready_to_merge"
+	| "pr_merged"
+	| "pr_closed_unmerged"
+	| "orchestrator_waiting";
+
+/**
+ * A project orchestrator waiting for the user: the user's main contact, whose
+ * unseen question stalls every worker behind it. It is the one type that is
+ * louder than the rest (see {@link lookingAtNotification}, {@link soundEnabledFor}).
+ */
+export const ORCHESTRATOR_WAITING_TYPE: NotificationType = "orchestrator_waiting";
 
 /**
  * Whether to fire the Windows/Linux taskbar flash. Restricted to the
@@ -19,7 +31,41 @@ export type NotificationType = "needs_input" | "ready_to_merge" | "pr_merged" | 
  * The macOS dock bounce is deliberately NOT gated by this allowlist — every
  * notification bounces there, with urgency carried by {@link dockBounceType}.
  */
-const ATTENTION_TYPES: ReadonlySet<string> = new Set<NotificationType>(["needs_input", "ready_to_merge"]);
+const ATTENTION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
+	"needs_input",
+	"ready_to_merge",
+	ORCHESTRATOR_WAITING_TYPE,
+]);
+
+/**
+ * Whether the user is already looking at what this notification is about, so
+ * the toast and flash would only repeat what is on screen.
+ *
+ * Usually a focused window counts: the user is in the app. An orchestrator
+ * waiting is the exception. A focused window can be showing anything, and the
+ * question is in one conversation, so only the renderer's own report that this
+ * conversation is on screen (`watched`) counts. Otherwise the user is in the
+ * app, looking at something else, and must still be told.
+ */
+export function lookingAtNotification(
+	type: string | undefined,
+	state: { windowFocused: boolean; watched: boolean | undefined },
+): boolean {
+	if (type === ORCHESTRATOR_WAITING_TYPE) return state.watched === true;
+	return state.windowFocused || state.watched === true;
+}
+
+/**
+ * The sound preference that governs this type. An orchestrator waiting has its
+ * own switch, so turning off the general sound notifications does not mute the
+ * user's most important link.
+ */
+export function soundEnabledFor(
+	type: string | undefined,
+	preferences: { general: boolean; orchestratorWaiting: boolean },
+): boolean {
+	return type === ORCHESTRATOR_WAITING_TYPE ? preferences.orchestratorWaiting : preferences.general;
+}
 
 /** Whether this notification type should flash the Windows/Linux taskbar. */
 export function shouldSignalAttention(type: string | undefined): boolean {
@@ -85,5 +131,5 @@ export function toastSilent(
  * signal without a merged PR nagging as insistently as a blocked agent.
  */
 export function dockBounceType(type: string | undefined): "critical" | "informational" {
-	return type === "needs_input" ? "critical" : "informational";
+	return type === "needs_input" || type === ORCHESTRATOR_WAITING_TYPE ? "critical" : "informational";
 }

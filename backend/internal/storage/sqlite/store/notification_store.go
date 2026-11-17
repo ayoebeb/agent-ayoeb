@@ -138,6 +138,24 @@ func (s *Store) ResolveSessionNotifications(
 	defer s.writeMu.Unlock()
 	var rows []gen.Notification
 	err := s.inTx(ctx, "resolve session notifications", func(q *gen.Queries) error {
+		if typ == domain.NotificationOrchestratorWaiting {
+			// An orchestrator's wait outlives the user dismissing its
+			// notification. Resolve dismissed rows as well and report them, so
+			// the clients that mark the waiting orchestrator hear it ended; then
+			// drop the dismissed tombstones, which have nothing left to dedupe.
+			var err error
+			rows, err = q.ResolveOpenSessionNotificationsByTypeIncludingDismissed(ctx,
+				gen.ResolveOpenSessionNotificationsByTypeIncludingDismissedParams{
+					ResolvedAt: nullTime(at),
+					SessionID:  id,
+					Type:       typ,
+				})
+			if err != nil {
+				return err
+			}
+			_, err = q.DeleteResolvedDismissedNotifications(ctx)
+			return err
+		}
 		var err error
 		rows, err = q.ResolveSessionNotificationsByType(ctx, gen.ResolveSessionNotificationsByTypeParams{
 			ResolvedAt: nullTime(at),
@@ -250,6 +268,20 @@ func (s *Store) ReconcileResolvedNotifications(ctx context.Context, at time.Time
 			return fmt.Errorf("delete dismissed needs-input notifications: %w", err)
 		}
 		resolved = notificationsFromGen(needsInput)
+		// An orchestrator that ended while the daemon was down is no longer
+		// waiting on anyone, whether it asked through an approval or declared a
+		// question. Dismissed rows are resolved and reported too (see
+		// ResolveSessionNotifications).
+		endedWaits, err := q.ResolveStaleOrchestratorWaitingNotifications(ctx, nullTime(at))
+		if err != nil {
+			return fmt.Errorf("reconcile orchestrator waiting notifications: %w", err)
+		}
+		if len(endedWaits) > 0 {
+			if _, err := q.DeleteResolvedDismissedNotifications(ctx); err != nil {
+				return fmt.Errorf("delete dismissed orchestrator waiting notifications: %w", err)
+			}
+			resolved = append(resolved, notificationsFromGen(endedWaits)...)
+		}
 		for _, prURL := range stalePRs {
 			rows, err := q.ResolvePRNotificationsByType(ctx, gen.ResolvePRNotificationsByTypeParams{
 				ResolvedAt: nullTime(at),
@@ -395,8 +427,46 @@ func notificationFromGen(row gen.Notification) domain.NotificationRecord {
 		Status:     row.Status,
 		CreatedAt:  row.CreatedAt,
 		ResolvedAt: timeFromNull(row.ResolvedAt),
+		RemindedAt: timeFromNull(row.RemindedAt),
 		SourceKey:  row.SourceKey,
 	}
+}
+
+// ListOpenOrchestratorWaiting returns every orchestrator question still waiting
+// on the user, newest first. Rows the user dismissed from the notification panel
+// are included: dismissing acknowledges the alert, not the question.
+func (s *Store) ListOpenOrchestratorWaiting(ctx context.Context) ([]domain.NotificationRecord, error) {
+	rows, err := s.qr.ListOpenOrchestratorWaiting(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list open orchestrator waiting: %w", err)
+	}
+	return notificationsFromGen(rows), nil
+}
+
+// ListDueOrchestratorWaitingReminders returns the open orchestrator_waiting rows
+// that were created at or before cutoff and have not been reminded yet.
+func (s *Store) ListDueOrchestratorWaitingReminders(ctx context.Context, cutoff time.Time) ([]domain.NotificationRecord, error) {
+	rows, err := s.qr.ListDueOrchestratorWaitingReminders(ctx, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list due orchestrator waiting reminders: %w", err)
+	}
+	return notificationsFromGen(rows), nil
+}
+
+// MarkNotificationReminded claims the single reminder of an open row. It reports
+// false when the row was already reminded or resolved, so a reminder is sent at
+// most once even when two ticks race.
+func (s *Store) MarkNotificationReminded(ctx context.Context, id string, at time.Time) (domain.NotificationRecord, bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	row, err := s.qw.MarkNotificationReminded(ctx, gen.MarkNotificationRemindedParams{RemindedAt: nullTime(at), ID: id})
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.NotificationRecord{}, false, nil
+	}
+	if err != nil {
+		return domain.NotificationRecord{}, false, fmt.Errorf("mark notification reminded %s: %w", id, err)
+	}
+	return notificationFromGen(row), true, nil
 }
 
 func notificationsFromGen(rows []gen.Notification) []domain.NotificationRecord {
