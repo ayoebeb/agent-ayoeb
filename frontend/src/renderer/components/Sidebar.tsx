@@ -704,7 +704,9 @@ function SessionRowMenuEntries({ session, splitRef, onArchive, onRename }: {
 	const entries = useSessionMenuEntries(session, { onArchive, onRename });
 	const getWorkspaces = useContext(SidebarWorkspacesContext);
 	const { open, addBeside } = useSessionSplitActions(getWorkspaces);
-	const routedSessionId = useParams({ strict: false, select: (params) => ((params as { hostId?: string }).hostId ? undefined : (params as { sessionId?: string }).sessionId) });
+	const routedSessionId = useParams({ strict: false, select: (params) => (params as { sessionId?: string }).sessionId });
+	const routedHostId = useParams({ strict: false, select: (params) => (params as { hostId?: string }).hostId });
+	const routedSession = useMemo(() => ({ sessionId: routedSessionId, hostId: routedHostId }), [routedHostId, routedSessionId]);
 	const selection = useSidebarSelectionStore((state) => state.selection);
 	const split = useSessionSplitStore((state) => state.split);
 	let onSelect: (() => void) | undefined;
@@ -713,7 +715,7 @@ function SessionRowMenuEntries({ session, splitRef, onArchive, onRename }: {
 		if (selection?.kind === "session" && selection.keys.length >= 2 && selection.keys.includes(key)) {
 			onSelect = () => void open(selectedPaneRefs(useSidebarSelectionStore.getState()));
 		} else {
-			const anchor = paneOnScreen(split, getWorkspaces(), routedSessionId);
+			const anchor = paneOnScreen(split, getWorkspaces(), routedSession);
 			const shown = anchor && split?.panes[sessionPaneKey(anchor)] ? split : null;
 			if (anchor && sessionPaneKey(anchor) !== key && !shown?.panes[key]) onSelect = () => void addBeside(anchor, splitRef, "right");
 		}
@@ -1309,7 +1311,9 @@ export function Sidebar({
 
 	// Rows read the list when an action runs, so a streamed update re-renders none of them.
 	const sidebarWorkspacesRef = useRef(workspaces);
-	sidebarWorkspacesRef.current = workspaces;
+	// A pane can come from any linked computer, so the split reads both lists.
+	const splitWorkspaces = useMemo(() => (remoteWorkspaces.length ? [...workspaces, ...remoteWorkspaces] : workspaces), [remoteWorkspaces, workspaces]);
+	sidebarWorkspacesRef.current = splitWorkspaces;
 	const getSidebarWorkspaces = useCallback(() => sidebarWorkspacesRef.current, []);
 
 	return (
@@ -1882,9 +1886,9 @@ const ProjectItem = memo(function ProjectItem({
 	const requestNewTask = useUiStore((state) => state.requestNewTask);
 	const showGlobalToast = useUiStore((state) => state.showGlobalToast);
 	const projectIsDragging = isDragged;
-	// Projects on this computer can be selected to open their orchestrators side by side.
+	// Projects on any linked computer can be selected to open their orchestrators side by side.
 	const splitRef = useMemo<SessionPaneRef | undefined>(
-		() => (isStandalone || workspace.hostId ? undefined : { kind: "orchestrator", projectId: workspace.id }),
+		() => (isStandalone ? undefined : { kind: "orchestrator", projectId: workspace.id, ...(workspace.hostId ? { hostId: workspace.hostId } : {}) }),
 		[isStandalone, workspace.hostId, workspace.id],
 	);
 	const splitSelected = useSplitSelected("project", splitRef);
@@ -3093,9 +3097,9 @@ const SessionRow = memo(function SessionRow({
 	}, [rename.begin, renamable]);
 	// Owned here so both the hover Archive button and the context menu open the same confirm.
 	const [archiveOpen, setArchiveOpen] = useState(false);
-	// Sessions on this computer can be selected and opened side by side.
+	// Sessions on any linked computer can be selected and opened side by side.
 	const splitRef = useMemo<SessionPaneRef | undefined>(
-		() => (session.hostId ? undefined : { kind: "session", sessionId: session.id, projectId: session.workspaceId }),
+		() => ({ kind: "session", sessionId: session.id, projectId: session.workspaceId, ...(session.hostId ? { hostId: session.hostId } : {}) }),
 		[session.hostId, session.id, session.workspaceId],
 	);
 	const splitSelected = useSplitSelected("session", splitRef);

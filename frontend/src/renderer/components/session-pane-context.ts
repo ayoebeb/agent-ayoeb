@@ -11,7 +11,7 @@ export type SessionPaneValue = {
 	/** The pane's own element, so DOM lookups stay inside it. */
 	rootRef: RefObject<HTMLElement | null>;
 	/** Whether navigating to this session keeps the split, and so this pane, on screen. */
-	keepsSplit: (sessionId: string | undefined) => boolean;
+	keepsSplit: (sessionId: string | undefined, hostId?: string) => boolean;
 };
 
 export const SessionPaneContext = createContext<SessionPaneValue | null>(null);
