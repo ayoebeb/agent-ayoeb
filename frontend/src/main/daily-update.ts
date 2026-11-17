@@ -129,7 +129,7 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 	const read = (): Pending | undefined => {
 		if (!dailyDir || platform !== "win32") return undefined;
 		try {
-			return parsePending(readFile(path.join(dailyDir, PENDING_FILE)), dailyDir);
+			return parsePending(readFile(win.join(dailyDir, PENDING_FILE)), dailyDir);
 		} catch {
 			return undefined;
 		}
@@ -139,7 +139,7 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 		if (!dailyDir || now() - lastHeartbeat < HEARTBEAT_EVERY_MS) return;
 		lastHeartbeat = now();
 		try {
-			writeFile(path.join(dailyDir, NOTICE_SHOWN_FILE), JSON.stringify({ target: pending.target, at: new Date(now()).toISOString() }));
+			writeFile(win.join(dailyDir, NOTICE_SHOWN_FILE), JSON.stringify({ target: pending.target, at: new Date(now()).toISOString() }));
 		} catch {
 			// The watcher then falls back to its toast; the notice itself still works.
 		}
