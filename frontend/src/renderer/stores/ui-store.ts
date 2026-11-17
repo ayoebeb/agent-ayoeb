@@ -83,7 +83,7 @@ export type WorkbenchTab = "changes" | "files" | "terminal";
 export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts" | "crew";
 
 /** The tabs of an orchestrator's control room. "session" is the orchestrator's own chat. */
-export type ControlRoomTab = "session" | "changes" | "commits" | "files" | "terminal";
+export type ControlRoomTab = "session" | "changes" | "commits" | "files";
 
 export type ControlRoomState = {
 	tab: ControlRoomTab;

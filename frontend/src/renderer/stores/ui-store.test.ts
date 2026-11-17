@@ -489,11 +489,11 @@ describe("orchestrator control room", () => {
 		store.setControlRoom("orch", { tab: "changes", scope: "w-1" });
 		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "changes", scope: "w-1" });
 
-		store.setControlRoom("orch", { tab: "terminal" });
-		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "terminal", scope: "w-1" });
+		store.setControlRoom("orch", { tab: "commits" });
+		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "commits", scope: "w-1" });
 
 		store.setControlRoom("orch", { scope: null });
-		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "terminal", scope: undefined });
+		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "commits", scope: undefined });
 	});
 
 	it("does not replace the state when nothing changed", () => {

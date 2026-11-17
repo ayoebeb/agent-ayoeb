@@ -1,25 +1,18 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useQueries } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { GitBranch, Users } from "@/components/app-icons";
 import { useControlRoom, type ControlRoom } from "../../hooks/useControlRoom";
 import { useCrew } from "../../hooks/useCrew";
 import { sessionWorkspaceHistoryQueryOptions } from "../../hooks/useSessionWorkspaceFiles";
 import { sessionUiKey } from "../../lib/hosts";
-import { useShell } from "../../lib/shell-context";
-import { initialTerminalFontSize } from "../../lib/terminal-font-size";
 import { scopedRow, type CrewModel, type CrewRow } from "../../lib/crew";
-import { sessionNavigateTarget } from "../../lib/navigate-to-session";
 import { getSessionStatusDotView } from "../../lib/session-presentation";
 import { formatRelativeTime } from "../../lib/usage-format";
 import { cn } from "../../lib/utils";
-import { useResolvedTheme, useUiStore } from "../../stores/ui-store";
+import { useUiStore } from "../../stores/ui-store";
 import type { ProjectKind, WorkspaceSession } from "../../types/workspace";
-import { AgentAvatar } from "../AgentAvatar";
 import { SessionFileExplorer } from "../SessionFileExplorer";
-import { TerminalPane } from "../TerminalPane";
-import { Button } from "../ui/button";
 import { Pressable } from "../ui/pressable";
 import { shortBranch } from "./CrewRail";
 
@@ -29,7 +22,6 @@ import { shortBranch } from "./CrewRail";
  * rail, so a number here is the number there.
  */
 export function ControlRoomBody({ orchestrator, projectKind }: { orchestrator: WorkspaceSession; projectKind?: ProjectKind }) {
-	const { t } = useTranslation();
 	const room = useControlRoom(orchestrator);
 	const { model, now } = useCrew(orchestrator, true);
 	const live = model.rows.filter((row) => row.group !== "done");
@@ -46,12 +38,6 @@ export function ControlRoomBody({ orchestrator, projectKind }: { orchestrator: W
 					)
 				) : room.tab === "commits" ? (
 					<CommitsTab now={now.getTime()} orchestrator={orchestrator} rows={scoped ? [scoped] : live} />
-				) : room.tab === "terminal" ? (
-					scoped ? (
-						<ScopedTerminal key={scoped.session.id} orchestrator={orchestrator} row={scoped} />
-					) : (
-						<ChooseAgent onScope={(id) => room.setScope(id)} rows={live} title={t("controlRoom.terminal.choose")} />
-					)
 				) : null}
 			</div>
 		</div>
@@ -239,89 +225,6 @@ function CommitsTab({ now, orchestrator, rows }: { now: number; orchestrator: Wo
 					</section>
 				);
 			})}
-		</div>
-	);
-}
-
-/**
- * The agent's own terminal, watched. Typing is off until the person takes over, so
- * a glance at a worker can never type into it by accident. A chat agent has no
- * terminal of its own; it says so and offers its chat. A shell in the worker's
- * worktree is not wired up yet.
- */
-function ScopedTerminal({ orchestrator, row }: { orchestrator: WorkspaceSession; row: CrewRow }) {
-	const { t } = useTranslation();
-	const navigate = useNavigate();
-	const { daemonStatus } = useShell();
-	const theme = useResolvedTheme();
-	const [takenOver, setTakenOver] = useState(false);
-	const { session } = row;
-	const openSession = () => void navigate(sessionNavigateTarget(session.workspaceId, session.id, orchestrator.hostId));
-	if (session.mode === "chat" || orchestrator.hostId) {
-		return (
-			<EmptyState>
-				<p>{t(session.mode === "chat" ? "controlRoom.terminal.chatAgent" : "controlRoom.terminal.remote", { name: session.title })}</p>
-				<Button onClick={openSession} size="sm" variant="secondary">{t("controlRoom.terminal.openSession")}</Button>
-			</EmptyState>
-		);
-	}
-	return (
-		<div className="flex h-full min-h-0 flex-col" data-testid="scoped-terminal">
-			<div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
-				<AgentAvatar className="size-4 shrink-0" decorative provider={session.provider} />
-				<span className="min-w-0 truncate text-control font-medium text-foreground">{session.title}</span>
-				<span className="text-caption text-passive" data-testid="terminal-mode">
-					{takenOver ? t("controlRoom.terminal.typing") : t("controlRoom.terminal.watching")}
-				</span>
-				<Button
-					aria-pressed={takenOver}
-					className="ml-auto"
-					onClick={() => setTakenOver((current) => !current)}
-					size="xs"
-					variant={takenOver ? "secondary" : "primary"}
-				>
-					{takenOver ? t("controlRoom.terminal.stopTakeOver") : t("controlRoom.terminal.takeOver")}
-				</Button>
-			</div>
-			<div className="min-h-0 flex-1">
-				<TerminalPane
-					daemonReady={daemonStatus.state === "ready"}
-					focusRequested={takenOver}
-					fontSize={initialTerminalFontSize()}
-					inputDisabled={!takenOver}
-					session={session}
-					terminalGeneration={session.terminalGeneration}
-					terminalTarget={{ kind: "worker" }}
-					theme={theme}
-				/>
-			</div>
-		</div>
-	);
-}
-
-/** The terminal tab with no agent picked: choose whose to watch. */
-function ChooseAgent({ onScope, rows, title }: { onScope: (sessionId: string) => void; rows: CrewRow[]; title: string }) {
-	const { t } = useTranslation();
-	if (rows.length === 0) return <EmptyState>{t("crew.empty")}</EmptyState>;
-	return (
-		<div className="board-scrollbar h-full overflow-y-auto pb-4" data-testid="choose-agent">
-			<h2 className="px-3 pb-1 pt-3 text-caption text-muted-foreground">{title}</h2>
-			<ul className="flex flex-col divide-y divide-border">
-				{rows.map((row) => (
-					<li key={row.session.id}>
-						<Pressable
-							className="flex w-full items-center gap-2 px-3 py-2 text-control text-foreground hover:bg-interactive-hover focus-visible:outline-2 focus-visible:outline-ring"
-							onClick={() => onScope(row.session.id)}
-						>
-							<AgentAvatar className="size-4 shrink-0" decorative provider={row.session.provider} />
-							<span className="min-w-0 flex-1 truncate">{row.session.title}</span>
-							<span className="shrink-0 text-caption text-passive">
-								{row.session.mode === "chat" ? t("controlRoom.terminal.kindChat") : t("controlRoom.terminal.kindTerminal")}
-							</span>
-						</Pressable>
-					</li>
-				))}
-			</ul>
 		</div>
 	);
 }

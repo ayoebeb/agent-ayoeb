@@ -9,7 +9,6 @@ import {
 	FileDiff,
 	GitCommitHorizontal,
 	MessageSquare,
-	SquareTerminal,
 } from "@/components/app-icons";
 import { useControlRoom } from "../../hooks/useControlRoom";
 import { useConversationCommands } from "../../hooks/useConversation";
@@ -222,7 +221,7 @@ function CrewRowView({ active, now, orchestrator, room, row }: CrewRowProps) {
 				) : null}
 				{row.group === "needsYou" && !pending && session.mode !== "chat" ? (
 					<div className="mt-1.5">
-						<Button onClick={() => room.show("terminal", session.id)} size="xs" variant="secondary">
+						<Button onClick={openChat} size="xs" variant="secondary">
 							{t("crew.openTerminal")}
 						</Button>
 					</div>
@@ -231,7 +230,6 @@ function CrewRowView({ active, now, orchestrator, room, row }: CrewRowProps) {
 			<div className="absolute right-2 top-1.5 flex items-center opacity-0 transition-opacity duration-(--duration-fast) group-focus-within/crew:opacity-100 group-hover/crew:opacity-100">
 				<RowAction icon={<FileDiff />} label={t("crew.action.changes", { name: session.title })} onClick={() => room.show("changes", session.id)} />
 				<RowAction icon={<GitCommitHorizontal />} label={t("crew.action.commits", { name: session.title })} onClick={() => room.show("commits", session.id)} />
-				<RowAction icon={<SquareTerminal />} label={t("crew.action.terminal", { name: session.title })} onClick={() => room.show("terminal", session.id)} />
 				<RowAction icon={<MessageSquare />} label={t("crew.action.chat", { name: session.title })} onClick={openChat} />
 			</div>
 		</li>

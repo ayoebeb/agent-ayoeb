@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildCrew } from "../../lib/crew";
-import type { ConversationPlan, ConversationUsage } from "../../types/conversation";
+import type { ConversationUsage } from "../../types/conversation";
 import type { WorkspaceSession } from "../../types/workspace";
 
 const NOW = Date.parse("2026-11-16T12:00:00Z");
@@ -53,13 +53,9 @@ function setCrew(sessions: WorkspaceSession[], diffs: Record<string, { additions
 	crewState.current = { model: buildCrew({ sessions, diffs: map, now: NOW }), sessions, now: new Date(NOW) };
 }
 
-const plan = (...statuses: ("pending" | "in_progress" | "completed")[]): ConversationPlan => ({
-	steps: statuses.map((status, index) => ({ text: `Step ${index + 1}`, status })),
-});
-
-function snapshotWith(extra: { plan?: ConversationPlan; running?: boolean; usage?: ConversationUsage; model?: string } = {}) {
+function snapshotWith(extra: { running?: boolean; usage?: ConversationUsage; model?: string } = {}) {
 	return {
-		turns: [{ id: "t1", state: extra.running ? "running" : "completed", requestedAt: ago(MIN), plan: extra.plan }],
+		turns: [{ id: "t1", state: extra.running ? "running" : "completed", requestedAt: ago(MIN) }],
 		items: [],
 		settings: { model: extra.model },
 		usage: extra.usage,
@@ -80,12 +76,12 @@ beforeEach(() => {
 });
 
 describe("OrchestratorControlBar tabs", () => {
-	it("lists Session, Changes, Commits, Files and Terminal with the current one selected", () => {
+	it("lists Session, Changes, Commits, and Files with the current one selected", () => {
 		room.tab = "changes";
 		renderBar();
 		const tabs = within(screen.getByRole("tablist", { name: "Orchestrator views" })).getAllByRole("tab");
-		expect(tabs.map((tab) => tab.textContent)).toEqual(["Session", "Changes", "Commits", "Files", "Terminal"]);
-		expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["false", "true", "false", "false", "false"]);
+		expect(tabs.map((tab) => tab.textContent)).toEqual(["Session", "Changes", "Commits", "Files"]);
+		expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual(["false", "true", "false", "false"]);
 	});
 
 	it("counts changed files across live worktrees and commits ahead of the base", () => {
@@ -111,9 +107,9 @@ describe("OrchestratorControlBar tabs", () => {
 
 		screen.getByRole("tab", { name: "Session" }).focus();
 		await userEvent.keyboard("{ArrowLeft}");
-		expect(room.setTab).toHaveBeenLastCalledWith("terminal");
+		expect(room.setTab).toHaveBeenLastCalledWith("files");
 		await userEvent.keyboard("{End}");
-		expect(room.setTab).toHaveBeenLastCalledWith("terminal");
+		expect(room.setTab).toHaveBeenLastCalledWith("files");
 	});
 });
 
@@ -160,37 +156,13 @@ describe("OrchestratorControlBar info row", () => {
 		expect(screen.getByTestId("control-info-usage")).toHaveTextContent("Tokens and cost: not reported");
 	});
 
-	it("folds the info row and plan bar away and back", async () => {
-		conversation.snapshot = snapshotWith({ plan: plan("completed", "in_progress") });
+	it("folds the info row away and back", async () => {
 		renderBar();
 		expect(screen.getByTestId("control-info-row")).toBeInTheDocument();
 		await userEvent.click(screen.getByRole("button", { name: "Hide project details" }));
 		expect(screen.queryByTestId("control-info-row")).toBeNull();
-		expect(screen.queryByTestId("control-plan-bar")).toBeNull();
 		await userEvent.click(screen.getByRole("button", { name: "Show project details" }));
-		expect(screen.getByTestId("control-plan-bar")).toBeInTheDocument();
-	});
-});
-
-describe("OrchestratorControlBar plan bar", () => {
-	it("draws one segment per step in its state and counts the done ones with who needs you", () => {
-		conversation.snapshot = snapshotWith({ plan: plan("completed", "completed", "in_progress", "pending") });
-		setCrew([worker({ id: "asks", status: "needs_input", activity: { state: "waiting_input", lastActivityAt: ago(MIN) } })]);
-		renderBar();
-		const segments = within(screen.getByRole("list", { name: "Orchestrator plan" })).getAllByRole("listitem");
-		expect(segments.map((segment) => segment.getAttribute("data-step-status"))).toEqual(["completed", "completed", "in_progress", "pending"]);
-		expect(screen.getByTestId("control-plan-count")).toHaveTextContent("2 of 4 done · 1 need you");
-	});
-
-	it("draws nothing when the orchestrator made no plan, rather than a fake bar", () => {
-		renderBar();
-		expect(screen.queryByTestId("control-plan-bar")).toBeNull();
-	});
-
-	it("omits the need-you count when nobody waits", () => {
-		conversation.snapshot = snapshotWith({ plan: plan("completed") });
-		renderBar();
-		expect(screen.getByTestId("control-plan-count")).toHaveTextContent(/^1 of 1 done$/);
+		expect(screen.getByTestId("control-info-row")).toBeInTheDocument();
 	});
 });
 
