@@ -80,10 +80,12 @@ func (f *fakeStore) ListLimitStopCandidates(_ context.Context, since time.Time) 
 	defer f.mu.Unlock()
 	var out []domain.LimitStopTurn
 	for _, turn := range f.turns {
-		if turn.CompletedAt.Before(since) {
+		stop := f.stops[turn.TurnID]
+		// Like the database: a pending stop is listed whatever its age.
+		if turn.CompletedAt.Before(since) && (stop == nil || stop.ResumeState != domain.UsageLimitStopPending) {
 			continue
 		}
-		if stop := f.stops[turn.TurnID]; stop != nil {
+		if stop != nil {
 			if stop.ResumeState != domain.UsageLimitStopPending {
 				continue
 			}
@@ -630,16 +632,12 @@ func TestSendFailures(t *testing.T) {
 func TestStaleStopIsNotActedOn(t *testing.T) {
 	h := newHarness(t)
 	h.store.addStop("w1", domain.KindWorker, limitMessage)
-	h.now = failedAt.Add(domain.UsageLimitResumeHorizon - time.Minute)
-	h.store.mu.Lock()
-	h.store.turns[0].CompletedAt = func() *time.Time { t := h.now.Add(-domain.UsageLimitResumeHorizon - time.Hour); return &t }()
-	h.store.mu.Unlock()
-	h.svc.now = func() time.Time { return h.now.Add(domain.UsageLimitResumeHorizon) }
-	// The candidate query would not even return a turn this old, so feed it directly.
+	// Seen for the first time long after its reset: nobody is waiting on it.
+	h.now = resetAt.Add(domain.UsageLimitResumeHorizon + time.Hour)
 	h.store.mu.Lock()
 	stale := h.store.turns[0]
 	h.store.mu.Unlock()
-	if err := h.svc.detect(context.Background(), stale, stale.Limit(), true, h.svc.now()); err != nil {
+	if err := h.svc.detect(context.Background(), stale, stale.Limit(), true, h.now); err != nil {
 		t.Fatal(err)
 	}
 	if len(h.notifier.stored) != 0 || len(h.reporter.notes) != 0 {
@@ -647,5 +645,75 @@ func TestStaleStopIsNotActedOn(t *testing.T) {
 	}
 	if stop := h.store.stops["turn-w1"]; stop.SkipReason != domain.UsageLimitOffExpired {
 		t.Fatalf("stop = %+v", stop)
+	}
+}
+
+// weeklyStop is a worker that stopped on a weekly limit resetting nine days
+// after it stopped: far past both the old twelve-hour window and the scan window.
+func weeklyStop(h *harness) (turn string, reset time.Time) {
+	turn = h.store.addStop("w1", domain.KindWorker, "You've hit your weekly limit")
+	reset = failedAt.Add(9 * 24 * time.Hour)
+	h.store.mu.Lock()
+	h.store.turns[0].StoredResetsAt = &reset
+	h.store.mu.Unlock()
+	return turn, reset
+}
+
+// A stop still waiting for a reset that is days away is not superseded or
+// expired because it grew old: it is resumed once the reset arrives.
+func TestPendingStopOlderThanTheScanWindowIsStillResumedAtItsReset(t *testing.T) {
+	h := newHarness(t)
+	turn, reset := weeklyStop(h)
+	h.sweep()
+	if stop := h.store.stops[turn]; stop == nil || stop.ResumeState != domain.UsageLimitStopPending {
+		t.Fatalf("stop = %+v, want pending", stop)
+	}
+
+	// A day later, then past the scan window: still waiting, neither superseded nor expired.
+	for _, at := range []time.Time{failedAt.Add(24 * time.Hour), failedAt.Add(domain.UsageLimitScanWindow + time.Hour)} {
+		h.now = at
+		h.sweep()
+		if stop := h.store.stops[turn]; stop.ResumeState != domain.UsageLimitStopPending {
+			t.Fatalf("at %v the stop was closed: %+v", at, stop)
+		}
+	}
+	if len(h.sender.sent) != 0 {
+		t.Fatalf("sent before the reset: %v", h.sender.ids())
+	}
+
+	h.now = reset.Add(time.Minute)
+	h.sweep()
+	if got := h.sender.ids(); len(got) != 1 || got[0] != "w1" {
+		t.Fatalf("sent %v at the reset, want [w1]", got)
+	}
+}
+
+// An old pending stop whose turn really was superseded is still closed as that.
+func TestOldPendingStopIsSupersededWhenItsTurnIsNoLongerTheLatest(t *testing.T) {
+	h := newHarness(t)
+	turn, _ := weeklyStop(h)
+	h.sweep()
+	h.store.dropTurn(turn)
+	h.now = failedAt.Add(domain.UsageLimitScanWindow + time.Hour)
+	h.sweep()
+	if stop := h.store.stops[turn]; stop.ResumeState != domain.UsageLimitStopSkipped || stop.SkipReason != domain.UsageLimitSkipSuperseded {
+		t.Fatalf("stop = %+v, want skipped/superseded", stop)
+	}
+}
+
+// A pending stop that outlives its reset by more than the horizon (no slot ever
+// freed, or the daemon was off) is closed as expired, not resumed and not
+// reported as superseded.
+func TestPendingStopTooLongPastItsResetIsExpired(t *testing.T) {
+	h := newHarness(t)
+	h.store.addStop("w1", domain.KindWorker, limitMessage)
+	h.sweep()
+	h.now = resetAt.Add(domain.UsageLimitResumeHorizon + time.Hour)
+	h.sweep()
+	if len(h.sender.sent) != 0 {
+		t.Fatalf("an expired stop was resumed: %v", h.sender.ids())
+	}
+	if stop := h.store.stops["turn-w1"]; stop.ResumeState != domain.UsageLimitStopSkipped || stop.SkipReason != domain.UsageLimitOffExpired {
+		t.Fatalf("stop = %+v, want skipped/expired", stop)
 	}
 }

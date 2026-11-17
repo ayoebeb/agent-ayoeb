@@ -200,3 +200,35 @@ func TestResumeTracksTheContinuedTurn(t *testing.T) {
 		t.Fatalf("running resumes after it finished = %d, %v", n, err)
 	}
 }
+
+// A stop already waiting to be resumed is listed whatever its age (a weekly
+// limit resets in days), so the watcher can tell it is still the latest turn
+// instead of mistaking it for a superseded one. A stop not yet followed up is
+// listed only inside the scan window.
+func TestLimitStopCandidatesKeepPendingStopsOlderThanTheCutoff(t *testing.T) {
+	ctx := context.Background()
+	s, session, conversation := seededChatConversation(t)
+	appendBranchPrompt(t, s, session, conversation, "generation-root", "limited", "finish this task")
+	if err := s.SettleTurnByID(ctx, "turn-limited", domain.TurnStateFailed, storeLimitMessage, testNow); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := testNow.Add(time.Hour) // the turn completed before it
+
+	if got, err := s.ListLimitStopCandidates(ctx, cutoff); err != nil || len(got) != 0 {
+		t.Fatalf("an unfollowed stop older than the cutoff was listed: %+v, %v", got, err)
+	}
+	reset := testNow.Add(3 * 24 * time.Hour)
+	if _, err := s.InsertUsageLimitStop(ctx, domain.UsageLimitStop{TurnID: "turn-limited", SessionID: session.ID, ResetsAt: &reset, DetectedAt: testNow}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListLimitStopCandidates(ctx, cutoff)
+	if err != nil || len(got) != 1 || got[0].ResumeState != domain.UsageLimitStopPending {
+		t.Fatalf("a pending stop older than the cutoff must still be listed: %+v, %v", got, err)
+	}
+
+	// Once its turn is no longer the latest it drops out, whatever its age.
+	appendBranchPrompt(t, s, session, conversation, "generation-root", "next", "carry on")
+	if got, err := s.ListLimitStopCandidates(ctx, cutoff); err != nil || len(got) != 0 {
+		t.Fatalf("a superseded pending stop was listed: %+v, %v", got, err)
+	}
+}

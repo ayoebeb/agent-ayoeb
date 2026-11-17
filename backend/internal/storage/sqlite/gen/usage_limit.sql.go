@@ -220,8 +220,8 @@ LEFT JOIN usage_limit_stops AS stops ON stops.turn_id = turns.id
 WHERE turns.state = 'failed'
   AND turns.rolled_back_at IS NULL
   AND turns.promoted_to_turn_id IS NULL
-  AND turns.completed_at >= ?1
   AND (stops.turn_id IS NULL OR stops.resume_state = 'pending')
+  AND (stops.resume_state = 'pending' OR turns.completed_at >= ?1)
   AND NOT EXISTS (
       SELECT 1 FROM conversation_turns AS newer
       WHERE newer.conversation_id = turns.conversation_id
@@ -248,9 +248,11 @@ type ListLimitStopCandidatesRow struct {
 	Attempts             int64
 }
 
-// Every failed turn that is still the latest of its session conversation, was
-// completed since the cutoff, and has not been followed up (no stop row) or is
-// still waiting to be resumed. This is the watcher sweep.
+// Every failed turn that is still the latest of its session conversation and
+// has not been followed up (no stop row) and was completed since the cutoff, or
+// is still waiting to be resumed (whatever its age: a weekly limit resets in
+// days, and the watcher closes a stop only when its turn stopped being the
+// latest). This is the watcher sweep.
 func (q *Queries) ListLimitStopCandidates(ctx context.Context, completedSince sql.NullTime) ([]ListLimitStopCandidatesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listLimitStopCandidates, completedSince)
 	if err != nil {

@@ -178,7 +178,7 @@ func (s *Service) Sweep(ctx context.Context) error {
 		return err
 	}
 	now := s.now()
-	candidates, err := s.store.ListLimitStopCandidates(ctx, now.Add(-domain.UsageLimitResumeHorizon))
+	candidates, err := s.store.ListLimitStopCandidates(ctx, now.Add(-domain.UsageLimitScanWindow))
 	if err != nil {
 		return fmt.Errorf("list limit stops: %w", err)
 	}
@@ -197,6 +197,15 @@ func (s *Service) Sweep(ctx context.Context) error {
 			continue
 		}
 		if turn.ResumeState == domain.UsageLimitStopPending {
+			// A pending stop is listed whatever its age, so supersede only ever
+			// closes a stop whose turn really is no longer the latest. One that
+			// outlived its reset by more than the horizon is closed as expired.
+			if domain.UsageLimitStopExpired(turn.StoppedAt(), turn.StopResetsAt, now) {
+				if _, err := s.store.SkipUsageLimitStop(ctx, turn.TurnID, domain.UsageLimitOffExpired); err != nil {
+					return err
+				}
+				continue
+			}
 			pending = append(pending, turn)
 		}
 	}
@@ -250,7 +259,7 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 	}
 	stop.WindowKey = domain.UsageLimitWindowKey(stop.AccountKey, limit.ResetsAt, stoppedAt)
 
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityExited || now.Sub(stoppedAt) > domain.UsageLimitResumeHorizon {
+	if rec.IsTerminated || rec.Activity.State == domain.ActivityExited || domain.UsageLimitStopExpired(stoppedAt, limit.ResetsAt, now) {
 		// Stopped on purpose, or too old to be news: record it so it is not
 		// looked at again, and do nothing else.
 		reason := domain.UsageLimitSkipStopped

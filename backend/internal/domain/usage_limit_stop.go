@@ -5,11 +5,29 @@ import (
 	"time"
 )
 
-// UsageLimitResumeHorizon is how long after a turn stopped on a usage limit AO
-// still acts on it by itself. A stop older than this is shown, but AO neither
-// notifies about it nor continues it: nobody is waiting on work that went
-// quiet days ago, and continuing it would spend the next window on it.
+// UsageLimitResumeHorizon is how long past a stop's reset time (past the stop
+// itself, when it has no reset time) AO still acts on it by itself. Later than
+// that the stop is shown, but AO neither notifies about it nor continues it:
+// nobody is waiting on work that went quiet that long ago, and continuing it
+// would spend the next window on it. It is measured from the reset, not from
+// the stop, so a weekly limit that resets in days is still acted on.
 const UsageLimitResumeHorizon = 12 * time.Hour
+
+// UsageLimitScanWindow bounds how far back the watcher looks for stops it has
+// not followed up yet. A stop already waiting to be resumed is always looked at,
+// whatever its age.
+const UsageLimitScanWindow = 8 * 24 * time.Hour
+
+// UsageLimitStopExpired reports whether a stop is too old for AO to act on by
+// itself: more than UsageLimitResumeHorizon past its reset time, or past the
+// stop itself when the provider gave no reset time.
+func UsageLimitStopExpired(stoppedAt time.Time, resetsAt *time.Time, now time.Time) bool {
+	relevantUntil := stoppedAt
+	if resetsAt != nil && resetsAt.After(relevantUntil) {
+		relevantUntil = *resetsAt
+	}
+	return now.Sub(relevantUntil) > UsageLimitResumeHorizon
+}
 
 // Resume states stored for a usage-limit stop.
 const (
@@ -134,7 +152,7 @@ func BuildSessionUsageLimit(turn LimitStopTurn, now time.Time) *SessionUsageLimi
 		off(UsageLimitOffRetryArmed)
 	case limit.ResetsAt == nil:
 		off(UsageLimitOffUnknownReset)
-	case turn.ResumeState == "" && now.Sub(out.StoppedAt) > UsageLimitResumeHorizon:
+	case (turn.ResumeState == "" || turn.ResumeState == UsageLimitStopPending) && UsageLimitStopExpired(out.StoppedAt, limit.ResetsAt, now):
 		off(UsageLimitOffExpired)
 	case !limit.ResetsAt.After(now):
 		out.Resume = UsageLimitResumeWaiting
