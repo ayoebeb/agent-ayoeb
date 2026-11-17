@@ -221,8 +221,8 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 		OrchestratorWaitingEnabled:         snapshot.OrchestratorWaitingEnabled,
 		OrchestratorWaitingRenotifyMinutes: snapshot.OrchestratorWaitingRenotifyMinutes,
 		CloudEnabled:                       offering.CloudEnabled(),
-		CloudControlPlaneURL:   offering.CloudControlPlaneURL,
-		TrackerIntakeEnabled:   offering.TrackerIntakeEnabled,
+		CloudControlPlaneURL:               offering.CloudControlPlaneURL,
+		TrackerIntakeEnabled:               offering.TrackerIntakeEnabled,
 	}
 }
 

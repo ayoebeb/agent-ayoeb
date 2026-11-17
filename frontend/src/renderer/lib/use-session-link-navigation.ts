@@ -4,7 +4,7 @@ import { useCloudProjectsQuery, useCloudSessionsQuery, remoteWorkspaceQueryKey, 
 import { useCloudOrg } from "../hooks/useCloudOrg";
 import { useUiStore } from "../stores/ui-store";
 import type { WorkspaceSummary } from "../types/workspace";
-import { LOCAL_HOST } from "./hosts";
+import { LOCAL_HOST, sessionUiKey } from "./hosts";
 import { useNavigateToSession } from "./navigate-to-session";
 import { parseArtifactLink, parseSessionLink, resolveSessionLink } from "./session-links";
 
@@ -65,6 +65,7 @@ export function useSessionLinkNavigation(sourceHostId?: string, sourceKind?: "cl
 	const navigateToSession = useNavigateToSession();
 	const showGlobalToast = useUiStore((state) => state.showGlobalToast);
 	const requestWorkspaceFileOpen = useUiStore((state) => state.requestWorkspaceFileOpen);
+	const requestChatAnchor = useUiStore((state) => state.requestChatAnchor);
 	return useCallback((url: string) => {
 		const artifact = parseArtifactLink(url);
 		const target = parseSessionLink(url) ?? artifact;
@@ -109,6 +110,8 @@ export function useSessionLinkNavigation(sourceHostId?: string, sourceKind?: "cl
 		if (artifact) requestWorkspaceFileOpen(resolved.sessionId, artifact.path, remoteHostId, "artifact");
 		if (remoteHostId) navigateToSession(resolved.projectId, resolved.sessionId, remoteHostId);
 		else navigateToSession(resolved.projectId, resolved.sessionId);
+		// `ao://sessions/{project}/{session}#{anchor}`: that session's chat scrolls to the heading.
+		if (target.anchor) requestChatAnchor(sessionUiKey(resolved.sessionId, remoteHostId), target.anchor);
 		return true;
-	}, [navigateToSession, remoteHostId, requestWorkspaceFileOpen, showGlobalToast, source, sourceKind]);
+	}, [navigateToSession, remoteHostId, requestChatAnchor, requestWorkspaceFileOpen, showGlobalToast, source, sourceKind]);
 }

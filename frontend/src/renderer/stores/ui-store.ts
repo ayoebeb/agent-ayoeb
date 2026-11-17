@@ -44,7 +44,7 @@ export type GlobalSettingsSection =
 	| "help";
 
 /** Project settings pages: the project form sections plus the cues manager. */
-export type ProjectSettingsSection = ProjectFormSection | "environment" | "scripts" | "cues" | "repositories" | "instructions";
+export type ProjectSettingsSection = ProjectFormSection | "environment" | "scripts" | "cues" | "repositories" | "instructions" | "permissions";
 
 /** Which failure a "Show diagnostics" shortcut is about: the job it produced,
  * if any, and the error the user saw. */
@@ -80,7 +80,18 @@ export type SettingsModal =
 
 /** Worker detail view toggles — Changes (Git rail) is the default. */
 export type WorkbenchTab = "changes" | "files" | "terminal";
-export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts";
+export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts" | "crew";
+
+/** The tabs of an orchestrator's control room. "session" is the orchestrator's own chat. */
+export type ControlRoomTab = "session" | "changes" | "commits" | "files";
+
+export type ControlRoomState = {
+	tab: ControlRoomTab;
+	/** The worker every tab is scoped to; absent means all agents. */
+	scope?: string;
+};
+
+export const DEFAULT_CONTROL_ROOM: ControlRoomState = { tab: "session" };
 
 export type CloudReviewUiState = {
 	showChanges?: boolean;
@@ -113,8 +124,6 @@ export type InspectorSessionState = {
 	fileDisplayModes?: Record<string, RememberedFileDisplayMode>;
 	/** The session-entry defaulting (Summary tab, baseline browser reveal) has already run once for this session's lifetime. */
 	initialized?: boolean;
-	/** Whether Files was left open is kept across restarts (orchestrators opt in at initialization). */
-	remembersFilesSidebar?: boolean;
 };
 
 export type FileDisplayMode = "diff" | "file" | "rendered";
@@ -147,6 +156,12 @@ export type WorkspaceFileOpenRequest = {
 	nonce: number;
 };
 
+/**
+ * Asks a session's chat to scroll to a heading, from an `ao://sessions/{project}/{session}#{anchor}`
+ * link. `sessionId` is the chat's `sessionUiKey`; `at` lets a request that nothing picked up expire.
+ */
+export type ChatAnchorRequest = { sessionId: string; anchor: string; nonce: number; at: number };
+
 /** Asks a local session's chat to scroll to one message, e.g. a palette chat hit. */
 export type ChatMessageFocusRequest = {
 	sessionId: string;
@@ -167,6 +182,8 @@ export type UiState = {
 	/** The user's durable sidebar preference. */
 	isSidebarOpen: boolean;
 	inspectorSessions: Record<string, InspectorSessionState>;
+	/** Per orchestrator session: which control-room tab is showing and which worker it is scoped to. */
+	controlRooms: Record<string, ControlRoomState>;
 	isCommandPaletteOpen: boolean;
 	settingsModal: SettingsModal | null;
 	accountLogin: string | null;
@@ -231,6 +248,7 @@ export type UiState = {
 	/** Transient one-shot request to reveal a path in a session's existing Files UI. */
 	workspaceFileOpenRequest: WorkspaceFileOpenRequest | null;
 	chatMessageFocusRequest: ChatMessageFocusRequest | null;
+	chatAnchorRequest: ChatAnchorRequest | null;
 	// Bumps to ask the sidebar's create-project flow to open (the ⌘N fallback
 	// when no project is in scope).
 	createProjectNonce: number;
@@ -294,10 +312,11 @@ export type UiState = {
 	 * reveal — exactly once per session's lifetime. Backed by persisted store
 	 * state (not a component-local ref) so it stays a no-op across unmount and
 	 * remount of the session view, not just across re-renders of one mounted
-	 * instance. With `remembersFilesSidebar`, a Files sidebar the user left open
-	 * (in an earlier run too) reopens instead of Summary.
+	 * instance.
 	 */
-	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean, remembersFilesSidebar?: boolean) => void;
+	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean, opensOnCrew?: boolean) => void;
+	/** `scope: null` returns to all agents; leaving `scope` out keeps the current one. */
+	setControlRoom: (sessionId: string, update: { tab?: ControlRoomTab; scope?: string | null }) => void;
 	setBrowserContentRevealed: (sessionId: string, revealed: boolean) => void;
 	setBrowserUnseen: (sessionId: string, unseen: boolean) => void;
 	setFilesChangedOnly: (sessionId: string, changedOnly: boolean) => void;
@@ -325,6 +344,8 @@ export type UiState = {
 	clearWorkspaceFileOpenRequest: (nonce: number) => void;
 	requestChatMessageFocus: (sessionId: string, messageId: string, text: string, reviewId?: string) => void;
 	clearChatMessageFocusRequest: (nonce: number) => void;
+	requestChatAnchor: (sessionId: string, anchor: string) => void;
+	clearChatAnchorRequest: (nonce: number) => void;
 	requestCreateProject: () => void;
 	requestCreateProjectFromPath: (path: string) => void;
 	requestNewShellTerminal: () => void;
@@ -352,10 +373,6 @@ const navigationGesturesStorageKey = "ao.navigationGestures";
 const renderMathStorageKey = "ao.renderMath";
 const projectAvatarsStorageKey = "ao.projectAvatars";
 const newSidebarDesignStorageKey = "ao.newSidebarDesign";
-/** "open" while a session that remembers its Files sidebar last left it open; absent otherwise. */
-export function filesSidebarStorageKey(sessionId: string): string {
-	return `ao.inspector.filesOpen:${sessionId}`;
-}
 function getLocalStorage() {
 	if (typeof window === "undefined" || !window.localStorage) return null;
 	return window.localStorage;
@@ -450,6 +467,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 	workbenchTab: "changes",
 	isSidebarOpen: initialSidebarOpen(),
 	inspectorSessions: {},
+	controlRooms: {},
 	isCommandPaletteOpen: false,
 	settingsModal: null,
 	accountLogin: null,
@@ -484,6 +502,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 	setFirstRunPromptActive: (active) => set({ firstRunPromptActive: active }),
 	workspaceFileOpenRequest: null,
 	chatMessageFocusRequest: null,
+	chatAnchorRequest: null,
 	createProjectNonce: 0,
 	folderDropRequest: null,
 	newShellTerminalNonce: 0,
@@ -660,24 +679,31 @@ export const useUiStore = create<UiState>((set, get) => ({
 				},
 			};
 		}),
-	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, remembersFilesSidebar = false) =>
+	setControlRoom: (sessionId, update) =>
 		set((state) => {
-			// Sessions without an inspector (e.g. orchestrator sessions) must not
-			// gain a store entry at all — leave inspectorSessions[sessionId]
-			// undefined so callers that key off its presence stay correct.
+			const current = state.controlRooms[sessionId] ?? DEFAULT_CONTROL_ROOM;
+			const scope = update.scope === undefined ? current.scope : (update.scope ?? undefined);
+			const tab = update.tab ?? current.tab;
+			if (tab === current.tab && scope === current.scope) return state;
+			return { controlRooms: { ...state.controlRooms, [sessionId]: { tab, scope } } };
+		}),
+	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, opensOnCrew = false) =>
+		set((state) => {
+			// Sessions without an inspector must not gain a store entry at all —
+			// leave inspectorSessions[sessionId] undefined so callers that key off
+			// its presence stay correct.
 			if (!hasInspector) return state;
 			const current = inspectorState(state.inspectorSessions, sessionId);
 			if (current.initialized) return state;
-			const reopenFiles = remembersFilesSidebar && getLocalStorage()?.getItem(filesSidebarStorageKey(sessionId)) === "open";
 			return {
 				inspectorSessions: {
 					...state.inspectorSessions,
 					[sessionId]: {
 						...current,
 						initialized: true,
-						view: reopenFiles ? "files" : "summary",
-						...(reopenFiles ? { isOpen: true, filesChangedOnly: false } : {}),
-						...(remembersFilesSidebar ? { remembersFilesSidebar: true } : {}),
+						// An orchestrator opens on its crew: who is doing what is the first thing to see.
+						view: opensOnCrew ? "crew" : "summary",
+						...(opensOnCrew ? { isOpen: true } : {}),
 						browserContentRevealed: current.browserContentRevealed ?? hasBrowserContent,
 					},
 				},
@@ -914,6 +940,12 @@ export const useUiStore = create<UiState>((set, get) => ({
 		set((state) => state.chatMessageFocusRequest?.nonce === nonce
 			? { chatMessageFocusRequest: null }
 			: state),
+	requestChatAnchor: (sessionId, anchor) =>
+		set((state) => ({
+			chatAnchorRequest: { sessionId, anchor, nonce: (state.chatAnchorRequest?.nonce ?? 0) + 1, at: Date.now() },
+		})),
+	clearChatAnchorRequest: (nonce) =>
+		set((state) => state.chatAnchorRequest?.nonce === nonce ? { chatAnchorRequest: null } : state),
 	requestCreateProject: () => set((state) => ({ createProjectNonce: state.createProjectNonce + 1 })),
 	requestCreateProjectFromPath: (path) =>
 		set((state) => ({ folderDropRequest: { path, nonce: (state.folderDropRequest?.nonce ?? 0) + 1 } })),
@@ -942,25 +974,6 @@ function syncLegacyStatusColors(state: UiState) {
 }
 syncLegacyStatusColors(useUiStore.getState());
 useUiStore.subscribe(syncLegacyStatusColors);
-
-// Sessions that remember their Files sidebar keep "open" stored only while
-// the inspector is open on Files; closing it or picking another tab clears it.
-function rememberFilesSidebars(state: UiState, previous: UiState) {
-	if (state.inspectorSessions === previous.inspectorSessions) return;
-	const storage = getLocalStorage();
-	if (!storage) return;
-	for (const [sessionId, session] of Object.entries(state.inspectorSessions)) {
-		const before = previous.inspectorSessions[sessionId];
-		if (!session.remembersFilesSidebar || (before?.remembersFilesSidebar && before.isOpen === session.isOpen && before.view === session.view)) continue;
-		try {
-			if (session.isOpen && session.view === "files") storage.setItem(filesSidebarStorageKey(sessionId), "open");
-			else storage.removeItem(filesSidebarStorageKey(sessionId));
-		} catch {
-			// Storage can be full or blocked; the sidebar then simply starts closed.
-		}
-	}
-}
-useUiStore.subscribe(rememberFilesSidebars);
 
 // Hydration synchronizes legacy renderer-only Developer Mode state into the
 // main-process updater mirror. Until this completes, the updater is fail-closed.

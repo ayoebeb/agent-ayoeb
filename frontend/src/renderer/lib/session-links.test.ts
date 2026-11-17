@@ -7,10 +7,25 @@ describe("session links", () => {
 		["ao://sessions/project%20one/session%2Done", { projectId: "project one", sessionId: "session-one" }],
 	])("parses %s", (url, expected) => expect(parseSessionLink(url)).toEqual(expected));
 
+	it("parses a heading anchor after the session, for a link into one chat's history", () => {
+		expect(parseSessionLink("ao://sessions/project/session#which-database")).toEqual({
+			projectId: "project", sessionId: "session", anchor: "which-database",
+		});
+		expect(parseSessionLink("ao://sessions/p%201/s#caf%C3%A9")).toEqual({ projectId: "p 1", sessionId: "s", anchor: "café" });
+		expect(isAoLink("ao://sessions/project/session#which-database")).toBe(true);
+		expect(findSessionLinks("See ao://sessions/p/s#which-database, then more.")).toEqual([
+			{ start: 4, end: 36, text: "ao://sessions/p/s#which-database" },
+		]);
+		expect(resolveSessionLink("ao://sessions/p/s#which-database", [{ id: "p", sessions: [{ id: "s" }] }]))
+			.toEqual({ projectId: "p", sessionId: "s", isTerminated: false });
+	});
+
 	it.each([
 		"AO://sessions/project/session", "a0://sessions/project/session", "ao://session/project/session",
 		"ao://sessions/project", "ao://sessions/project/session/extra", "ao://sessions//session",
-		"ao://sessions/project/session?kill=true", "ao://sessions/project/session#chat",
+		"ao://sessions/project/session?kill=true", "ao://sessions/project/session#",
+		"ao://sessions/project/session#a#b", "ao://sessions/project/session#a?b", "ao://sessions/project/session#a/b",
+		"ao://sessions/project/session#%ZZ", "ao://sessions/project/session/extra#chat", "ao://sessions/project#chat",
 		"ao://user@sessions/project/session", "ao://sessions/project/%ZZ", "ao://sessions/project/%2Faction",
 		"ao://sessions/project/session/kill", "ao://sessions/%20/%20", "ao://sessions/project/%09",
 	])("rejects unsupported value %s", (url) => expect(parseSessionLink(url)).toBeUndefined());

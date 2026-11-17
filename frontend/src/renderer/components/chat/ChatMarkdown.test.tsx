@@ -1,3 +1,4 @@
+import { useLayoutEffect, useMemo } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,8 @@ import { setApiBaseUrl } from "../../lib/api-client";
 import { renderMermaidDiagram } from "../../lib/mermaid-diagram";
 import { useUiStore } from "../../stores/ui-store";
 import { ActivityTitle, ArtifactPathCode, ChatLinkProvider, ChatMarkdown, ChatOpeningRef } from "./ChatMarkdown";
+import { ChatAnchorNavContext, ChatAnchorStoreContext } from "./chat-anchor-context";
+import { ChatAnchorStore } from "../../lib/chat-anchors";
 import { WorkerUpdateRows } from "./WorkerUpdates";
 import { ChatImageSourceProvider } from "./chat-image-source";
 
@@ -1110,5 +1113,93 @@ describe("ChatMarkdown math", () => {
 		await waitFor(() => expect(container.querySelector('[data-math="inline"] .katex')).not.toBeNull());
 		expect(container.querySelectorAll('[data-math="inline"] .katex')).toHaveLength(1);
 		expect(container).toHaveTextContent("$\\notacommand{x}$");
+	});
+});
+
+describe("ChatMarkdown heading anchors", () => {
+	/** A transcript's anchors: the store its messages share, and the scroll a link asks for. */
+	function Transcript({ messages, goTo }: { messages: Array<{ id: string; text: string; streaming?: boolean }>; goTo?: (anchor: string) => void }) {
+		const store = useMemo(() => new ChatAnchorStore(), []);
+		useLayoutEffect(() => store.update(messages), [store, messages]);
+		return (
+			<ChatAnchorStoreContext.Provider value={store}>
+				<ChatAnchorNavContext.Provider value={goTo}>
+					{messages.map((message) => <ChatMarkdown key={message.id} text={message.text} messageId={message.id} streaming={message.streaming} />)}
+				</ChatAnchorNavContext.Provider>
+			</ChatAnchorStoreContext.Provider>
+		);
+	}
+
+	it("gives each heading its anchor as a prefixed id, whatever its level", () => {
+		const messages = [{ id: "m1", text: "# One\n\n## Which database?\n\n### Deep\n\n#### Deeper\n\n##### Five\n\n###### Six" }];
+		const { container } = render(<Transcript messages={messages} />);
+		expect([...container.querySelectorAll("h3, h4, h5, h6")].map((heading) => [heading.tagName, heading.id])).toEqual([
+			["H3", "chat-anchor-one"],
+			["H4", "chat-anchor-which-database"],
+			["H5", "chat-anchor-deep"],
+			["H6", "chat-anchor-deeper"],
+			["H5", "chat-anchor-five"],
+			["H6", "chat-anchor-six"],
+		]);
+	});
+
+	it("keeps an anchor unique across the chat's messages, oldest first", () => {
+		const messages = [
+			{ id: "m1", text: "## What you need to do\n\nFirst." },
+			{ id: "m2", text: "Between.\n\n## What you need to do\n\nSecond." },
+		];
+		const { container } = render(<Transcript messages={messages} />);
+		expect([...container.querySelectorAll("h4")].map((heading) => heading.id)).toEqual([
+			"chat-anchor-what-you-need-to-do",
+			"chat-anchor-what-you-need-to-do-1",
+		]);
+	});
+
+	it("finds a streaming message's heading in a later chunk by its offset in the whole message", () => {
+		const text = "Intro paragraph.\n\n## First question\n\nSome text.\n\n- item\n\n## Second question\n\nMore.";
+		const { container } = render(<Transcript messages={[{ id: "m1", text, streaming: true }]} />);
+		expect([...container.querySelectorAll("h4")].map((heading) => heading.id)).toEqual([
+			"chat-anchor-first-question",
+			"chat-anchor-second-question",
+		]);
+	});
+
+	it("leaves headings without an id when no transcript owns the message", () => {
+		const { container } = render(<ChatMarkdown text={"## Which database?"} />);
+		expect(container.querySelector("h4")).not.toHaveAttribute("id");
+		const { container: other } = render(<Transcript messages={[{ id: "m1", text: "## Which database?" }]} />);
+		expect(other.querySelector("h4")).toHaveAttribute("id");
+		const { container: unowned } = render(
+			<ChatAnchorStoreContext.Provider value={new ChatAnchorStore()}>
+				<ChatMarkdown text={"## Which database?"} />
+			</ChatAnchorStoreContext.Provider>,
+		);
+		expect(unowned.querySelector("h4")).not.toHaveAttribute("id");
+	});
+
+	it("asks the transcript to scroll when a fragment link is clicked, without navigating the app", async () => {
+		const goTo = vi.fn();
+		const before = window.location.href;
+		render(<Transcript goTo={goTo} messages={[
+			{ id: "m1", text: "## Which database?" },
+			{ id: "m2", text: "What you need to do:\n\n- [Which database?](#which-database)\n- [Café](#Caf%C3%A9)" },
+		]} />);
+		await userEvent.click(screen.getByRole("link", { name: "Which database?" }));
+		expect(goTo).toHaveBeenLastCalledWith("which-database");
+		await userEvent.click(screen.getByRole("link", { name: "Café" }));
+		expect(goTo).toHaveBeenLastCalledWith("café");
+		expect(window.location.href).toBe(before);
+	});
+
+	it("keeps a fragment link inert, not a page jump, where no transcript listens", async () => {
+		const before = window.location.href;
+		render(<ChatMarkdown text={"[Which database?](#which-database)"} />);
+		await userEvent.click(screen.getByRole("link", { name: "Which database?" }));
+		expect(window.location.href).toBe(before);
+	});
+
+	it("does not offer a fragment link inside content from another origin", () => {
+		render(<ChatMarkdown safeOrigin text={"[Which database?](#which-database)"} />);
+		expect(screen.queryByRole("link")).toBeNull();
 	});
 });

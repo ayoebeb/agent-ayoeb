@@ -43,6 +43,47 @@ func TestHealthProbes(t *testing.T) {
 	}
 }
 
+func TestHealthProbesReportTheRunningVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version string
+		want    string
+		present bool
+	}{
+		{name: "release", version: " 0.44.0 ", want: "0.44.0", present: true},
+		{name: "development build", version: "", present: false},
+		{name: "blank", version: "  ", present: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Config{}
+			cfg.Telemetry.AppVersion = tc.version
+			srv := httptest.NewServer(newTestRouter(cfg, discardLogger(), nil))
+			defer srv.Close()
+
+			client := &http.Client{Timeout: 2 * time.Second}
+			for _, path := range []string{"/healthz", "/readyz"} {
+				resp, err := client.Get(srv.URL + path)
+				if err != nil {
+					t.Fatalf("GET %s: %v", path, err)
+				}
+				var body map[string]any
+				err = json.NewDecoder(resp.Body).Decode(&body)
+				resp.Body.Close()
+				if err != nil {
+					t.Fatalf("decode %s: %v", path, err)
+				}
+				got, ok := body["version"]
+				if ok != tc.present {
+					t.Fatalf("GET %s version present = %v, want %v (body %v)", path, ok, tc.present, body)
+				}
+				if tc.present && got != tc.want {
+					t.Errorf("GET %s version = %v, want %q", path, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestHealthProbesIncludeDaemonIdentity(t *testing.T) {
 	router := newTestRouter(config.Config{StartupWorkingDirectory: "/startup"}, discardLogger(), nil)
 	srv := httptest.NewServer(router)

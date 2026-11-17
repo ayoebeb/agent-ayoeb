@@ -10,6 +10,7 @@ import { useSplitPanesStore } from "../stores/split-panes-store";
 import { appShortcutBus } from "../test/app-shortcut-bus";
 import { useFilesTopbarHost } from "./files-topbar-host";
 import { SessionTopbarProvider } from "./SessionTopbarPortal";
+import { sendReferenceToChat, subscribeChatComposerReferences } from "../lib/chat-context-bus";
 import { SessionPaneContext, type SessionPaneValue } from "./session-pane-context";
 import { PageTopbarSurface } from "./PageTopbar";
 import { TooltipProvider } from "./ui/tooltip";
@@ -17,7 +18,7 @@ import type { SessionInterfaceTransitionStatus } from "../hooks/useSessionInterf
 import { conversationQueryKey } from "../hooks/useConversation";
 import type { BrowserTabsState } from "../../main/browser-view-host";
 import type { ObservedBrowserAgentActivity } from "../hooks/useBrowserView";
-import { filesSidebarStorageKey, inspectorIsOpen, rememberedFileDisplayMode, useUiStore, type InspectorView } from "../stores/ui-store";
+import { inspectorIsOpen, rememberedFileDisplayMode, useUiStore, type InspectorView } from "../stores/ui-store";
 import { useTerminalResetStore } from "../stores/terminal-reset-store";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 import { setChatDraftBoundary } from "../lib/chat-draft-boundary";
@@ -883,6 +884,14 @@ vi.mock("../hooks/useShellTerminals", () => ({
 	useCloseShellTerminal: () => ({ mutate: closeShellTerminalMock }),
 	useRenameShellTerminal: () => ({ mutate: vi.fn() }),
 }));
+
+// The orchestrator's control room (tabs, project numbers, crew) has its own
+// suites (components/crew). Here it would need the QueryClientProvider this suite
+// omits, so it stands in as three marked boxes and the tests keep to the split.
+vi.mock("./crew/OrchestratorControlBar", () => ({ OrchestratorControlBar: () => <div data-testid="orchestrator-control-bar" /> }));
+vi.mock("./crew/ControlRoomBody", () => ({ ControlRoomBody: () => <div data-testid="control-room-body" /> }));
+vi.mock("./crew/CrewRail", () => ({ CrewRail: () => <div data-testid="crew-rail" /> }));
+vi.mock("../hooks/useCrew", () => ({ useCrew: () => ({ model: { needsYouCount: 0, rows: [], groups: [], overlaps: [], totals: { additions: 0, deletions: 0, worktrees: 0 } }, sessions: [], now: new Date(0) }) }));
 
 type TestShell = (typeof shellTerminalsState.data)[number];
 
@@ -5736,7 +5745,8 @@ describe("SessionView", () => {
 
 	it("mounts the inspector in sync when navigating from an orchestrator session", () => {
 		const { rerender } = render(<SessionView sessionId="sess-orch" />);
-		expect(inspectorOpen("sess-orch")).toBe(false);
+		// An orchestrator opens on its crew; the worker it navigates to has its own state.
+		expect(inspectorOpen("sess-orch")).toBe(true);
 
 		act(() => useUiStore.getState().setInspectorOpen("sess-1", true));
 		rerender(<SessionView sessionId="sess-1" />);
@@ -5751,7 +5761,7 @@ describe("SessionView", () => {
 
 		act(() => useUiStore.getState().setInspectorOpen("sess-2", false));
 		rerender(<SessionView sessionId="sess-orch" />);
-		expect(inspectorOpen("sess-orch")).toBe(false);
+		expect(inspectorOpen("sess-orch")).toBe(true);
 
 		act(() => useUiStore.getState().setInspectorOpen("sess-2", false));
 		rerender(<SessionView sessionId="sess-2" />);
@@ -5763,14 +5773,110 @@ describe("SessionView", () => {
 		expect(screen.getByTestId("panel-inspector")).toHaveAttribute("data-state", "expanded");
 	});
 
-	it("starts the orchestrator inspector closed on Summary and opens it with the inspector shortcut", () => {
+	it("opens the orchestrator inspector on its crew, and closes and reopens it with the inspector shortcut", () => {
 		render(<SessionView sessionId="sess-orch" />);
+		expect(inspectorOpen("sess-orch")).toBe(true);
+		expect(screen.getByRole("button", { name: "Close inspector panel" })).toHaveAttribute("aria-pressed", "true");
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("crew");
+		act(() => appShortcutBus.emit({ id: "toggle-inspector" }));
 		expect(inspectorOpen("sess-orch")).toBe(false);
 		expect(screen.getByRole("button", { name: "Open inspector panel" })).toHaveAttribute("aria-pressed", "false");
 		act(() => appShortcutBus.emit({ id: "toggle-inspector" }));
 		expect(inspectorOpen("sess-orch")).toBe(true);
-		expect(screen.getByRole("button", { name: "Close inspector panel" })).toHaveAttribute("aria-pressed", "true");
-		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("summary");
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("crew");
+	});
+
+	it("mounts the control room above a local orchestrator's session, and on no worker's", () => {
+		const { rerender } = render(<SessionView sessionId="sess-orch" />);
+		expect(screen.getByTestId("orchestrator-control-bar")).toBeInTheDocument();
+		expect(screen.queryByTestId("control-room-body")).not.toBeInTheDocument();
+
+		act(() => useUiStore.getState().setControlRoom("sess-orch", { tab: "changes" }));
+		expect(screen.getByTestId("control-room-body")).toBeInTheDocument();
+
+		rerender(<SessionView sessionId="sess-1" />);
+		expect(screen.queryByTestId("orchestrator-control-bar")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("control-room-body")).not.toBeInTheDocument();
+	});
+
+	describe("control room overlay gives way to workspace navigation", () => {
+		const showChanges = () => act(() => useUiStore.getState().setControlRoom("sess-orch", { tab: "changes" }));
+		const expectBroughtForward = () => {
+			expect(screen.queryByTestId("control-room-body")).not.toBeInTheDocument();
+			expect(useUiStore.getState().controlRooms["sess-orch"]?.tab).toBe("session");
+		};
+
+		it("shows a file opened from the chat over a control-room tab, even one that is already open", async () => {
+			workerSession("sess-orch").mode = "chat";
+			render(<SessionView sessionId="sess-orch" />);
+			showChanges();
+			expect(screen.getByTestId("control-room-body")).toBeInTheDocument();
+
+			fireEvent.click(screen.getByRole("button", { name: "open chat basename" }));
+			await waitFor(() => expect(screen.getByTestId("session-file-workspace")).toBeInTheDocument());
+			expectBroughtForward();
+
+			// The file is already the selection now: opening it again changes no selection, yet must still show it.
+			showChanges();
+			expect(screen.getByTestId("control-room-body")).toBeInTheDocument();
+			fireEvent.click(screen.getByRole("button", { name: "open chat basename" }));
+			await waitFor(expectBroughtForward);
+		});
+
+		it("shows the transcript for a chat search hit", () => {
+			workerSession("sess-orch").mode = "chat";
+			render(<SessionView sessionId="sess-orch" />);
+			showChanges();
+			act(() => useUiStore.getState().requestChatMessageFocus("sess-orch", "m1", "flaky login"));
+			expectBroughtForward();
+			act(() => useUiStore.setState({ chatMessageFocusRequest: null }));
+		});
+
+		it("shows the chat when a reference is sent to its composer", () => {
+			workerSession("sess-orch").mode = "chat";
+			render(<SessionView sessionId="sess-orch" />);
+			const stopListening = subscribeChatComposerReferences("sess-orch", () => true);
+			try {
+				showChanges();
+				act(() => {
+					sendReferenceToChat("sess-orch", {} as never);
+				});
+				expectBroughtForward();
+			} finally {
+				stopListening();
+			}
+		});
+
+		it("shows the workspace when a session topbar tab is clicked, but not for tabs inside the overlay", () => {
+			render(<SessionView sessionId="sess-orch" />);
+			showChanges();
+			// Re-picking the selected tab changes no state, so the click itself must do it.
+			const insideOverlay = document.createElement("button");
+			insideOverlay.setAttribute("role", "tab");
+			screen.getByTestId("control-room-body").appendChild(insideOverlay);
+			fireEvent.click(insideOverlay);
+			expect(screen.getByTestId("control-room-body")).toBeInTheDocument();
+
+			const stripTab = document.createElement("button");
+			stripTab.setAttribute("role", "tab");
+			screen.getByTestId("session-topbar-host").appendChild(stripTab);
+			fireEvent.click(stripTab);
+			expectBroughtForward();
+		});
+
+		it("leaves a worker session's control-room state alone", () => {
+			render(<SessionView sessionId="sess-1" />);
+			act(() => useUiStore.getState().setControlRoom("sess-orch", { tab: "files" }));
+			fireEvent.click(screen.getByRole("button", { name: "view review file" }));
+			expect(useUiStore.getState().controlRooms["sess-orch"]?.tab).toBe("files");
+		});
+	});
+
+	it("gives a Cloud orchestrator no control room and no crew", () => {
+		workerSession("sess-orch").cloud = { orgId: "cloud-org", sandboxProvider: "docker" };
+		render(<SessionView sessionId="sess-orch" />);
+		expect(screen.queryByTestId("orchestrator-control-bar")).not.toBeInTheDocument();
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]).toMatchObject({ isOpen: false, view: "summary" });
 	});
 
 	it("opens an absolute chat path at the workspace-relative path the daemon returns", async () => {
@@ -5882,30 +5988,23 @@ describe("SessionView", () => {
 		render(<SessionView sessionId="sess-orch" />);
 		fireEvent.click(screen.getByRole("button", { name: "open chat basename" }));
 		await waitFor(() => expect(screen.getByTestId("session-file-workspace")).toBeInTheDocument());
-		expect(inspectorOpen("sess-orch")).toBe(false);
-		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("summary");
+		// The rail stays on the crew it opened on; opening a file reveals neither Browser nor Files.
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("crew");
 	});
 
-	// The orchestrator's rail starts closed: open it, then pick Files.
+	// A local orchestrator's rail starts open on its crew; a Cloud orchestrator's
+	// starts closed. Open it if it is closed, then pick Files.
 	function openOrchestratorFiles() {
-		fireEvent.click(screen.getByRole("button", { name: "Open inspector panel" }));
+		const open = screen.queryByRole("button", { name: "Open inspector panel" });
+		if (open) fireEvent.click(open);
 		fireEvent.click(screen.getByRole("button", { name: "open files" }));
 	}
 
-	it.each(["tui", "chat"] as const)("opens a %s orchestrator's Files on its whole tree and a picked file in the center", (mode) => {
-		if (mode === "chat") workerSession("sess-orch").mode = "chat";
+	it("gives an orchestrator no Files sidebar: its checkout is browsed in the control room", () => {
 		render(<SessionView sessionId="sess-orch" />);
-		openOrchestratorFiles();
-
-		expect(inspectorOpen("sess-orch")).toBe(true);
-		expect(useUiStore.getState().inspectorSessions["sess-orch"]).toMatchObject({ view: "files", filesChangedOnly: false });
-		const inspector = screen.getByTestId("panel-inspector");
-		expect(inspector).toHaveAttribute("data-workspace-mode", "files");
-		fireEvent.click(within(inspector).getByRole("button", { name: "select src/App.tsx" }));
-		expect(screen.getByTestId("session-file-workspace")).toHaveTextContent("src/App.tsx");
-		expect(screen.getByTestId("session-file-workspace")).toHaveAttribute("data-mode", "file");
-		expect(within(inspector).getByText("file tree")).toBeInTheDocument();
-		expect(browserUnseen("sess-orch")).toBe(false);
+		fireEvent.click(screen.getByRole("button", { name: "open files" }));
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("crew");
+		expect(screen.getByTestId("panel-inspector")).not.toHaveAttribute("data-workspace-mode", "files");
 	});
 
 	it("still opens a worker's Files on its changes", () => {
@@ -5914,7 +6013,6 @@ describe("SessionView", () => {
 		const state = useUiStore.getState().inspectorSessions["sess-1"];
 		expect(state).toMatchObject({ isOpen: true, view: "files" });
 		expect(state?.filesChangedOnly ?? true).toBe(true);
-		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-1"))).toBeNull();
 	});
 
 	it("keeps a Cloud orchestrator's rail without Files", () => {
@@ -5922,50 +6020,14 @@ describe("SessionView", () => {
 		render(<SessionView sessionId="sess-orch" />);
 		openOrchestratorFiles();
 		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("summary");
-		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.remembersFilesSidebar).toBeUndefined();
 	});
 
-	it("opens an orchestrator's Files as a narrow explorer, apart from the workers' width", () => {
-		window.localStorage.setItem("ao.inspector.widthPx", "520");
-		const { rerender } = render(<SessionView sessionId="sess-orch" />);
-		openOrchestratorFiles();
-		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("300px");
-
-		rerender(<SessionView sessionId="sess-1" />);
-		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("520px");
-	});
-
-	it("restores the Files width an orchestrator was resized to", () => {
-		window.localStorage.setItem("ao.inspector.filesWidthPx:sess-orch", "360");
-		render(<SessionView sessionId="sess-orch" />);
-		openOrchestratorFiles();
-		expect(screen.getByTestId("panel-inspector").style.getPropertyValue("--ao-inspector-w")).toBe("360px");
-	});
-
-	it("reopens an orchestrator's Files sidebar it left open, until it is closed", () => {
-		const first = render(<SessionView sessionId="sess-orch" />);
-		openOrchestratorFiles();
-		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-orch"))).toBe("open");
-		first.unmount();
-
-		// A restart forgets the in-memory inspector state.
-		act(() => useUiStore.setState({ inspectorSessions: {} }));
-		render(<SessionView sessionId="sess-orch" />);
-		expect(inspectorOpen("sess-orch")).toBe(true);
-		expect(useUiStore.getState().inspectorSessions["sess-orch"]).toMatchObject({ view: "files", filesChangedOnly: false });
-		expect(within(screen.getByTestId("panel-inspector")).getByText("file tree")).toBeInTheDocument();
-
-		fireEvent.click(screen.getByRole("button", { name: "Close inspector panel" }));
-		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-orch"))).toBeNull();
-	});
-
-	it("still reveals an explicit orchestrator preview over Files and badges passive Browser use", () => {
+	it("still reveals an explicit orchestrator preview over the crew and badges passive Browser use", () => {
 		const orchestrator = workerSession("sess-orch");
 		const { rerender } = render(<SessionView sessionId="sess-orch" />);
-		openOrchestratorFiles();
 		browserViewState.agentBrowserActive = true;
 		rerender(<SessionView sessionId="sess-orch" />);
-		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("files");
+		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("crew");
 		expect(browserUnseen("sess-orch")).toBe(true);
 
 		browserViewState.agentBrowserActive = false;
@@ -5975,7 +6037,6 @@ describe("SessionView", () => {
 		expect(inspectorOpen("sess-orch")).toBe(true);
 		expect(useUiStore.getState().inspectorSessions["sess-orch"]?.view).toBe("browser");
 		expect(browserUnseen("sess-orch")).toBe(false);
-		expect(window.localStorage.getItem(filesSidebarStorageKey("sess-orch"))).toBeNull();
 	});
 
 	it("reveals each explicit orchestrator preview and respects closing it during passive activity", () => {
@@ -6009,6 +6070,8 @@ describe("SessionView", () => {
 
 	it("only badges the orchestrator Browser when the agent first uses it", () => {
 		const { rerender } = render(<SessionView sessionId="sess-orch" />);
+		// The rail opens on the crew; the person closes it, so only a badge may follow.
+		fireEvent.click(screen.getByRole("button", { name: "Close inspector panel" }));
 		browserViewState.agentBrowserActive = true;
 		rerender(<SessionView sessionId="sess-orch" />);
 		expect(inspectorOpen("sess-orch")).toBe(false);

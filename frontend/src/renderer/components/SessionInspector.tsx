@@ -1,7 +1,9 @@
 import { apiErrorException } from "../lib/api-error-exception";
 import { BrowserIcon } from "./icons";
 import { artifactFileIcon } from "./artifact-file-icon";
-import { Chat, CheckWaves, Folder, List, Package } from "@/components/app-icons";
+import { Chat, CheckWaves, Folder, List, Package, Users } from "@/components/app-icons";
+import { CrewRail } from "./crew/CrewRail";
+import { useCrew } from "../hooks/useCrew";
 import { AppLink } from "./AppLink";
 import { ArtifactThumbnail } from "./ArtifactThumbnail";
 import type { ArtifactRow } from "../lib/artifacts";
@@ -122,9 +124,10 @@ export type { InspectorView } from "@aoagents/product-ui";
 
 const VIEW_DEFS: {
 	id: InspectorView;
-	labelKey: "inspector.summary" | "inspector.reviewTab" | "inspector.browser" | "inspector.sideChat" | "inspector.files" | "artifacts.title";
+	labelKey: "inspector.summary" | "inspector.reviewTab" | "inspector.browser" | "inspector.sideChat" | "inspector.files" | "artifacts.title" | "crew.title";
 	icon: ReactNode;
 }[] = [
+	{ id: "crew", labelKey: "crew.title", icon: <Users /> },
 	{ id: "summary", labelKey: "inspector.summary", icon: <List /> },
 	{ id: "files", labelKey: "inspector.files", icon: <Folder data-testid="files-viewer-icon" /> },
 	{ id: "reviews", labelKey: "inspector.reviewTab", icon: <CheckWaves /> },
@@ -165,7 +168,7 @@ export const SessionInspector = memo(function SessionInspector({
 	view: viewProp,
 	onViewChange,
 }: {
-	/** An orchestrator's rail has Summary, Files (local and remote hosts), Browser, and contextual Artifacts. */
+	/** An orchestrator's rail has Crew, Summary, Browser, and contextual Artifacts. */
 	orchestrator?: boolean;
 	session?: WorkspaceSession;
 	hostId?: string;
@@ -242,13 +245,14 @@ export const SessionInspector = memo(function SessionInspector({
 	// A persisted/controlled Reviews selection can outlive the last reviewable PR.
 	// Keep the shell on a real, visible tab instead of rendering an empty, unlabelled body.
 	const reviewsAvailable = reviewsTabVisible(session);
+	// The crew is the orchestrator's own view of its project; a worker has none,
+	// and a Cloud orchestrator lists its workers in Summary instead.
+	const hasCrew = orchestrator && session !== undefined && !session.cloud;
 	const availableViewDefs = orchestrator ? VIEW_DEFS.filter((entry) =>
-		entry.id === "summary" || entry.id === "browser"
-			// Files browses the orchestrator's own checkout of the project. A Cloud
-			// orchestrator's workspace is not reviewed through Files.
-			|| (entry.id === "files" && !session?.cloud)
+		entry.id === "summary" || entry.id === "browser" || (entry.id === "crew" && hasCrew)
+			// An orchestrator browses its own checkout in the control room's Files tab.
 			|| (entry.id === "artifacts" && ((session?.artifactFiles?.length ?? 0) > 0 || artifactRequestPending)))
-		: VIEW_DEFS.filter((entry) => (!hostId || entry.id !== "browser" || browserView) && (reviewsAvailable || entry.id !== "reviews")
+		: VIEW_DEFS.filter((entry) => entry.id !== "crew" && (!hostId || entry.id !== "browser" || browserView) && (reviewsAvailable || entry.id !== "reviews")
 			// The host passes a side chat view only where side chats can run.
 			&& (entry.id !== "sideChat" || sideChatView !== undefined)
 			// Artifacts shows whenever the session lists files, or while an artifact
@@ -262,12 +266,15 @@ export const SessionInspector = memo(function SessionInspector({
 		setInternalView(view);
 		onViewChange?.(view);
 	}, [onViewChange, orchestrator, requestedView, sessionLoaded, view]);
+	// Workers that wait on the person, on the crew tab, so a closed-in-the-corner
+	// view still says when someone needs an answer.
+	const crewNeedsYou = useCrew(hasCrew ? session : undefined, Boolean(hasCrew)).model.needsYouCount;
 	const tabs = availableViewDefs.map((entry) => {
 		const label = t(entry.labelKey);
 		return {
 			...entry,
 			badge: entry.id === "browser" && browserUnseen,
-			count: entry.id === "files" ? filesChangedCount : undefined,
+			count: entry.id === "files" ? filesChangedCount : entry.id === "crew" ? crewNeedsYou : undefined,
 			displayLabel:
 				entry.id === "files" && filesChangedCount !== undefined && (filesChangedCount > 0 || hasWorkspaceInventory)
 					? t("files.tabCount", { count: filesChangedCount })
@@ -287,6 +294,7 @@ export const SessionInspector = memo(function SessionInspector({
 				sideChatView={sideChatView ?? <p className="p-4 text-xs text-muted-foreground">{t("sideChat.unavailable")}</p>}
 				activeView={view}
 				ariaLabel={t("inspector.aria")}
+				crewView={hasCrew && session ? <CrewRail active={isInspectorVisible} orchestrator={session} /> : undefined}
 				artifactsView={
 					session ? (
 						<SessionArtifactsView hostId={hostId} key={sessionUiKey(session.id, hostId)} onRequestConsumed={onArtifactRequestConsumed} request={artifactRequest} session={session} />

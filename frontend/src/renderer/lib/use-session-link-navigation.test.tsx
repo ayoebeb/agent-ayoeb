@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useUiStore } from "../stores/ui-store";
+import { sessionUiKey } from "./hosts";
 import { useSessionLinkNavigation } from "./use-session-link-navigation";
 
 const mocks = vi.hoisted(() => ({ navigate: vi.fn(), workspace: vi.fn(), cloudProjects: vi.fn(), cloudSessions: vi.fn() }));
@@ -99,6 +100,36 @@ describe("useSessionLinkNavigation", () => {
 			source: "artifact",
 		}));
 		expect(useUiStore.getState().globalToasts).toEqual([]);
+	});
+
+	it("opens the session and asks its chat to scroll to the linked heading", () => {
+		useUiStore.setState({ chatAnchorRequest: null });
+		const { result } = renderHook(() => useSessionLinkNavigation());
+		act(() => expect(result.current("ao://sessions/other-project/other-session#which-database")).toBe(true));
+		expect(mocks.navigate).toHaveBeenCalledWith("other-project", "other-session");
+		expect(useUiStore.getState().chatAnchorRequest).toEqual(expect.objectContaining({ sessionId: "other-session", anchor: "which-database" }));
+	});
+
+	it("keys a remote host's anchor request to that host's chat", () => {
+		useUiStore.setState({ chatAnchorRequest: null });
+		const queryClient = new QueryClient();
+		queryClient.setQueryData(["remote-workspaces", "box-a"], [{ id: "project", sessions: [{ id: "session", isTerminated: false }] }]);
+		const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+		const { result } = renderHook(() => useSessionLinkNavigation("box-a"), { wrapper });
+		act(() => expect(result.current("ao://sessions/project/session#which-database")).toBe(true));
+		expect(useUiStore.getState().chatAnchorRequest).toEqual(expect.objectContaining({
+			sessionId: sessionUiKey("session", "box-a"),
+			anchor: "which-database",
+		}));
+	});
+
+	it("asks for no scroll when the link has no anchor, or the session cannot be opened", () => {
+		useUiStore.setState({ chatAnchorRequest: null });
+		const { result } = renderHook(() => useSessionLinkNavigation());
+		act(() => expect(result.current("ao://sessions/project/session")).toBe(true));
+		act(() => expect(result.current("ao://sessions/project/terminated#which-database")).toBe(false));
+		act(() => expect(result.current("ao://sessions/project/missing#which-database")).toBe(false));
+		expect(useUiStore.getState().chatAnchorRequest).toBeNull();
 	});
 
 	it.each([
