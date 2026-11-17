@@ -38,10 +38,12 @@ const DOWNLOAD_ATTEMPTS = 3;
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = resolve(scriptsDir, "..");
 const sourceDir = join(frontendRoot, "acp-runtime");
-// `--dev` on Windows (the daily/dev build) builds into a fresh versioned
-// directory: running chat sessions lock the previous one. Everything else,
-// including packaged builds, keeps the fixed resources/acp-runtime.
-const versioned = process.platform === "win32" && process.argv.includes("--dev");
+// On Windows every build except a packaging one (`--packaged`, passed by
+// prepackage/premake/publish) goes into a fresh versioned directory: running
+// chat sessions lock the previous one. The default matters because older daily
+// scripts call this with no arguments. Packaged builds and other platforms keep
+// the fixed resources/acp-runtime.
+const versioned = process.platform === "win32" && !process.argv.includes("--packaged");
 const buildsRoot = runtimeBuildsRoot(frontendRoot);
 const currentDir = versioned ? readCurrentRuntimeDir(buildsRoot) : null;
 const outDir = versioned ? newRuntimeDir(buildsRoot) : join(frontendRoot, "resources", "acp-runtime");
