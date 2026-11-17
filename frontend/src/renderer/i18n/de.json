@@ -1422,6 +1422,8 @@
 	"settings.navigationGesturesHint": "Mit zwei Fingern horizontal wischen, um zurück oder vorwärts zu navigieren.",
 	"settings.renderMath": "Mathematik darstellen",
 	"settings.renderMathHint": "$…$, $$…$$, \\(…\\) und \\[…\\] in Chats und Markdown-Vorschauen als Formeln anzeigen. Ein Preis mit $ kann als Formel erscheinen.",
+	"settings.resourceStatus": "RAM- und CPU-Status anzeigen",
+	"settings.resourceStatusHint": "Zeigt Speicher- und CPU-Auslastung unten rechts im Fenster. Ein Klick öffnet die Aufschlüsselung pro Sitzung.",
 	"settings.terminalCopyOnSelect": "Bei Auswahl kopieren",
 	"settings.projectAvatars": "Repository-Avatare",
 	"settings.projectAvatars.description": "Zeigt statt des Ordnersymbols den Avatar des Repository-Besitzers.",

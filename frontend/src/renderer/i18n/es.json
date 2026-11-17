@@ -1445,6 +1445,8 @@
 	"settings.navigationGesturesHint": "Desliza horizontalmente con dos dedos para ir hacia atrás o hacia delante.",
 	"settings.renderMath": "Mostrar fórmulas",
 	"settings.renderMathHint": "Muestra $…$, $$…$$, \\(…\\) y \\[…\\] como ecuaciones en chats y vistas previas de Markdown. Un precio escrito con $ puede mostrarse como fórmula.",
+	"settings.resourceStatus": "Mostrar estado de RAM y CPU",
+	"settings.resourceStatusHint": "Muestra el uso de memoria y CPU en la esquina inferior derecha de la ventana. Haz clic para ver el desglose por sesión.",
 	"settings.terminalCopyOnSelect": "Copiar al seleccionar",
 	"settings.projectAvatars": "Avatares de repositorios",
 	"settings.projectAvatars.description": "Muestra el avatar del propietario del repositorio en lugar del icono de carpeta.",

@@ -91,6 +91,13 @@ export function useStatusMemorySampling() {
 	}, []);
 }
 
+/** The corner status and the window behind it: on by default, off with the
+ * General setting. Diagnostics (Developer mode) still turns the readings on
+ * for the board's chips even with the status hidden. */
+export function useMemoryMonitoringEnabled(): boolean {
+	return useUiStore((state) => state.resourceStatus || (state.developerMode && state.diagnostics));
+}
+
 /** Memory monitoring is a Developer mode tool behind its own Diagnostics
  * toggle: with either off, nothing polls the daemon and nothing renders. */
 export function useDiagnosticsEnabled(): boolean {
@@ -125,7 +132,7 @@ function selectAppReading(data: SessionMemoryResponse) {
 /** `local` is false on another machine's board: these readings are this
  * machine's, so they must not colour that board's sessions. */
 export function useSessionMemory(projectId?: string, local = true) {
-	const enabled = useDiagnosticsEnabled() && local;
+	const enabled = useMemoryMonitoringEnabled() && local;
 	return useQuery({
 		enabled,
 		...sessionMemoryQueryOptions(projectId),
@@ -147,7 +154,7 @@ export function useSystemMemory(projectId?: string) {
 /** Everything AO runs, app-wide, for the status bar. Same query as the
  * sessions so the bar and the window it opens never disagree. */
 export function useAppMemory(local = true) {
-	const enabled = useDiagnosticsEnabled() && local;
+	const enabled = useMemoryMonitoringEnabled() && local;
 	return useQuery({
 		enabled,
 		...sessionMemoryQueryOptions(),
@@ -161,7 +168,7 @@ export const memoryPressureRefetchIntervalMs = 10_000;
 export const memoryPressureQueryKey = ["memory-pressure"] as const;
 
 export function useMemoryPressure(local = true) {
-	const enabled = useDiagnosticsEnabled() && local;
+	const enabled = useMemoryMonitoringEnabled() && local;
 	return useQuery({
 		enabled,
 		queryKey: memoryPressureQueryKey,

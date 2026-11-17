@@ -1,5 +1,7 @@
+import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { formatCPU, formatMemory, resourceStatusParts, type AppMemoryReading, type SystemMemoryReading } from "./useSessionMemory";
+import { useUiStore } from "../stores/ui-store";
+import { formatCPU, formatMemory, useMemoryMonitoringEnabled, resourceStatusParts, type AppMemoryReading, type SystemMemoryReading } from "./useSessionMemory";
 import { formatDuration, processKind } from "../components/SessionMemoryPanel";
 
 describe("formatMemory", () => {
@@ -49,5 +51,22 @@ describe("resourceStatusParts", () => {
 
 	it("keeps only Ayo's size where the host cannot be read", () => {
 		expect(resourceStatusParts(undefined, app)).toEqual({ ayo: "2.0 GB" });
+	});
+});
+
+describe("useMemoryMonitoringEnabled", () => {
+	const enabled = (state: { resourceStatus: boolean; developerMode: boolean; diagnostics: boolean }) => {
+		useUiStore.setState(state);
+		return renderHook(() => useMemoryMonitoringEnabled()).result.current;
+	};
+
+	it("is on by default for everyone, without Developer mode or Diagnostics", () => {
+		expect(enabled({ resourceStatus: true, developerMode: false, diagnostics: false })).toBe(true);
+	});
+
+	it("turns off with the setting, unless Diagnostics still wants the readings", () => {
+		expect(enabled({ resourceStatus: false, developerMode: false, diagnostics: false })).toBe(false);
+		expect(enabled({ resourceStatus: false, developerMode: true, diagnostics: false })).toBe(false);
+		expect(enabled({ resourceStatus: false, developerMode: true, diagnostics: true })).toBe(true);
 	});
 });

@@ -1481,6 +1481,8 @@
 	"settings.navigationGesturesHint": "Проводите двумя пальцами по горизонтали, чтобы переходить назад или вперёд.",
 	"settings.renderMath": "Отображать формулы",
 	"settings.renderMathHint": "Показывать $…$, $$…$$, \\(…\\) и \\[…\\] как формулы в чатах и предпросмотре Markdown. Цена, записанная со знаком $, может отобразиться как формула.",
+	"settings.resourceStatus": "Показывать состояние RAM и CPU",
+	"settings.resourceStatusHint": "Показывает использование памяти и CPU в правом нижнем углу окна. Нажмите, чтобы увидеть разбивку по сеансам.",
 	"settings.terminalCopyOnSelect": "Копировать при выделении",
 	"settings.projectAvatars": "Аватары репозиториев",
 	"settings.projectAvatars.description": "Показывать аватар владельца репозитория вместо значка папки проекта.",
