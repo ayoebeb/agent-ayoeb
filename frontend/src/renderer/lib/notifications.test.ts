@@ -882,7 +882,7 @@ describe("createNotificationsTransport", () => {
 				id: "ntf_wait",
 				sessionId: "mer-orchestrator-1",
 				type: "orchestrator_waiting",
-				title: "Mercury: orchestrator wacht op u",
+				title: "Mercury: orchestrator is waiting for you",
 				body: "Merge PR 42 now, or wait?",
 				target: { kind: "session", sessionId: "mer-orchestrator-1" },
 				...overrides,
@@ -897,7 +897,7 @@ describe("createNotificationsTransport", () => {
 
 			expect(showNotificationMock).toHaveBeenCalledWith({
 				id: "ntf_wait",
-				title: "Mercury: orchestrator wacht op u",
+				title: "Mercury: orchestrator is waiting for you",
 				body: "Merge PR 42 now, or wait?",
 				type: "orchestrator_waiting",
 				watched: false,

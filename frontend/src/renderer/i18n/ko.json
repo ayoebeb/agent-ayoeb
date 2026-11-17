@@ -1239,6 +1239,8 @@
 	"notify.restoreArchivedPrompt": "이 세션은 보관되었습니다. 복원하시겠어요?",
 	"notify.restoreUnavailable": "이 세션은 더 이상 복원할 수 없습니다.",
 	"notify.title": "알림",
+	"notify.orchestratorWaiting.title": "{{project}}: 오케스트레이터가 기다리고 있습니다",
+	"notify.orchestratorWaiting.body": "오케스트레이터가 답변 또는 승인을 기다리고 있습니다.",
 	"notify.unread": "읽지 않음",
 	"notify.unreadCount": "읽지 않은 알림 {{count}}개",
 	"notify.unseen": "미확인",

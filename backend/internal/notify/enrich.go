@@ -58,10 +58,21 @@ func titleForIntent(intent Intent) string {
 	}
 }
 
-// OrchestratorWaitingTitle is the title of the notification that says a
-// project's orchestrator is waiting for the user: "<project>: orchestrator wacht
-// op u". It follows the user's own wording and is the same text on every
-// surface (desktop toast, notification center, phone push).
+// OrchestratorWaitingTitleSuffix follows the project name in the title of the
+// notification that says a project's orchestrator is waiting for the user. The
+// daemon has no UI language, so it writes English like every other notification
+// it stores (phone push, CLI, API). The desktop app shows these in the user's own
+// language instead, and finds the project name by this suffix. The renderer keeps
+// a copy (ORCHESTRATOR_WAITING_TITLE_SUFFIX) and a test fails if they drift.
+const OrchestratorWaitingTitleSuffix = ": orchestrator is waiting for you"
+
+// OrchestratorWaitingFallbackBody is the body when the wait is a pending approval
+// or input request, which has no declared one-line question. The desktop app
+// replaces it with the user's language the same way (see the suffix above).
+const OrchestratorWaitingFallbackBody = "The orchestrator is waiting for your answer or approval."
+
+// OrchestratorWaitingTitle is the title of that notification:
+// "<project>: orchestrator is waiting for you".
 func OrchestratorWaitingTitle(projectName, projectID string) string {
 	name := strings.TrimSpace(projectName)
 	if name == "" {
@@ -70,12 +81,8 @@ func OrchestratorWaitingTitle(projectName, projectID string) string {
 	if name == "" {
 		name = "project"
 	}
-	return name + ": orchestrator wacht op u"
+	return name + OrchestratorWaitingTitleSuffix
 }
-
-// orchestratorWaitingFallbackBody is shown when the wait is a pending approval
-// or input request, which has no declared one-line question.
-const orchestratorWaitingFallbackBody = "De orchestrator wacht op uw antwoord of goedkeuring."
 
 func bodyForIntent(intent Intent) string {
 	switch intent.Type {
@@ -108,7 +115,7 @@ func bodyForIntent(intent Intent) string {
 		if detail := strings.TrimSpace(intent.Detail); detail != "" {
 			return detail
 		}
-		return orchestratorWaitingFallbackBody
+		return OrchestratorWaitingFallbackBody
 	default:
 		return ""
 	}

@@ -22,7 +22,7 @@ const ALL_TYPES: NotificationType[] = [
 
 describe("orchestrator_waiting", () => {
 	it("toasts, flashes the taskbar and bounces the dock until the app is opened", () => {
-		expect(shouldToast({ title: "Mercury: orchestrator wacht op u" }, true)).toBe(true);
+		expect(shouldToast({ title: "Mercury: orchestrator is waiting for you" }, true)).toBe(true);
 		expect(shouldSignalAttention("orchestrator_waiting")).toBe(true);
 		expect(dockBounceType("orchestrator_waiting")).toBe("critical");
 	});

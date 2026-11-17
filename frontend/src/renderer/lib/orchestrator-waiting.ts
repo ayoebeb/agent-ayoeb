@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
+import { appI18n } from "../i18n";
 import { apiErrorException } from "./api-error-exception";
 import { apiClient } from "./api-client";
 import { clientForHost } from "./host-clients";
@@ -9,6 +10,41 @@ import { LOCAL_HOST, type HostId } from "./hosts";
 export type OrchestratorWaiting = components["schemas"]["OrchestratorWaitingResponse"] & { hostId: HostId };
 
 export const NOTIFICATION_TYPE_ORCHESTRATOR_WAITING = "orchestrator_waiting";
+
+/**
+ * The daemon has no UI language, so it stores this notification in English like
+ * every other one (phone push, CLI, API): "<project>: orchestrator is waiting for
+ * you", with the one-line question as the body, or the fallback below when the
+ * wait is an approval with no declared question. The desktop shows it in the
+ * user's own language instead. These two constants are copies of the daemon's
+ * (notify.OrchestratorWaitingTitleSuffix and notify.OrchestratorWaitingFallbackBody);
+ * a daemon test and a renderer test fail if they drift.
+ */
+export const ORCHESTRATOR_WAITING_TITLE_SUFFIX = ": orchestrator is waiting for you";
+export const ORCHESTRATOR_WAITING_FALLBACK_BODY = "The orchestrator is waiting for your answer or approval.";
+
+/**
+ * What the user reads for a notification: an orchestrator wait in their own
+ * language, anything else exactly as the daemon wrote it. A title that does not
+ * end with the daemon's suffix (a daemon from another build) is shown unchanged
+ * rather than guessed at. The question the orchestrator wrote is never altered.
+ */
+export function localizedNotificationCopy(notification: { type: string; title: string; body: string }): {
+	title: string;
+	body: string;
+} {
+	if (notification.type !== NOTIFICATION_TYPE_ORCHESTRATOR_WAITING) {
+		return { title: notification.title, body: notification.body };
+	}
+	const { title, body } = notification;
+	const project = title.endsWith(ORCHESTRATOR_WAITING_TITLE_SUFFIX)
+		? title.slice(0, title.length - ORCHESTRATOR_WAITING_TITLE_SUFFIX.length)
+		: undefined;
+	return {
+		title: project === undefined ? title : appI18n.t("notify.orchestratorWaiting.title", { project }),
+		body: body.trim() === "" || body === ORCHESTRATOR_WAITING_FALLBACK_BODY ? appI18n.t("notify.orchestratorWaiting.body") : body,
+	};
+}
 
 export const orchestratorWaitingQueryKey = (hostId: HostId) => ["orchestrator-waiting", hostId] as const;
 const allOrchestratorWaitingQueryKey = ["orchestrator-waiting"] as const;

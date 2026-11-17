@@ -6,8 +6,13 @@ const { localGet, remoteGet } = vi.hoisted(() => ({ localGet: vi.fn(), remoteGet
 vi.mock("./api-client", () => ({ apiClient: { GET: localGet } }));
 vi.mock("./host-clients", () => ({ clientForHost: () => ({ GET: remoteGet }) }));
 
+import { appI18n } from "../i18n";
+import { deMessages } from "../i18n/all-messages";
 import {
 	fetchOrchestratorWaiting,
+	localizedNotificationCopy,
+	ORCHESTRATOR_WAITING_FALLBACK_BODY,
+	ORCHESTRATOR_WAITING_TITLE_SUFFIX,
 	refreshOrchestratorWaiting,
 	waitingForProject,
 	waitingForSession,
@@ -19,7 +24,7 @@ const wait = (overrides: Partial<OrchestratorWaiting> = {}): OrchestratorWaiting
 	notificationId: "ntf_1",
 	sessionId: "mer-orchestrator-1",
 	projectId: "mer",
-	title: "Mercury: orchestrator wacht op u",
+	title: "Mercury: orchestrator is waiting for you",
 	question: "Merge PR 42 now, or wait?",
 	since: "2026-11-16T12:00:00Z",
 	reminded: false,
@@ -106,5 +111,65 @@ describe("refreshOrchestratorWaiting", () => {
 		refreshOrchestratorWaiting(queryClient, "host-b");
 		expect(refetchQueries).toHaveBeenNthCalledWith(1, { queryKey: ["orchestrator-waiting"], type: "active" });
 		expect(refetchQueries).toHaveBeenNthCalledWith(2, { queryKey: ["orchestrator-waiting", "host-b"], type: "active" });
+	});
+});
+
+// The daemon writes English (title "<project>: orchestrator is waiting for you");
+// the desktop shows it in the user's own language. The daemon pins the same two
+// strings in notify/orchestrator_waiting_test.go.
+describe("localizedNotificationCopy", () => {
+	const waiting = (overrides: Partial<{ title: string; body: string; type: string }> = {}) => ({
+		type: "orchestrator_waiting",
+		title: "Mercury: orchestrator is waiting for you",
+		body: "Merge PR #42 now, or wait?",
+		...overrides,
+	});
+
+	it("matches the daemon's pinned English", () => {
+		expect(ORCHESTRATOR_WAITING_TITLE_SUFFIX).toBe(": orchestrator is waiting for you");
+		expect(ORCHESTRATOR_WAITING_FALLBACK_BODY).toBe("The orchestrator is waiting for your answer or approval.");
+	});
+
+	it("keeps the project name and never touches the question the orchestrator wrote", () => {
+		expect(localizedNotificationCopy(waiting())).toEqual({
+			title: "Mercury: orchestrator is waiting for you",
+			body: "Merge PR #42 now, or wait?",
+		});
+		// A project name that itself contains the separator survives.
+		expect(localizedNotificationCopy(waiting({ title: "Acme: web: orchestrator is waiting for you" })).title).toBe(
+			"Acme: web: orchestrator is waiting for you",
+		);
+	});
+
+	it("replaces the daemon's fallback body, for a wait that is an approval, with the localized one", () => {
+		expect(localizedNotificationCopy(waiting({ body: ORCHESTRATOR_WAITING_FALLBACK_BODY })).body).toBe(
+			"The orchestrator is waiting for your answer or approval.",
+		);
+		expect(localizedNotificationCopy(waiting({ body: "  " })).body).toBe("The orchestrator is waiting for your answer or approval.");
+	});
+
+	it("shows a title it does not recognise exactly as the daemon wrote it", () => {
+		expect(localizedNotificationCopy(waiting({ title: "Something else entirely" })).title).toBe("Something else entirely");
+	});
+
+	it("leaves every other notification type alone", () => {
+		const other = { type: "needs_input", title: "checkout needs your input", body: "Your agent is waiting on you to continue." };
+		expect(localizedNotificationCopy(other)).toEqual({ title: other.title, body: other.body });
+	});
+
+	it("follows the user's language, not the daemon's", async () => {
+		appI18n.addResourceBundle("de", "translation", deMessages, true, true);
+		await appI18n.changeLanguage("de");
+		try {
+			expect(localizedNotificationCopy(waiting())).toEqual({
+				title: "Mercury: Orchestrator wartet auf dich",
+				body: "Merge PR #42 now, or wait?",
+			});
+			expect(localizedNotificationCopy(waiting({ body: ORCHESTRATOR_WAITING_FALLBACK_BODY })).body).toBe(
+				"Der Orchestrator wartet auf deine Antwort oder Freigabe.",
+			);
+		} finally {
+			await appI18n.changeLanguage("en");
+		}
 	});
 });

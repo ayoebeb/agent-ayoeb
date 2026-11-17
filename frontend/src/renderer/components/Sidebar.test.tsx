@@ -841,7 +841,7 @@ describe("Sidebar", () => {
 			notificationId: "ntf_wait",
 			sessionId: `${projectId}-orch`,
 			projectId,
-			title: "Project One: orchestrator wacht op u",
+			title: "Project One: orchestrator is waiting for you",
 			question: "Merge PR 42 now, or wait?",
 			since: "2026-11-16T12:00:00Z",
 			reminded: false,

@@ -1239,6 +1239,8 @@
 	"notify.restoreArchivedPrompt": "このセッションはアーカイブされました。復元しますか？",
 	"notify.restoreUnavailable": "このセッションは復元できなくなりました。",
 	"notify.title": "通知",
+	"notify.orchestratorWaiting.title": "{{project}}: オーケストレーターが返信を待っています",
+	"notify.orchestratorWaiting.body": "オーケストレーターがあなたの回答または承認を待っています。",
 	"notify.unread": "未読",
 	"notify.unreadCount": "未読通知 {{count}} 件",
 	"notify.unseen": "未確認",

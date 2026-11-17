@@ -90,7 +90,7 @@ func (w *fakeWorld) Notify(_ context.Context, intent ports.NotificationIntent) e
 	w.nextID++
 	w.rows = append(w.rows, domain.NotificationRecord{
 		ID: "ntf_" + string(rune('a'+w.nextID)), SessionID: intent.SessionID, ProjectID: intent.ProjectID,
-		Type: intent.Type, Title: "mer: orchestrator wacht op u", Body: intent.Detail, Status: domain.NotificationUnread,
+		Type: intent.Type, Title: "mer: orchestrator is waiting for you", Body: intent.Detail, Status: domain.NotificationUnread,
 		CreatedAt: intent.CreatedAt, SourceKey: intent.SourceKey,
 	})
 	return nil

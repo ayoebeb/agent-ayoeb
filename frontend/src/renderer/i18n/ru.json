@@ -1242,6 +1242,8 @@
 	"notify.restoreArchivedPrompt": "Эта сессия архивирована. Восстановить её?",
 	"notify.restoreUnavailable": "Эту сессию больше нельзя восстановить.",
 	"notify.title": "Уведомления",
+	"notify.orchestratorWaiting.title": "{{project}}: оркестратор ждёт вас",
+	"notify.orchestratorWaiting.body": "Оркестратор ждёт вашего ответа или подтверждения.",
 	"notify.unreadCount": "Непрочитанных уведомлений: {{count}}",
 	"notify.workspaceLoadFailed": "Не удалось загрузить сессии. Восстановление и открытие могут быть недоступны.",
 	"pr.botSuffix": "{{name}} бот",

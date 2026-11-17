@@ -56,7 +56,7 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "./ui/pop
 import { TooltipProvider } from "./ui/tooltip";
 import { useCloudNotifications } from "../hooks/useCloudNotifications";
 import { useOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
-import { NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, waitsBeyondUnread } from "../lib/orchestrator-waiting";
+import { localizedNotificationCopy, NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, waitsBeyondUnread } from "../lib/orchestrator-waiting";
 import { labelForHost } from "../lib/host-clients";
 import { clearRemoteNotification, clearRemoteNotifications, connectRemoteNotificationStreams, fetchRemoteNotificationsPage, markRemoteNotificationsRead, remoteNotificationsQueryKey, useRemoteNotificationHosts } from "../hooks/useRemoteNotifications";
 import type { CloudCpNotification } from "../lib/cloud-cp/types";
@@ -242,10 +242,11 @@ export function NotificationRuntime() {
 		const watched =
 			routeHost === hostId && sessionId === notification.sessionId &&
 			document.visibilityState === "visible" && document.hasFocus();
+		const copy = localizedNotificationCopy(notification);
 		void aoBridge.notifications.show({
 			id,
-			title: `${labelForHost(hostId) ?? hostId}: ${notification.title}`,
-			body: notification.body || undefined,
+			title: `${labelForHost(hostId) ?? hostId}: ${copy.title}`,
+			body: copy.body || undefined,
 			type: notification.type,
 			watched,
 		});
@@ -284,10 +285,11 @@ export function NotificationRuntime() {
 					(notification.type === "needs_input" &&
 						useUiStore.getState().visibleTerminalKindBySession[sessionUiKey(sessionId ?? "", hostId)] === "worker")
 				);
+				const copy = localizedNotificationCopy(notification);
 				void aoBridge.notifications.show({
 					id,
-					title: `${host.label}: ${notification.title}`,
-					body: notification.body || undefined,
+					title: `${host.label}: ${copy.title}`,
+					body: copy.body || undefined,
 					type: notification.type,
 					watched,
 				});
@@ -1366,6 +1368,8 @@ function notificationPRTitleLink(
 }
 
 function notificationCopy(notification: NotificationDTO, sessionName?: string): NotificationCopy {
+	// An orchestrator wait reads in the user's own language; the daemon stores English.
+	if (notification.type === NOTIFICATION_TYPE_ORCHESTRATOR_WAITING) return localizedNotificationCopy(notification);
 	if (notification.type !== "ready_to_merge") {
 		return { title: notification.title, body: notification.body };
 	}

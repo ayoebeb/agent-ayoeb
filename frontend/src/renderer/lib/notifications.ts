@@ -4,7 +4,7 @@ import type { components } from "../../api/schema";
 import { aoBridge } from "./bridge";
 import { apiClient, eventStreamBaseUrl, getApiBaseUrl, subscribeApiBaseUrl } from "./api-client";
 import { computeSseRetryDelayMs } from "./sse-backoff";
-import { NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, refreshOrchestratorWaiting } from "./orchestrator-waiting";
+import { localizedNotificationCopy, NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, refreshOrchestratorWaiting } from "./orchestrator-waiting";
 
 export type NotificationDTO = components["schemas"]["NotificationResponse"];
 export type NotificationsPage = components["schemas"]["ListNotificationsResponse"];
@@ -548,10 +548,11 @@ export function createNotificationsTransport(
 					refreshOrchestratorWaiting(queryClient);
 				}
 				if (event.kind === "reminder") {
+					const copy = localizedNotificationCopy(event.notification);
 					void aoBridge.notifications.show({
 						id: event.notification.id,
-						title: event.notification.title,
-						body: event.notification.body || undefined,
+						title: copy.title,
+						body: copy.body || undefined,
 						type: event.notification.type,
 						watched: event.watched,
 					});
@@ -582,10 +583,11 @@ export function createNotificationsTransport(
 				const inserted = mergeUnreadNotification(queryClient, event.notification);
 				mergeRecentNotification(queryClient, event.notification);
 				if (inserted) {
+					const copy = localizedNotificationCopy(event.notification);
 					void aoBridge.notifications.show({
 						id: event.notification.id,
-						title: event.notification.title,
-						body: event.notification.body || undefined,
+						title: copy.title,
+						body: copy.body || undefined,
 						type: event.notification.type,
 						watched: event.watched,
 					});

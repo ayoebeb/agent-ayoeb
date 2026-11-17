@@ -1215,6 +1215,8 @@
 	"notify.restoreArchivedPrompt": "This session was archived. Restore it?",
 	"notify.restoreUnavailable": "This session can no longer be restored.",
 	"notify.title": "Notifications",
+	"notify.orchestratorWaiting.title": "{{project}}: orchestrator is waiting for you",
+	"notify.orchestratorWaiting.body": "The orchestrator is waiting for your answer or approval.",
 	"notify.unreadCount": "{{count}} unread notifications",
 	"notify.workspaceLoadFailed": "Could not load sessions. Restore and open may be unavailable.",
 	"pr.botSuffix": "{{name}} bot",

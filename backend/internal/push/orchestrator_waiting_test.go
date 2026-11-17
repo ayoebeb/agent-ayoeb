@@ -11,7 +11,7 @@ import (
 func waitingRecord() domain.NotificationRecord {
 	return domain.NotificationRecord{
 		ID: "ntf_1", SessionID: "mer-orchestrator-1", ProjectID: "mer", Type: domain.NotificationOrchestratorWaiting,
-		Title: "Mercury: orchestrator wacht op u", Body: "Merge PR 42 now, or wait?",
+		Title: "Mercury: orchestrator is waiting for you", Body: "Merge PR 42 now, or wait?",
 	}
 }
 
@@ -33,7 +33,7 @@ func TestDispatcherPushesAnOrchestratorWait(t *testing.T) {
 	sender.mu.Lock()
 	defer sender.mu.Unlock()
 	m := sender.gotMsgs[0]
-	if m.Title != "h_machine_ · Mercury: orchestrator wacht op u" || m.Body != "Merge PR 42 now, or wait?" {
+	if m.Title != "h_machine_ · Mercury: orchestrator is waiting for you" || m.Body != "Merge PR 42 now, or wait?" {
 		t.Fatalf("copy = %+v", m)
 	}
 	if m.Priority != "high" || m.Sound != "default" {

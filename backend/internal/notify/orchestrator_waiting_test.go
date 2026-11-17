@@ -36,7 +36,7 @@ func TestOrchestratorWaitingPayload(t *testing.T) {
 		t.Fatalf("rows = %+v", st.rows)
 	}
 	got := st.rows[0]
-	if got.Type != domain.NotificationOrchestratorWaiting || got.Title != "Mercury: orchestrator wacht op u" ||
+	if got.Type != domain.NotificationOrchestratorWaiting || got.Title != "Mercury: orchestrator is waiting for you" ||
 		got.Body != "Merge PR 42 now,\nor wait?" || got.Status != domain.NotificationUnread ||
 		got.SessionID != "mer-orchestrator-1" || got.ProjectID != "mer" || got.PRURL != "" || got.SourceKey != "orchestrator_waiting:abc" {
 		t.Fatalf("stored = %+v", got)
@@ -51,7 +51,7 @@ func TestOrchestratorWaitingFallbackBody(t *testing.T) {
 	if err := mgr.Notify(context.Background(), Intent{Type: domain.NotificationOrchestratorWaiting, SessionID: "mer-orchestrator-1", ProjectID: "mer", ProjectName: "Mercury"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := st.rows[0].Body; got != orchestratorWaitingFallbackBody {
+	if got := st.rows[0].Body; got != OrchestratorWaitingFallbackBody {
 		t.Fatalf("body = %q", got)
 	}
 }
@@ -64,9 +64,9 @@ func TestOrchestratorWaitingProjectNameLookup(t *testing.T) {
 		resolve func(context.Context, domain.ProjectID) string
 		want    string
 	}{
-		{"resolved", func(context.Context, domain.ProjectID) string { return "Mercury" }, "Mercury: orchestrator wacht op u"},
-		{"unknown name falls back to the id", func(context.Context, domain.ProjectID) string { return "" }, "mer: orchestrator wacht op u"},
-		{"no resolver falls back to the id", nil, "mer: orchestrator wacht op u"},
+		{"resolved", func(context.Context, domain.ProjectID) string { return "Mercury" }, "Mercury: orchestrator is waiting for you"},
+		{"unknown name falls back to the id", func(context.Context, domain.ProjectID) string { return "" }, "mer: orchestrator is waiting for you"},
+		{"no resolver falls back to the id", nil, "mer: orchestrator is waiting for you"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			st := &fakeStore{}
@@ -79,7 +79,7 @@ func TestOrchestratorWaitingProjectNameLookup(t *testing.T) {
 			}
 		})
 	}
-	if got := OrchestratorWaitingTitle("", ""); got != "project: orchestrator wacht op u" {
+	if got := OrchestratorWaitingTitle("", ""); got != "project: orchestrator is waiting for you" {
 		t.Fatalf("empty title = %q", got)
 	}
 }
@@ -129,6 +129,22 @@ func TestRemindPublishesWithoutStoring(t *testing.T) {
 	var nilMgr *Manager
 	if err := nilMgr.Remind(context.Background(), rec); err != nil {
 		t.Fatalf("nil manager: %v", err)
+	}
+}
+
+// The daemon writes English; the desktop app shows the user's own language and
+// finds the project name by this suffix (ORCHESTRATOR_WAITING_TITLE_SUFFIX in
+// frontend/src/renderer/lib/orchestrator-waiting.ts). The strings are pinned here
+// and in a renderer test, so changing one side alone fails a test.
+func TestOrchestratorWaitingTextIsThePinnedEnglishTheDesktopLocalizes(t *testing.T) {
+	if OrchestratorWaitingTitleSuffix != ": orchestrator is waiting for you" {
+		t.Fatalf("title suffix = %q: update ORCHESTRATOR_WAITING_TITLE_SUFFIX in the renderer with it", OrchestratorWaitingTitleSuffix)
+	}
+	if OrchestratorWaitingFallbackBody != "The orchestrator is waiting for your answer or approval." {
+		t.Fatalf("fallback body = %q: update ORCHESTRATOR_WAITING_FALLBACK_BODY in the renderer with it", OrchestratorWaitingFallbackBody)
+	}
+	if got := OrchestratorWaitingTitle("Mercury", "mer"); got != "Mercury"+OrchestratorWaitingTitleSuffix {
+		t.Fatalf("title = %q", got)
 	}
 }
 

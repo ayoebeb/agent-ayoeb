@@ -1249,6 +1249,8 @@
 	"notify.restoreArchivedPrompt": "Esta sesión se archivó. ¿Quieres restaurarla?",
 	"notify.restoreUnavailable": "Esta sesión ya no se puede restaurar.",
 	"notify.title": "Notificaciones",
+	"notify.orchestratorWaiting.title": "{{project}}: el orquestador te está esperando",
+	"notify.orchestratorWaiting.body": "El orquestador espera tu respuesta o aprobación.",
 	"notify.unread": "No leídas",
 	"notify.unreadCount": "{{count}} notificaciones no leídas",
 	"notify.unseen": "No vistas",

@@ -7,9 +7,10 @@ project orchestrator can use it; a worker asks its orchestrator with
 The orchestrator is the human's main contact. A question that ends a turn but
 raises no signal sits unseen, and every worker behind it stalls. This command is
 that signal: the human gets a distinct notification titled "<project>:
-orchestrator wacht op u" with your one-line question (desktop toast with sound,
-phone push, the app badge, and a marker on the project and the orchestrator in
-the sidebar). Clicking it opens your chat.
+orchestrator is waiting for you" (in their own language on the desktop) with your
+one-line question (desktop toast with sound, phone push, the app badge, and a
+marker on the project and the orchestrator in the sidebar). Clicking it opens
+your chat.
 
 ## Syntax
 

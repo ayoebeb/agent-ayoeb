@@ -61,6 +61,7 @@ import { registerCliShadowIpc } from "./main/cli-shadow-ipc";
 import { createCliShadowShellPath } from "./main/cli-shadow-shell-path";
 import { cliShadowEnabled } from "./shared/cli-shadow";
 import { PRODUCT_NAME, productDisplayName } from "./shared/brand";
+import { ensureWindowsToastIdentity } from "./main/windows-toast-identity";
 import { registerDictationIpc } from "./main/dictation";
 import { launchCommand } from "./main/launch-command";
 import { readNativeAppIcon } from "./main/native-app-icon";
@@ -300,6 +301,10 @@ process.stderr.on("error", ignoreStdStreamError);
 // lock do not derive from it.
 const APP_DISPLAY_NAME = PRODUCT_NAME;
 
+// The Windows AppUserModelID: fixed on purpose (see shared/brand.ts), shared by the
+// packaged app and every unpackaged run.
+const WINDOWS_APP_USER_MODEL_ID = "dev.agent-orchestrator.desktop";
+
 // Must run before app ready so the About panel and default-menu role labels use it.
 // Unpackaged runs get a distinct name so the dev window, dock menu, and About
 // panel never impersonate the installed app (#3642).
@@ -316,7 +321,21 @@ if (!app.isPackaged && process.platform === "darwin") {
 // Notification.isSupported() still returns true but show() silently drops the
 // toast, so notifications never appear. No-op on macOS/Linux.
 if (process.platform === "win32") {
-	app.setAppUserModelId("dev.agent-orchestrator.desktop");
+	app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
+	// A dev or daily run has no installer shortcut to name its toasts, so Windows
+	// labels them "Electron". Register the product name and icon once (see
+	// windows-toast-identity.ts). Not awaited: a toast shown a moment before this
+	// finishes still works, it just carries the old label.
+	if (!app.isPackaged) {
+		void ensureWindowsToastIdentity({
+			aumid: WINDOWS_APP_USER_MODEL_ID,
+			displayName: PRODUCT_NAME,
+			iconPath: windowIconPath(),
+			packaged: app.isPackaged,
+		}).then((outcome) => {
+			if (outcome === "failed") console.warn("Could not register the Windows toast name; toasts may read \"Electron\".");
+		});
+	}
 }
 
 // Escape hatch for hosts whose GPU driver stack crashes Chromium on startup

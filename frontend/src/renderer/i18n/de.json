@@ -1239,6 +1239,8 @@
 	"notify.restoreArchivedPrompt": "Diese Sitzung wurde archiviert. Wiederherstellen?",
 	"notify.restoreUnavailable": "Diese Sitzung kann nicht mehr wiederhergestellt werden.",
 	"notify.title": "Benachrichtigungen",
+	"notify.orchestratorWaiting.title": "{{project}}: Orchestrator wartet auf dich",
+	"notify.orchestratorWaiting.body": "Der Orchestrator wartet auf deine Antwort oder Freigabe.",
 	"notify.unread": "Ungelesen",
 	"notify.unreadCount": "{{count}} ungelesene Benachrichtigungen",
 	"notify.unseen": "Ungesehen",

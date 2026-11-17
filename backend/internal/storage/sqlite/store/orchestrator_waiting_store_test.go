@@ -24,7 +24,7 @@ func seedOrchestrator(t *testing.T, s *sqlite.Store, project string) domain.Sess
 func waitingRecord(id string, sess domain.SessionRecord, key, question string, at time.Time) domain.NotificationRecord {
 	return domain.NotificationRecord{
 		ID: id, SessionID: sess.ID, ProjectID: sess.ProjectID, Type: domain.NotificationOrchestratorWaiting,
-		Title: "Mercury: orchestrator wacht op u", Body: question, Status: domain.NotificationUnread, CreatedAt: at, SourceKey: key,
+		Title: "Mercury: orchestrator is waiting for you", Body: question, Status: domain.NotificationUnread, CreatedAt: at, SourceKey: key,
 	}
 }
 

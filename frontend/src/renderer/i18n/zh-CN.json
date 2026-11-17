@@ -1228,6 +1228,8 @@
 	"notify.restoreArchivedPrompt": "此会话已归档。要恢复吗？",
 	"notify.restoreUnavailable": "此会话已无法恢复。",
 	"notify.title": "通知",
+	"notify.orchestratorWaiting.title": "{{project}}：编排器正在等你",
+	"notify.orchestratorWaiting.body": "编排器正在等待你的回复或批准。",
 	"notify.unreadCount": "{{count}} 条未读通知",
 	"notify.workspaceLoadFailed": "无法加载会话。恢复与打开可能暂不可用。",
 	"pr.botSuffix": "{{name}} 机器人",

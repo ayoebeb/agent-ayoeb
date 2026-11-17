@@ -191,7 +191,7 @@ ao report --done --note "Focused tests passed"
 
 ### `ao notify-user`
 
-Run by a project orchestrator, as the last step of a turn that ends by asking you to decide or approve something. You get a distinct notification titled "&lt;project&gt;: orchestrator wacht op u" with the one-line question (a toast with sound, a phone push, the app badge, and a marker in the sidebar) until you reply. It is announced once more after the delay you choose in Settings, and never again. A pending approval already raises it on its own.
+Run by a project orchestrator, as the last step of a turn that ends by asking you to decide or approve something. You get a distinct notification titled "&lt;project&gt;: orchestrator is waiting for you" (in your own language) with the one-line question (a toast with sound, a phone push, the app badge, and a marker in the sidebar) until you reply. It is announced once more after the delay you choose in Settings, and never again. A pending approval already raises it on its own.
 
 ```bash
 ao notify-user --waiting "Merge PR 42 now, or wait for the second review?"

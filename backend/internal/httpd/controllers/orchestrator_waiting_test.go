@@ -105,7 +105,7 @@ func TestOrchestratorWaitingListRoute(t *testing.T) {
 	since := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	svc := &fakeWaitingService{list: []orchestratorwait.Waiting{{
 		NotificationID: "ntf_1", SessionID: "mer-orchestrator-1", ProjectID: "mer",
-		Title: "Mercury: orchestrator wacht op u", Question: "Ship it?", Since: since, Reminded: true,
+		Title: "Mercury: orchestrator is waiting for you", Question: "Ship it?", Since: since, Reminded: true,
 	}}}
 	w := httptest.NewRecorder()
 	waitingRouter(svc).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/orchestrator-waiting", nil))
