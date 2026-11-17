@@ -534,8 +534,10 @@ func TestBuildSystemPrompt_WorkersNeverGetCommunicationStyle(t *testing.T) {
 // injected into every orchestrator, so growth should be a deliberate choice.
 func TestCommunicationStylePromptStaysShort(t *testing.T) {
 	style := orchestratorCommunicationStylePrompt()
-	if words := len(strings.Fields(style)); words > 520 {
-		t.Fatalf("communication style grew to %d words; keep it under 520", words)
+	// 520 until the usage-limit rule (check a worker's last turn error before
+	// calling it stalled) was added on purpose; 550 now.
+	if words := len(strings.Fields(style)); words > 550 {
+		t.Fatalf("communication style grew to %d words; keep it under 550", words)
 	}
 	if strings.Contains(strings.ToLower(style), "adhd") {
 		t.Fatalf("the style must not name the reader's condition:\n%s", style)
