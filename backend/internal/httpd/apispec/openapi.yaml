@@ -4872,6 +4872,82 @@ paths:
       summary: Replace a project's per-project config
       tags:
       - projects
+  /api/v1/projects/{id}/permission-rules:
+    get:
+      operationId: listProjectPermissionRules
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListProjectPermissionRulesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the tool permissions users chose "Always allow" for in this project
+      tags:
+      - projects
+  /api/v1/projects/{id}/permission-rules/{ruleId}:
+    delete:
+      operationId: revokeProjectPermissionRule
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Remembered permission rule identifier.
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          description: Remembered permission rule identifier.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Revoke a remembered permission rule for future sessions and live Claude
+        Code sessions of the project
+      tags:
+      - projects
   /api/v1/projects/{id}/permissions:
     delete:
       operationId: forgetProjectPermissions
@@ -17064,6 +17140,42 @@ components:
           type: string
         deleteArtifacts:
           type: boolean
+      type: object
+    ControllersListProjectPermissionRulesResponse:
+      properties:
+        rules:
+          items:
+            $ref: '#/components/schemas/ControllersProjectPermissionRuleResponse'
+          type: array
+      required:
+      - rules
+      type: object
+    ControllersProjectPermissionRuleResponse:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        kind:
+          enum:
+          - exact
+          - command
+          - tool
+          - server
+          type: string
+        label:
+          type: string
+        sourceSessionId:
+          type: string
+        tool:
+          type: string
+      required:
+      - id
+      - kind
+      - label
+      - tool
+      - createdAt
       type: object
     ControllersRemoteHostAccountTokenResponse:
       properties:
