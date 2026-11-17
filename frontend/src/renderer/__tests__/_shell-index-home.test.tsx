@@ -81,6 +81,8 @@ vi.mock("../lib/shell-context", () => ({
 	useShellMaybe: () => ({ daemonStatus: { state: "ready" } }),
 }));
 
+vi.mock("../components/HomeWaitingLine", () => ({ HomeWaitingLine: () => null }));
+
 vi.mock("../components/CreateProjectFlow", () => ({
 	CreateProjectFlow: (props: NonNullable<typeof routeMocks.createProjectFlowProps>) => {
 		routeMocks.createProjectFlowProps = props;
