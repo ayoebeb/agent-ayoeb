@@ -88,6 +88,22 @@ func (s *Service) HandleApproval(ctx context.Context, id domain.SessionID, n App
 	}
 }
 
+// AnswersApprovalsFor reports whether Autopilot answers this session's permission
+// requests, so the "needs your input" notification for it is not raised. Only a
+// Chat session covered by a running run qualifies: a terminal session keeps its
+// prompts inside the terminal, where the user must see them.
+func (s *Service) AnswersApprovalsFor(ctx context.Context, id domain.SessionID) bool {
+	if s == nil || s.approvals == nil {
+		return false
+	}
+	rec, ok, err := s.store.GetSession(ctx, id)
+	if err != nil || !ok || domain.NormalizeSessionMode(rec.Mode) != domain.SessionModeChat {
+		return false
+	}
+	_, covered := s.runCovering(ctx, rec)
+	return covered
+}
+
 // runCovering finds the running run whose policy applies to the session.
 func (s *Service) runCovering(ctx context.Context, rec domain.SessionRecord) (domain.AutopilotRun, bool) {
 	if own, ok, err := s.store.GetOpenAutopilotRunForSession(ctx, rec.ID); err == nil && ok {

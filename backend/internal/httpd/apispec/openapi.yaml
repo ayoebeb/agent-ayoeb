@@ -2082,6 +2082,109 @@ paths:
       summary: List durable automation run history
       tags:
       - automations
+  /api/v1/autopilot:
+    get:
+      operationId: listAutopilot
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAutopilotResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List every Autopilot task run that is still open (running, paused or
+        parked)
+      tags:
+      - autopilot
+  /api/v1/autopilot/items/{eventId}/resolve:
+    post:
+      operationId: resolveAutopilotItem
+      parameters:
+      - description: Parked item identifier, e.g. ape_1.
+        in: path
+        name: eventId
+        required: true
+        schema:
+          description: Parked item identifier, e.g. ape_1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveAutopilotItemResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Mark a parked Autopilot item handled
+      tags:
+      - autopilot
+  /api/v1/autopilot/stop:
+    post:
+      operationId: stopAllAutopilot
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopAllAutopilotResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Emergency stop: end every open Autopilot run and cut the sessions''
+        current turns'
+      tags:
+      - autopilot
   /api/v1/awake:
     get:
       operationId: getAwake
@@ -7227,6 +7330,447 @@ paths:
       summary: Enable or disable automatic review for a session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/autopilot:
+    get:
+      operationId: getAutopilot
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotViewResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read a session's Autopilot run, its log and the return report
+      tags:
+      - autopilot
+    post:
+      operationId: startAutopilot
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartAutopilotRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotViewResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Give a session one task to finish on its own, without waiting for the
+        user
+      tags:
+      - autopilot
+  /api/v1/sessions/{sessionId}/autopilot/criteria:
+    post:
+      operationId: setAutopilotCriteria
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutopilotCriteriaRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotRunResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Record the acceptance criteria the agent drafted for its Autopilot
+        task
+      tags:
+      - autopilot
+  /api/v1/sessions/{sessionId}/autopilot/decisions:
+    post:
+      operationId: recordAutopilotDecision
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutopilotDecideRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotDecideResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Record a choice the agent made instead of asking the user
+      tags:
+      - autopilot
+  /api/v1/sessions/{sessionId}/autopilot/done:
+    post:
+      operationId: declareAutopilotDone
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutopilotDoneRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotDoneResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Declare the Autopilot task done; AO checks the verification gates before
+        it finishes the run
+      tags:
+      - autopilot
+  /api/v1/sessions/{sessionId}/autopilot/parked:
+    post:
+      operationId: parkAutopilotItem
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutopilotParkRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotParkResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Park one item that needs a hard limit crossed; the user is told once
+        and the run carries on
+      tags:
+      - autopilot
+  /api/v1/sessions/{sessionId}/autopilot/resume:
+    post:
+      operationId: resumeAutopilot
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotViewResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Continue a parked Autopilot run
+      tags:
+      - autopilot
+  /api/v1/sessions/{sessionId}/autopilot/stop:
+    post:
+      operationId: stopAutopilot
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopAutopilotResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop a session's Autopilot run at once and cut its current turn
+      tags:
+      - autopilot
   /api/v1/sessions/{sessionId}/chat-view:
     post:
       operationId: setSessionChatView
@@ -13218,6 +13762,44 @@ paths:
       summary: Read the daemon-owned user preferences
       tags:
       - settings
+  /api/v1/settings/autopilot:
+    patch:
+      operationId: updateAutopilotSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAutopilotSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Choose how many iterations an Autopilot task run may take before it
+        parks itself
+      tags:
+      - settings
   /api/v1/settings/chat-hibernation:
     patch:
       operationId: updateChatHibernation
@@ -15650,6 +16232,368 @@ components:
       - id
       - status
       - scheduledFor
+      type: object
+    AutopilotCriteriaRequest:
+      properties:
+        criteria:
+          description: A short checklist that says exactly when the task is done and
+            how it will be proved.
+          type: string
+      required:
+      - criteria
+      type: object
+    AutopilotDecideRequest:
+      properties:
+        choice:
+          type: string
+        question:
+          type: string
+        why:
+          type: string
+      required:
+      - question
+      - choice
+      - why
+      type: object
+    AutopilotDecideResponse:
+      properties:
+        event:
+          $ref: '#/components/schemas/AutopilotEventResponse'
+      required:
+      - event
+      type: object
+    AutopilotDoneRequest:
+      properties:
+        ciCannotRun:
+          description: Why CI cannot start (for example a billing limit). Recorded
+            as a gap, never as a pass.
+          type: string
+        evidence:
+          description: The test and build commands the agent ran and what they showed.
+          type: string
+      required:
+      - evidence
+      type: object
+    AutopilotDoneResponse:
+      properties:
+        accepted:
+          description: True when every gate passed and the run is finished.
+          type: boolean
+        failures:
+          description: The gates that did not pass; the agent goes back to work.
+          items:
+            type: string
+          type: array
+        gaps:
+          description: Recorded but not blocking, such as CI that cannot start.
+          items:
+            type: string
+          type: array
+        run:
+          $ref: '#/components/schemas/AutopilotRunResponse'
+      required:
+      - accepted
+      - failures
+      - gaps
+      - run
+      type: object
+    AutopilotEventResponse:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        detail:
+          type: string
+        id:
+          type: string
+        iteration:
+          type: integer
+        kind:
+          enum:
+          - started
+          - iteration
+          - decision
+          - parked
+          - gate_failed
+          - done
+          - stopped
+          - run_parked
+          - paused
+          - resumed
+          - permission_denied
+          - wait_diverted
+          type: string
+        resolvedAt:
+          description: When the user marked a parked item handled.
+          format: date-time
+          type:
+          - "null"
+          - string
+        runId:
+          type: string
+        sessionId:
+          type: string
+        summary:
+          type: string
+      required:
+      - id
+      - runId
+      - sessionId
+      - kind
+      - iteration
+      - summary
+      - detail
+      - createdAt
+      type: object
+    AutopilotMergedPRResponse:
+      properties:
+        at:
+          format: date-time
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - url
+      - title
+      - at
+      type: object
+    AutopilotParkRequest:
+      properties:
+        item:
+          description: What could not be done.
+          type: string
+        limit:
+          description: The hard limit the item would cross.
+          enum:
+          - money
+          - ci
+          - main_push
+          - data_delete
+          - admin
+          - messaging
+          - credentials
+          - other_pcs
+          type: string
+        why:
+          type: string
+      required:
+      - limit
+      - item
+      - why
+      type: object
+    AutopilotParkResponse:
+      properties:
+        alreadyParked:
+          description: True when the same item was already parked and open; the user
+            was not told again.
+          type: boolean
+        event:
+          $ref: '#/components/schemas/AutopilotEventResponse'
+      required:
+      - event
+      - alreadyParked
+      type: object
+    AutopilotReportResponse:
+      properties:
+        decisions:
+          description: Choices the agent made instead of asking, oldest first.
+          items:
+            $ref: '#/components/schemas/AutopilotEventResponse'
+          type: array
+        endReason:
+          enum:
+          - user
+          - emergency_stop
+          - session_ended
+          - goal_done
+          - max_iterations
+          - stuck
+          - needs_input
+          type: string
+        endedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        gaps:
+          description: What the run could not close, in plain words.
+          items:
+            type: string
+          type: array
+        iterations:
+          type: integer
+        mergedPrs:
+          items:
+            $ref: '#/components/schemas/AutopilotMergedPRResponse'
+          type: array
+        parked:
+          description: Items set aside because they needed a hard limit crossed, oldest
+            first.
+          items:
+            $ref: '#/components/schemas/AutopilotEventResponse'
+          type: array
+        permissionsAllowed:
+          type: integer
+        permissionsDenied:
+          type: integer
+        runId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        state:
+          enum:
+          - running
+          - paused_usage_limit
+          - parked
+          - done
+          - stopped
+          type: string
+        task:
+          type: string
+      required:
+      - runId
+      - task
+      - state
+      - iterations
+      - startedAt
+      - mergedPrs
+      - decisions
+      - parked
+      - gaps
+      - permissionsAllowed
+      - permissionsDenied
+      type: object
+    AutopilotRunResponse:
+      properties:
+        ciGap:
+          description: Why CI could not run, as the agent declared it. A recorded
+            gap, never a pass.
+          type: string
+        criteria:
+          description: The "done when ..." list the agent drafted from the task; empty
+            until it records it.
+          type: string
+        endReason:
+          description: Why the run left running; absent while it runs.
+          enum:
+          - user
+          - emergency_stop
+          - session_ended
+          - goal_done
+          - max_iterations
+          - stuck
+          - needs_input
+          type: string
+        endedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        evidence:
+          description: The agent's account of the tests it ran, from its last done
+            claim.
+          type: string
+        id:
+          type: string
+        iteration:
+          description: Completed turns the loop has judged.
+          type: integer
+        lastGap:
+          description: What was still failing at the last judgement.
+          type: string
+        lastNudgeAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        maxIterations:
+          type: integer
+        openParkedItemCount:
+          description: Parked items the user has not handled yet.
+          type: integer
+        permissionsAllowed:
+          description: Permission requests the policy allowed.
+          type: integer
+        permissionsDenied:
+          description: Permission requests the policy denied.
+          type: integer
+        projectId:
+          type: string
+        sessionId:
+          type: string
+        stagnantIterations:
+          description: Consecutive iterations that changed neither the workspace nor
+            the recorded test result. Three park the run.
+          type: integer
+        startedAt:
+          format: date-time
+          type: string
+        state:
+          description: 'running: AO keeps the agent on the task. paused_usage_limit:
+            waiting for the usage limit to reset. parked: the run stopped itself and
+            waits for the user. done: the agent declared the task done and every gate
+            passed. stopped: the user, or the session ending, ended it.'
+          enum:
+          - running
+          - paused_usage_limit
+          - parked
+          - done
+          - stopped
+          type: string
+        task:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - sessionId
+      - projectId
+      - task
+      - criteria
+      - state
+      - iteration
+      - maxIterations
+      - stagnantIterations
+      - lastGap
+      - evidence
+      - ciGap
+      - permissionsAllowed
+      - permissionsDenied
+      - startedAt
+      - updatedAt
+      - openParkedItemCount
+      type: object
+    AutopilotViewResponse:
+      properties:
+        events:
+          description: The run log, newest first.
+          items:
+            $ref: '#/components/schemas/AutopilotEventResponse'
+          type: array
+        parked:
+          description: Parked items the user has not handled.
+          items:
+            $ref: '#/components/schemas/AutopilotEventResponse'
+          type: array
+        report:
+          $ref: '#/components/schemas/AutopilotReportResponse'
+        run:
+          $ref: '#/components/schemas/AutopilotRunResponse'
+          description: Absent when the session never had a run.
+        warnings:
+          description: Gaps Autopilot cannot close for this session, such as a terminal
+            prompt it cannot answer.
+          items:
+            type: string
+          type: array
+      required:
+      - events
+      - parked
+      - warnings
       type: object
     AwakeApplication:
       properties:
@@ -18714,11 +19658,13 @@ components:
         outcome:
           description: 'notified: a new wait was recorded and the user was told. unchanged:
             the same question was already open. disabled: the user switched this notification
-            off in Settings.'
+            off in Settings. autopilot: Autopilot is running for this orchestrator,
+            so the user was not told and the orchestrator decides the question itself.'
           enum:
           - notified
           - unchanged
           - disabled
+          - autopilot
           type: string
       required:
       - outcome
@@ -19712,6 +20658,15 @@ components:
       required:
       - automations
       type: object
+    ListAutopilotResponse:
+      properties:
+        runs:
+          items:
+            $ref: '#/components/schemas/AutopilotRunResponse'
+          type: array
+      required:
+      - runs
+      type: object
     ListCompactSessionUsageResponse:
       properties:
         sessions:
@@ -20261,6 +21216,7 @@ components:
           - review_completed
           - review_changes_requested
           - orchestrator_waiting
+          - autopilot_parked
           type: string
       required:
       - id
@@ -21022,6 +21978,13 @@ components:
       - projectId
       - createdAt
       - repeatCount
+      type: object
+    ResolveAutopilotItemResponse:
+      properties:
+        event:
+          $ref: '#/components/schemas/AutopilotEventResponse'
+      required:
+      - event
       type: object
     ResolveCommentsResponse:
       properties:
@@ -22519,6 +23482,13 @@ components:
       type: object
     SettingsResponse:
       properties:
+        autopilotMaxIterations:
+          description: Most iterations an Autopilot task run may take before it parks
+            itself for the user (Settings, General). A run can override it when it
+            starts.
+          maximum: 500
+          minimum: 1
+          type: integer
         chatHarnesses:
           items:
             type: string
@@ -22578,6 +23548,7 @@ components:
       - sessionRetentionDays
       - orchestratorWaitingEnabled
       - orchestratorWaitingRenotifyMinutes
+      - autopilotMaxIterations
       - cloudEnabled
       - cloudControlPlaneUrl
       - trackerIntakeEnabled
@@ -23275,6 +24246,23 @@ components:
       required:
       - method
       type: object
+    StartAutopilotRequest:
+      properties:
+        maxIterations:
+          description: Most iterations before the run parks itself for the user. Omit
+            to use the Settings default.
+          maximum: 500
+          minimum: 1
+          type:
+          - "null"
+          - integer
+        task:
+          description: The one task to finish without the user. AO sends it again
+            at the end of every turn until it is verifiably done.
+          type: string
+      required:
+      - task
+      type: object
     StartAwakeRequest:
       properties:
         boundId:
@@ -23425,6 +24413,20 @@ components:
       required:
       - outcome
       - duplicate
+      type: object
+    StopAllAutopilotResponse:
+      properties:
+        stopped:
+          type: integer
+      required:
+      - stopped
+      type: object
+    StopAutopilotResponse:
+      properties:
+        stopped:
+          type: boolean
+      required:
+      - stopped
       type: object
     SubmitAgentUILoginCodeRequest:
       properties:
@@ -23891,6 +24893,19 @@ components:
           type:
           - "null"
           - string
+      type: object
+    UpdateAutopilotSettingsRequest:
+      properties:
+        maxIterations:
+          description: Most iterations a run may take before it parks itself for the
+            user.
+          maximum: 500
+          minimum: 1
+          type:
+          - "null"
+          - integer
+      required:
+      - maxIterations
       type: object
     UpdateChatHibernationRequest:
       properties:
@@ -25117,6 +26132,9 @@ tags:
   name: reviews
 - description: Durable dashboard notifications
   name: notifications
+- description: 'Autopilot: run one task to completion without the user, with a stop
+    control and a log'
+  name: autopilot
 - description: Durable worker reports
   name: reports
 - description: Token usage telemetry for AO sessions

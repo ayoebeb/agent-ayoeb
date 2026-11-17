@@ -2490,7 +2490,7 @@ type NotificationResponse struct {
 	SessionID string    `json:"sessionId"`
 	ProjectID string    `json:"projectId"`
 	PRURL     string    `json:"prUrl"`
-	Type      string    `json:"type" enum:"needs_input,ready_to_merge,pr_merged,pr_closed_unmerged,review_completed,review_changes_requested,orchestrator_waiting"`
+	Type      string    `json:"type" enum:"needs_input,ready_to_merge,pr_merged,pr_closed_unmerged,review_completed,review_changes_requested,orchestrator_waiting,autopilot_parked"`
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
 	Status    string    `json:"status" enum:"unread,read" description:"Seen state. unread means the user has not opened the notification panel since it arrived."`
@@ -3915,6 +3915,8 @@ type SettingsResponse struct {
 	OrchestratorWaitingEnabled bool `json:"orchestratorWaitingEnabled" description:"When on, a project orchestrator waiting for the user raises a distinct notification (toast, sound, phone push, badge and a sidebar marker) until the user responds."`
 	// OrchestratorWaitingRenotifyMinutes is the delay before the single reminder.
 	OrchestratorWaitingRenotifyMinutes int `json:"orchestratorWaitingRenotifyMinutes" description:"Minutes a question stays unanswered before it is announced a second time; 0 turns the reminder off." minimum:"0" maximum:"1440"`
+	// AutopilotMaxIterations is the default cap on an Autopilot run.
+	AutopilotMaxIterations int `json:"autopilotMaxIterations" description:"Most iterations an Autopilot task run may take before it parks itself for the user (Settings, General). A run can override it when it starts." minimum:"1" maximum:"500"`
 	// CloudEnabled reports whether the cloud offering is available: on for
 	// everyone unless AO_CLOUD_OFFERING switches it off, given a configured
 	// control plane.
@@ -3971,7 +3973,7 @@ type DeclareOrchestratorWaitingRequest struct {
 
 // DeclareOrchestratorWaitingResponse reports what declaring a question did.
 type DeclareOrchestratorWaitingResponse struct {
-	Outcome string `json:"outcome" enum:"notified,unchanged,disabled" description:"notified: a new wait was recorded and the user was told. unchanged: the same question was already open. disabled: the user switched this notification off in Settings."`
+	Outcome string `json:"outcome" enum:"notified,unchanged,disabled,autopilot" description:"notified: a new wait was recorded and the user was told. unchanged: the same question was already open. disabled: the user switched this notification off in Settings. autopilot: Autopilot is running for this orchestrator, so the user was not told and the orchestrator decides the question itself."`
 }
 
 // ClearOrchestratorWaitingResponse reports whether a wait was open to clear.

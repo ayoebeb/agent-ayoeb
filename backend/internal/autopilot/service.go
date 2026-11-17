@@ -54,6 +54,10 @@ const (
 	stallAfter = 5 * time.Minute
 	// maintenanceTick is how often the watchdog looks at every open run.
 	maintenanceTick = 20 * time.Second
+	// needsInputGrace is how long a covered session may sit on a prompt before the
+	// run is parked. The policy answers an approval in milliseconds, so a prompt
+	// still open after this is one Autopilot cannot answer.
+	needsInputGrace = 90 * time.Second
 	// eventListLimit caps the log lines one read returns.
 	eventListLimit = 200
 	// sendTimeout bounds one message to a session.
@@ -79,6 +83,7 @@ type Store interface {
 	ResolveAutopilotEvent(ctx context.Context, id string, at time.Time) (domain.AutopilotEvent, bool, error)
 	ListMergedPRNotificationsForProjectSince(ctx context.Context, project domain.ProjectID, since time.Time) ([]domain.NotificationRecord, error)
 	AutopilotMaxIterations(ctx context.Context) (int, error)
+	SetAutopilotMaxIterations(ctx context.Context, n int, now time.Time) error
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
 	ListCurrentHeadReviewRunsForSession(ctx context.Context, id domain.SessionID) ([]domain.CurrentHeadReviewRun, error)
 }
@@ -127,19 +132,19 @@ type TestsVerifier func(ctx context.Context, rec domain.SessionRecord, evidence 
 
 // Deps configures a Service.
 type Deps struct {
-	Store         Store
-	Messenger     Messenger
-	Interrupter   Interrupter
-	Notifier      Notifier
-	Progress      Progress
-	Approvals     ApprovalResolver
-	UsageLimited  UsageLimitCheck
-	VerifyTests   TestsVerifier
-	Clock         func() time.Time
-	NewID         func() string
-	Logger        *slog.Logger
-	IdleGrace     time.Duration
-	MinNudgeGap   time.Duration
+	Store        Store
+	Messenger    Messenger
+	Interrupter  Interrupter
+	Notifier     Notifier
+	Progress     Progress
+	Approvals    ApprovalResolver
+	UsageLimited UsageLimitCheck
+	VerifyTests  TestsVerifier
+	Clock        func() time.Time
+	NewID        func() string
+	Logger       *slog.Logger
+	IdleGrace    time.Duration
+	MinNudgeGap  time.Duration
 	// Background runs work off the caller's goroutine; it defaults to a go
 	// statement that recovers from a panic. Tests run it inline.
 	Background func(func())
@@ -340,6 +345,28 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, task string, m
 	}
 	s.mu.Unlock()
 	return s.View(ctx, id)
+}
+
+// MaxIterations is the default cap on a run, from Settings.
+func (s *Service) MaxIterations(ctx context.Context) (int, error) {
+	n, err := s.store.AutopilotMaxIterations(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("autopilot: read the iteration cap: %w", err)
+	}
+	return n, nil
+}
+
+// SetMaxIterations changes the default cap on a run. A run already going keeps
+// the cap it started with.
+func (s *Service) SetMaxIterations(ctx context.Context, n int) error {
+	if n < 1 || n > domain.AutopilotMaxIterationsCeiling {
+		return apierr.Invalid("AUTOPILOT_MAX_ITERATIONS_INVALID",
+			fmt.Sprintf("maxIterations must be between 1 and %d", domain.AutopilotMaxIterationsCeiling), nil)
+	}
+	if err := s.store.SetAutopilotMaxIterations(ctx, n, s.clock()); err != nil {
+		return fmt.Errorf("autopilot: save the iteration cap: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) iterationCap(ctx context.Context, requested int) (int, error) {

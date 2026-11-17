@@ -187,6 +187,17 @@ var legacyActorlessUserCLICommands = map[string]struct{}{
 	"ao session approvals ls":      {},
 	"ao session approvals resolve": {},
 
+	"ao autopilot":          {},
+	"ao autopilot criteria": {},
+	"ao autopilot decide":   {},
+	"ao autopilot done":     {},
+	"ao autopilot log":      {},
+	"ao autopilot park":     {},
+	"ao autopilot resume":   {},
+	"ao autopilot start":    {},
+	"ao autopilot status":   {},
+	"ao autopilot stop":     {},
+
 	// Legacy commands observed in PostHog's current billing-period data.
 	"ao handoff":                   {},
 	"ao project orchestration get": {},

@@ -1030,7 +1030,7 @@ func TestTestsVerifierProblemsFailTheClaim(t *testing.T) {
 func approval(id, tool, kind, input string) ApprovalNotice {
 	return ApprovalNotice{
 		RequestID: id, Summary: tool,
-		Detail:    []byte(`{"providerToolName":"` + tool + `","toolKind":"` + kind + `","input":` + input + `}`),
+		Detail: []byte(`{"providerToolName":"` + tool + `","toolKind":"` + kind + `","input":` + input + `}`),
 		Decisions: []ports.ChatDecisionOption{
 			{ID: "allow", Kind: ports.ChatDecisionAllowOnce},
 			{ID: "allow_always", Kind: ports.ChatDecisionAllowAlways},
@@ -1302,5 +1302,82 @@ func TestCleanAutopilotTextDropsControlCharactersAndCuts(t *testing.T) {
 	}
 	if long := domain.CleanAutopilotText(strings.Repeat("é", 50), 10); len([]rune(long)) != 10 || !strings.HasSuffix(long, "…") {
 		t.Fatalf("cut = %q", long)
+	}
+}
+
+// ---- suppressing the notification for approvals Autopilot answers ----
+
+func TestAnswersApprovalsForCoversChatSessionsOfARunningRunOnly(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	if e.svc.AnswersApprovalsFor(e.ctx, orch.ID) {
+		t.Fatal("with no run nothing is answered, so the user must be notified")
+	}
+	e.start(orch.ID, "task")
+	worker := e.session(domain.KindWorker, e.now.Add(time.Minute), domain.SessionModeChat)
+	termWorker := e.session(domain.KindWorker, e.now.Add(time.Minute), domain.SessionModeTUI)
+	oldWorker := e.session(domain.KindWorker, e.base.Add(-time.Hour), domain.SessionModeChat)
+
+	for name, c := range map[string]struct {
+		id   domain.SessionID
+		want bool
+	}{
+		"the run's own Chat session":                        {orch.ID, true},
+		"a Chat worker started after the run":               {worker.ID, true},
+		"a terminal worker (its prompt cannot be answered)": {termWorker.ID, false},
+		"a worker from before the run":                      {oldWorker.ID, false},
+	} {
+		if got := e.svc.AnswersApprovalsFor(e.ctx, c.id); got != c.want {
+			t.Errorf("%s: AnswersApprovalsFor = %v, want %v", name, got, c.want)
+		}
+	}
+	if _, err := e.svc.Stop(e.ctx, orch.ID); err != nil {
+		t.Fatal(err)
+	}
+	if e.svc.AnswersApprovalsFor(e.ctx, orch.ID) || e.svc.AnswersApprovalsFor(e.ctx, worker.ID) {
+		t.Fatal("a stopped run answers nothing")
+	}
+}
+
+// Autopilot suppresses the ordinary "needs your input" notification for what it
+// answers, so a prompt it cannot answer must not stall the run in silence: the
+// run parks with its one notification.
+func TestRunParksWhenASessionSitsOnAPromptAutopilotCannotAnswer(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	e.start(orch.ID, "task")
+	e.activity(orch.ID, domain.ActivityWaitingInput, e.now)
+
+	e.now = e.now.Add(needsInputGrace - time.Second)
+	e.svc.maintain(e.ctx)
+	if got := e.run(orch.ID).State; got != domain.AutopilotRunning {
+		t.Fatalf("state = %s: the policy has had no time to answer yet", got)
+	}
+	e.now = e.now.Add(2 * time.Second)
+	e.svc.maintain(e.ctx)
+	run := e.run(orch.ID)
+	if run.State != domain.AutopilotParked || run.EndReason != domain.AutopilotEndNeedsInput {
+		t.Fatalf("run = %s/%s, want parked/needs_input", run.State, run.EndReason)
+	}
+	if e.notes.count() != 1 || !strings.Contains(e.notes.intents[0].Detail, "waiting on a prompt it cannot answer") {
+		t.Fatalf("notifications = %+v, want the one that tells the user", e.notes.intents)
+	}
+	e.now = e.now.Add(time.Minute)
+	e.svc.maintain(e.ctx)
+	if e.notes.count() != 1 {
+		t.Fatalf("a parked run notified again: %d", e.notes.count())
+	}
+}
+
+func TestRunParksWhenAWorkerItStartedSitsOnAPrompt(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	e.start(orch.ID, "task")
+	worker := e.session(domain.KindWorker, e.now.Add(time.Second), domain.SessionModeTUI)
+	e.activity(worker.ID, domain.ActivityBlocked, e.now)
+	e.now = e.now.Add(needsInputGrace + time.Minute)
+	e.svc.maintain(e.ctx)
+	if run := e.run(orch.ID); run.State != domain.AutopilotParked || run.EndReason != domain.AutopilotEndNeedsInput {
+		t.Fatalf("run = %s/%s, want parked/needs_input", run.State, run.EndReason)
 	}
 }

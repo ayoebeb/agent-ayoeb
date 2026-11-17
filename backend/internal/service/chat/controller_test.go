@@ -3166,6 +3166,10 @@ func (h *harness) now() time.Time {
 	return h.clock
 }
 
+// harnessApprovalObserver, when a test sets it, is passed to the harness's chat
+// service as its approval observer. Tests that use it must not run in parallel.
+var harnessApprovalObserver chatsvc.ApprovalObserver
+
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return newHarnessWithConversation(t, nil)
@@ -3265,6 +3269,7 @@ func newHarnessWithConversationAndStoreForHarness(
 			h.reconciled = append(h.reconciled, id)
 			return h.reconcileErr
 		},
+		ApprovalObserver: harnessApprovalObserver,
 	})
 
 	ctrl, err := svc.Start(context.Background(), chatsvc.StartConfig{

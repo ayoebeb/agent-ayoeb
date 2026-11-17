@@ -64,6 +64,12 @@ func (s *Service) maintain(ctx context.Context) {
 				s.resumeFromLimit(ctx, run)
 			}
 		case domain.AutopilotRunning:
+			if who, stuck := s.waitingOnPrompt(ctx, run, rec, now); stuck {
+				s.parkRun(ctx, run, domain.AutopilotEndNeedsInput,
+					fmt.Sprintf("Autopilot parked the run: %s is waiting on a prompt it cannot answer", sessionLabel(who)),
+					"A terminal prompt, a form, or a request the permission policy has no answer for. Answer it, then continue the run.")
+				continue
+			}
 			if rec.Activity.State != domain.ActivityIdle || now.Sub(rec.Activity.LastActivityAt) < s.idleGrace {
 				continue
 			}
@@ -77,6 +83,19 @@ func (s *Service) maintain(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// waitingOnPrompt finds a session of the run (its own, or a worker it started)
+// that has sat on a prompt longer than the policy needs to answer one. Without
+// this a form or a terminal prompt would stall the run with no notification,
+// because Autopilot suppresses the ordinary "needs your input" one.
+func (s *Service) waitingOnPrompt(ctx context.Context, run domain.AutopilotRun, rec domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
+	for _, r := range append([]domain.SessionRecord{rec}, s.workersInScope(ctx, run, rec)...) {
+		if r.Activity.State.NeedsInput() && now.Sub(r.Activity.LastActivityAt) > needsInputGrace {
+			return r, true
+		}
+	}
+	return domain.SessionRecord{}, false
 }
 
 func (s *Service) limited(ctx context.Context, id domain.SessionID) (bool, error) {

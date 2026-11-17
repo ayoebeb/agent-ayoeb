@@ -37,6 +37,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/systemexec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/telemetry/policyauthority"
 	"github.com/aoagents/agent-orchestrator/backend/internal/agentlaunch"
+	"github.com/aoagents/agent-orchestrator/backend/internal/autopilot"
 	"github.com/aoagents/agent-orchestrator/backend/internal/attachmentstore"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autoreview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/browserruntime"
@@ -331,8 +332,17 @@ func Run(buildVersion string) error {
 	// the notification writer needs two of its answers before that, so it reads
 	// them through this late-bound reference.
 	var settingsRef atomic.Pointer[settingssvc.Service]
+	// Autopilot is built after the chat and session services it drives. Until then
+	// nothing is suppressed, so no notification is ever lost to a half-started daemon.
+	var autopilotRef atomic.Pointer[autopilot.Service]
 	notificationWriter := notify.New(notify.Deps{
 		Store: store, Publisher: notificationHub, Barrier: notificationBarrier,
+		// Autopilot answers the permission requests of the Chat sessions it covers
+		// by policy, so a "needs your input" notification for them would only flash.
+		Suppress: func(ctx context.Context, intent ports.NotificationIntent) bool {
+			svc := autopilotRef.Load()
+			return svc != nil && svc.AnswersApprovalsFor(ctx, intent.SessionID)
+		},
 		ProjectName: func(ctx context.Context, id domain.ProjectID) string {
 			project, ok, err := store.GetProject(ctx, string(id))
 			if err != nil || !ok {
@@ -797,6 +807,32 @@ func Run(buildVersion string) error {
 	})
 	chatSvc.SetReportCoordinator(reportCoordinator)
 	chatSvc.SetHumanReplyObserver(orchestratorWaiting)
+
+	// Autopilot keeps a session on one task until it is verifiably done, answers
+	// the permission requests of the sessions it covers by policy, and never
+	// waits on the user. It hears every turn that ends and every approval that
+	// is raised, and takes an orchestrator's declared wait instead of notifying.
+	autopilotDelivery := reportSemanticDelivery{chat: chatSvc, sessions: reportSessions, store: store}
+	autopilotSvc := autopilot.New(autopilot.Deps{
+		Store:       store,
+		Messenger:   autopilotMessenger{sessions: sessionSvc},
+		Interrupter: autopilotDelivery,
+		Notifier:    notificationWriter,
+		Progress:    autopilot.GitProgress{},
+		Approvals:   chatSvc,
+		Logger:      log,
+		// UsageLimited is the integration point for the usage-limit state of
+		// PR #23: wire it to the session's usage_limit status there. Nil reads as
+		// "never limited", so the loop keeps going until then.
+	})
+	autopilotRef.Store(autopilotSvc)
+	orchestratorWaiting.SetAutopilot(autopilotSvc)
+	chatSvc.SetApprovalObserver(autopilotApprovals{svc: autopilotSvc})
+	lcStack.LCM.AddTurnEndObserver(autopilotSvc)
+	go func() {
+		defer sentryobs.RecoverBackground()
+		autopilotSvc.RunMaintenance(ctx)
+	}()
 	reportDeliveryDone := reportCoordinator.Start(ctx)
 	defer func() {
 		stop()
@@ -1207,6 +1243,7 @@ func Run(buildVersion string) error {
 		Reviews:             reviewSvc,
 		Notifications:       notifier,
 		OrchestratorWaiting: orchestratorWaiting,
+		Autopilot:           autopilotSvc,
 		Reports:             reportSvc,
 		NotificationStream:  notificationHub,
 		Push:                pushRegistry,

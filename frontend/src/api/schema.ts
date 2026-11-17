@@ -809,6 +809,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/autopilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every Autopilot task run that is still open (running, paused or parked) */
+        get: operations["listAutopilot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autopilot/items/{eventId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a parked Autopilot item handled */
+        post: operations["resolveAutopilotItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autopilot/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Emergency stop: end every open Autopilot run and cut the sessions' current turns */
+        post: operations["stopAllAutopilot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/awake": {
         parameters: {
             query?: never;
@@ -2667,6 +2718,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/autopilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a session's Autopilot run, its log and the return report */
+        get: operations["getAutopilot"];
+        put?: never;
+        /** Give a session one task to finish on its own, without waiting for the user */
+        post: operations["startAutopilot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/autopilot/criteria": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record the acceptance criteria the agent drafted for its Autopilot task */
+        post: operations["setAutopilotCriteria"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/autopilot/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a choice the agent made instead of asking the user */
+        post: operations["recordAutopilotDecision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/autopilot/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Declare the Autopilot task done; AO checks the verification gates before it finishes the run */
+        post: operations["declareAutopilotDone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/autopilot/parked": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Park one item that needs a hard limit crossed; the user is told once and the run carries on */
+        post: operations["parkAutopilotItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/autopilot/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Continue a parked Autopilot run */
+        post: operations["resumeAutopilot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/autopilot/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop a session's Autopilot run at once and cut its current turn */
+        post: operations["stopAutopilot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/chat-view": {
         parameters: {
             query?: never;
@@ -4333,6 +4504,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/autopilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Choose how many iterations an Autopilot task run may take before it parks itself */
+        patch: operations["updateAutopilotSettings"];
+        trace?: never;
+    };
     "/api/v1/settings/chat-hibernation": {
         parameters: {
             query?: never;
@@ -5302,6 +5490,147 @@ export interface components {
             startedAt?: null | string;
             /** @enum {string} */
             status: "pending" | "spawning" | "running" | "completed" | "failed";
+        };
+        AutopilotCriteriaRequest: {
+            /** @description A short checklist that says exactly when the task is done and how it will be proved. */
+            criteria: string;
+        };
+        AutopilotDecideRequest: {
+            choice: string;
+            question: string;
+            why: string;
+        };
+        AutopilotDecideResponse: {
+            event: components["schemas"]["AutopilotEventResponse"];
+        };
+        AutopilotDoneRequest: {
+            /** @description Why CI cannot start (for example a billing limit). Recorded as a gap, never as a pass. */
+            ciCannotRun?: string;
+            /** @description The test and build commands the agent ran and what they showed. */
+            evidence: string;
+        };
+        AutopilotDoneResponse: {
+            /** @description True when every gate passed and the run is finished. */
+            accepted: boolean;
+            /** @description The gates that did not pass; the agent goes back to work. */
+            failures: string[];
+            /** @description Recorded but not blocking, such as CI that cannot start. */
+            gaps: string[];
+            run: components["schemas"]["AutopilotRunResponse"];
+        };
+        AutopilotEventResponse: {
+            /** Format: date-time */
+            createdAt: string;
+            detail: string;
+            id: string;
+            iteration: number;
+            /** @enum {string} */
+            kind: "started" | "iteration" | "decision" | "parked" | "gate_failed" | "done" | "stopped" | "run_parked" | "paused" | "resumed" | "permission_denied" | "wait_diverted";
+            /**
+             * Format: date-time
+             * @description When the user marked a parked item handled.
+             */
+            resolvedAt?: null | string;
+            runId: string;
+            sessionId: string;
+            summary: string;
+        };
+        AutopilotMergedPRResponse: {
+            /** Format: date-time */
+            at: string;
+            title: string;
+            url: string;
+        };
+        AutopilotParkRequest: {
+            /** @description What could not be done. */
+            item: string;
+            /**
+             * @description The hard limit the item would cross.
+             * @enum {string}
+             */
+            limit: "money" | "ci" | "main_push" | "data_delete" | "admin" | "messaging" | "credentials" | "other_pcs";
+            why: string;
+        };
+        AutopilotParkResponse: {
+            /** @description True when the same item was already parked and open; the user was not told again. */
+            alreadyParked: boolean;
+            event: components["schemas"]["AutopilotEventResponse"];
+        };
+        AutopilotReportResponse: {
+            /** @description Choices the agent made instead of asking, oldest first. */
+            decisions: components["schemas"]["AutopilotEventResponse"][];
+            /** @enum {string} */
+            endReason?: "user" | "emergency_stop" | "session_ended" | "goal_done" | "max_iterations" | "stuck" | "needs_input";
+            /** Format: date-time */
+            endedAt?: null | string;
+            /** @description What the run could not close, in plain words. */
+            gaps: string[];
+            iterations: number;
+            mergedPrs: components["schemas"]["AutopilotMergedPRResponse"][];
+            /** @description Items set aside because they needed a hard limit crossed, oldest first. */
+            parked: components["schemas"]["AutopilotEventResponse"][];
+            permissionsAllowed: number;
+            permissionsDenied: number;
+            runId: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** @enum {string} */
+            state: "running" | "paused_usage_limit" | "parked" | "done" | "stopped";
+            task: string;
+        };
+        AutopilotRunResponse: {
+            /** @description Why CI could not run, as the agent declared it. A recorded gap, never a pass. */
+            ciGap: string;
+            /** @description The "done when ..." list the agent drafted from the task; empty until it records it. */
+            criteria: string;
+            /**
+             * @description Why the run left running; absent while it runs.
+             * @enum {string}
+             */
+            endReason?: "user" | "emergency_stop" | "session_ended" | "goal_done" | "max_iterations" | "stuck" | "needs_input";
+            /** Format: date-time */
+            endedAt?: null | string;
+            /** @description The agent's account of the tests it ran, from its last done claim. */
+            evidence: string;
+            id: string;
+            /** @description Completed turns the loop has judged. */
+            iteration: number;
+            /** @description What was still failing at the last judgement. */
+            lastGap: string;
+            /** Format: date-time */
+            lastNudgeAt?: null | string;
+            maxIterations: number;
+            /** @description Parked items the user has not handled yet. */
+            openParkedItemCount: number;
+            /** @description Permission requests the policy allowed. */
+            permissionsAllowed: number;
+            /** @description Permission requests the policy denied. */
+            permissionsDenied: number;
+            projectId: string;
+            sessionId: string;
+            /** @description Consecutive iterations that changed neither the workspace nor the recorded test result. Three park the run. */
+            stagnantIterations: number;
+            /** Format: date-time */
+            startedAt: string;
+            /**
+             * @description running: AO keeps the agent on the task. paused_usage_limit: waiting for the usage limit to reset. parked: the run stopped itself and waits for the user. done: the agent declared the task done and every gate passed. stopped: the user, or the session ending, ended it.
+             * @enum {string}
+             */
+            state: "running" | "paused_usage_limit" | "parked" | "done" | "stopped";
+            task: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        AutopilotViewResponse: {
+            /** @description The run log, newest first. */
+            events: components["schemas"]["AutopilotEventResponse"][];
+            /** @description Parked items the user has not handled. */
+            parked: components["schemas"]["AutopilotEventResponse"][];
+            report?: components["schemas"]["AutopilotReportResponse"];
+            /** @description Absent when the session never had a run. */
+            run?: components["schemas"]["AutopilotRunResponse"];
+            /** @description Gaps Autopilot cannot close for this session, such as a terminal prompt it cannot answer. */
+            warnings: string[];
         };
         AwakeApplication: {
             id: string;
@@ -6444,10 +6773,10 @@ export interface components {
         };
         DeclareOrchestratorWaitingResponse: {
             /**
-             * @description notified: a new wait was recorded and the user was told. unchanged: the same question was already open. disabled: the user switched this notification off in Settings.
+             * @description notified: a new wait was recorded and the user was told. unchanged: the same question was already open. disabled: the user switched this notification off in Settings. autopilot: Autopilot is running for this orchestrator, so the user was not told and the orchestrator decides the question itself.
              * @enum {string}
              */
-            outcome: "notified" | "unchanged" | "disabled";
+            outcome: "notified" | "unchanged" | "disabled" | "autopilot";
         };
         DegradedProject: {
             id: string;
@@ -6811,6 +7140,9 @@ export interface components {
             automations: components["schemas"]["AutomationResponse"][];
             nextCursor?: string;
         };
+        ListAutopilotResponse: {
+            runs: components["schemas"]["AutopilotRunResponse"][];
+        };
         ListCompactSessionUsageResponse: {
             sessions: components["schemas"]["CompactSessionUsageResponse"][];
         };
@@ -7018,7 +7350,7 @@ export interface components {
             target: components["schemas"]["NotificationTarget"];
             title: string;
             /** @enum {string} */
-            type: "needs_input" | "ready_to_merge" | "pr_merged" | "pr_closed_unmerged" | "review_completed" | "review_changes_requested" | "orchestrator_waiting";
+            type: "needs_input" | "ready_to_merge" | "pr_merged" | "pr_closed_unmerged" | "review_completed" | "review_changes_requested" | "orchestrator_waiting" | "autopilot_parked";
         };
         NotificationTarget: {
             /** @enum {string} */
@@ -7329,6 +7661,9 @@ export interface components {
             repeatCount: number;
             sessionId: string;
             state?: string;
+        };
+        ResolveAutopilotItemResponse: {
+            event: components["schemas"]["AutopilotEventResponse"];
         };
         ResolveCommentsResponse: {
             ok: boolean;
@@ -7926,6 +8261,8 @@ export interface components {
             enabled: null | boolean;
         };
         SettingsResponse: {
+            /** @description Most iterations an Autopilot task run may take before it parks itself for the user (Settings, General). A run can override it when it starts. */
+            autopilotMaxIterations: number;
             chatHarnesses: string[];
             chatHibernationEnabled: boolean;
             client: string;
@@ -8216,6 +8553,12 @@ export interface components {
             method: string;
             secret?: string;
         };
+        StartAutopilotRequest: {
+            /** @description Most iterations before the run parks itself for the user. Omit to use the Settings default. */
+            maxIterations?: null | number;
+            /** @description The one task to finish without the user. AO sends it again at the end of every turn until it is verifiably done. */
+            task: string;
+        };
         StartAwakeRequest: {
             boundId: string;
             boundIdentity?: string;
@@ -8272,6 +8615,12 @@ export interface components {
             /** @enum {string} */
             state?: "queued" | "running" | "completed" | "recovered" | "interrupted" | "failed";
             turnId?: string;
+        };
+        StopAllAutopilotResponse: {
+            stopped: number;
+        };
+        StopAutopilotResponse: {
+            stopped: boolean;
         };
         SubmitAgentUILoginCodeRequest: {
             code: string;
@@ -8457,6 +8806,10 @@ export interface components {
             timezone?: null | string;
             /** @enum {null|string} */
             useCase?: "pr_review" | "issue_triage" | "repo_digest" | "ci_triage" | "release_notes" | "security_audit" | "dependency_maintenance" | "docs_maintenance" | "other" | "unknown" | null;
+        };
+        UpdateAutopilotSettingsRequest: {
+            /** @description Most iterations a run may take before it parks itself for the user. */
+            maxIterations: null | number;
         };
         UpdateChatHibernationRequest: {
             enabled: null | boolean;
@@ -11528,6 +11881,150 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listAutopilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListAutopilotResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    resolveAutopilotItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Parked item identifier, e.g. ape_1. */
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveAutopilotItemResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopAllAutopilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopAllAutopilotResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -18236,6 +18733,570 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getAutopilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotViewResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startAutopilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartAutopilotRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotViewResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setAutopilotCriteria: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutopilotCriteriaRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotRunResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    recordAutopilotDecision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutopilotDecideRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotDecideResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    declareAutopilotDone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutopilotDoneRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotDoneResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    parkAutopilotItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutopilotParkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotParkResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    resumeAutopilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotViewResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopAutopilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopAutopilotResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -25037,6 +26098,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    updateAutopilotSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAutopilotSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Internal Server Error */

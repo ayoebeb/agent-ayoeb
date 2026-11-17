@@ -52,6 +52,9 @@ type APIDeps struct {
 	Notifications     controllers.NotificationService
 	// OrchestratorWaiting records and lists orchestrators waiting for the user.
 	OrchestratorWaiting controllers.OrchestratorWaitingService
+	// Autopilot runs a task to completion without the user: start, stop, the
+	// agent's own commands, and the run log.
+	Autopilot controllers.AutopilotService
 	Reports             controllers.ReportService
 	NotificationStream  controllers.NotificationStream
 	Push                controllers.PushRegistry
@@ -158,6 +161,7 @@ type API struct {
 	reviews       *controllers.ReviewsController
 	notifications *controllers.NotificationsController
 	orchWaiting   *controllers.OrchestratorWaitingController
+	autopilot     *controllers.AutopilotController
 	reports       *controllers.ReportsController
 	push          *controllers.PushController
 	imports       *controllers.ImportController
@@ -227,6 +231,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		orchWaiting:   &controllers.OrchestratorWaitingController{Svc: deps.OrchestratorWaiting},
+		autopilot:     &controllers.AutopilotController{Svc: deps.Autopilot},
 		reports:       &controllers.ReportsController{Svc: deps.Reports},
 		push:          &controllers.PushController{Registry: deps.Push},
 		imports:       &controllers.ImportController{Svc: deps.Import},
@@ -239,7 +244,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		},
 		cues:          &controllers.CuesController{Svc: deps.Cues},
 		conversations: &controllers.ConversationsController{Svc: deps.Conversations, Renders: attachmentstore.New(cfg.DataDir), Search: deps.ConversationSearch, UserMessages: userMessageRecorder(deps.Sessions)},
-		settings:      &controllers.SettingsController{Svc: deps.Settings},
+		settings:      &controllers.SettingsController{Svc: deps.Settings, Autopilot: autopilotSettings(deps.Autopilot)},
 		dev:           &controllers.DevController{Import: deps.DevImport},
 		browser:       &controllers.BrowserController{Svc: deps.Browser, Chrome: deps.BrowserChrome},
 		sharedBrowser: &controllers.SharedBrowserProfilesController{Source: deps.SharedBrowserProfiles},
@@ -286,6 +291,13 @@ func serveWithSetupBudget(next http.Handler, w http.ResponseWriter, req *http.Re
 
 // Register mounts the bounded /api/v1 REST surface. Long-lived surfaces such
 // as muxed terminal streams stay outside this timeout group.
+// autopilotSettings is the Autopilot service seen as the settings controller's
+// Autopilot preference, when the service provides it.
+func autopilotSettings(svc controllers.AutopilotService) controllers.AutopilotSettings {
+	settings, _ := svc.(controllers.AutopilotSettings)
+	return settings
+}
+
 func (a *API) Register(root chi.Router) {
 	timeout := a.cfg.RequestTimeout
 	if timeout <= 0 {
@@ -371,6 +383,7 @@ func (a *API) Register(root chi.Router) {
 			a.reviews.Register(r)
 			a.notifications.Register(r)
 			a.orchWaiting.Register(r)
+			a.autopilot.Register(r)
 			a.reports.Register(r)
 			a.push.Register(r)
 			a.imports.Register(r)

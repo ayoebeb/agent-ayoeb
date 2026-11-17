@@ -53,6 +53,10 @@ const (
 	AutopilotEndGoalDone      AutopilotEndReason = "goal_done"
 	AutopilotEndMaxIterations AutopilotEndReason = "max_iterations"
 	AutopilotEndStuck         AutopilotEndReason = "stuck"
+	// AutopilotEndNeedsInput is a run parked because a session sat on a prompt
+	// Autopilot cannot answer (a terminal prompt, a form, a request the policy has
+	// no decision for), which would otherwise stall it silently.
+	AutopilotEndNeedsInput AutopilotEndReason = "needs_input"
 )
 
 // AutopilotRun is one task the user gave a session to finish on its own.

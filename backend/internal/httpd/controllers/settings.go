@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -34,6 +35,16 @@ type SettingsService interface {
 // disagree with the others.
 type SettingsController struct {
 	Svc SettingsService
+	// Autopilot holds the Autopilot preferences. Optional: without it the default
+	// iteration cap is reported and cannot be changed.
+	Autopilot AutopilotSettings
+}
+
+// AutopilotSettings is the Autopilot preference: how many iterations a task run
+// may take before it parks itself for the user.
+type AutopilotSettings interface {
+	MaxIterations(ctx context.Context) (int, error)
+	SetMaxIterations(ctx context.Context, n int) error
 }
 
 // Register mounts the settings routes.
@@ -45,6 +56,7 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Patch("/settings/computer-use", c.setComputerUse)
 	r.Patch("/settings/session-retention", c.setSessionRetention)
 	r.Patch("/settings/orchestrator-waiting", c.setOrchestratorWaiting)
+	r.Patch("/settings/autopilot", c.setAutopilot)
 	r.Patch("/settings/harness-defaults/{agent}", c.setHarnessDefault)
 }
 
@@ -67,7 +79,34 @@ func (c *SettingsController) setOrchestratorWaiting(w http.ResponseWriter, r *ht
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
+}
+
+func (c *SettingsController) setAutopilot(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil || c.Autopilot == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/settings/autopilot")
+		return
+	}
+	var req UpdateAutopilotSettingsRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	if req.MaxIterations == nil || *req.MaxIterations < 1 || *req.MaxIterations > domain.AutopilotMaxIterationsCeiling {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"AUTOPILOT_MAX_ITERATIONS_INVALID",
+			fmt.Sprintf("maxIterations must be between 1 and %d", domain.AutopilotMaxIterationsCeiling), nil)
+		return
+	}
+	if err := c.Autopilot.SetMaxIterations(r.Context(), *req.MaxIterations); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	snapshot, err := c.Svc.Get(r.Context())
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }
 
 func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +119,7 @@ func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }
 
 func (c *SettingsController) setSessionInterface(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +146,7 @@ func (c *SettingsController) setSessionInterface(w http.ResponseWriter, r *http.
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }
 
 func (c *SettingsController) setChatHibernation(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +168,7 @@ func (c *SettingsController) setChatHibernation(w http.ResponseWriter, r *http.R
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }
 
 func (c *SettingsController) setVersionRefresh(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +190,7 @@ func (c *SettingsController) setVersionRefresh(w http.ResponseWriter, r *http.Re
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }
 
 func (c *SettingsController) setComputerUse(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +212,7 @@ func (c *SettingsController) setComputerUse(w http.ResponseWriter, r *http.Reque
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }
 
 func (c *SettingsController) setSessionRetention(w http.ResponseWriter, r *http.Request) {
@@ -195,10 +234,16 @@ func (c *SettingsController) setSessionRetention(w http.ResponseWriter, r *http.
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }
 
-func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsResponse {
+func (c *SettingsController) response(ctx context.Context, snapshot settingssvc.Snapshot) SettingsResponse {
+	autopilotMax := domain.AutopilotDefaultMaxIterations
+	if c.Autopilot != nil {
+		if n, err := c.Autopilot.MaxIterations(ctx); err == nil && n > 0 {
+			autopilotMax = n
+		}
+	}
 	// Reported so the client can warn that choosing chat narrows which agents are
 	// available, instead of letting the user discover it at spawn time.
 	chatHarnesses := c.Svc.ChatHarnesses(domain.AllHarnesses)
@@ -220,6 +265,7 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 
 		OrchestratorWaitingEnabled:         snapshot.OrchestratorWaitingEnabled,
 		OrchestratorWaitingRenotifyMinutes: snapshot.OrchestratorWaitingRenotifyMinutes,
+		AutopilotMaxIterations:             autopilotMax,
 		CloudEnabled:                       offering.CloudEnabled(),
 		CloudControlPlaneURL:   offering.CloudControlPlaneURL,
 		TrackerIntakeEnabled:   offering.TrackerIntakeEnabled,
@@ -253,5 +299,5 @@ func (c *SettingsController) setHarnessDefault(w http.ResponseWriter, r *http.Re
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	envelope.WriteJSON(w, http.StatusOK, c.response(r.Context(), snapshot))
 }

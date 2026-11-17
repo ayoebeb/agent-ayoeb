@@ -15,7 +15,7 @@ CREATE TABLE autopilot_runs (
     criteria TEXT NOT NULL DEFAULT '',
     state TEXT NOT NULL CHECK (state IN ('running', 'paused_usage_limit', 'parked', 'done', 'stopped')),
     -- Why the run left running: user, emergency_stop, session_ended, goal_done,
-    -- max_iterations, stuck. Empty while running.
+    -- max_iterations, stuck, needs_input. Empty while running.
     end_reason TEXT NOT NULL DEFAULT '',
     -- Completed turns the loop has judged so far.
     iteration INTEGER NOT NULL DEFAULT 0,
