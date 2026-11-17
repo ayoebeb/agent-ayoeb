@@ -443,6 +443,12 @@ func TestBuildSystemPrompt_OrchestratorIncludesCommunicationStyleByDefault(t *te
 		// a plain-text question, so the orchestrator declares it.
 		"`ao notify-user --waiting \"<one-line question>\"`",
 		"`ao notify-user --clear` withdraws it",
+		// Autopilot: the one rule that changes how the orchestrator treats the human
+		// while it runs, scoped to the messages AO sends.
+		`Autopilot applies only after AO messages you "Autopilot is ON"`,
+		"`ao autopilot decide`",
+		"`ao autopilot park`",
+		"Never switch Autopilot on or off yourself",
 		"Restate state in every reply",
 		"[name](ao://sessions/{project-id}/{session-id})",
 		"never in code formatting",
@@ -531,10 +537,12 @@ func TestBuildSystemPrompt_WorkersNeverGetCommunicationStyle(t *testing.T) {
 // injected into every orchestrator, so growth should be a deliberate choice.
 func TestCommunicationStylePromptStaysShort(t *testing.T) {
 	style := orchestratorCommunicationStylePrompt()
-	// 520 leaves room for the one rule that makes the human's main contact
-	// audible (`ao notify-user`); anything beyond that is a deliberate choice.
-	if words := len(strings.Fields(style)); words > 520 {
-		t.Fatalf("communication style grew to %d words; keep it under 520", words)
+	// 600 leaves room for the two rules that change how the human is reached: the
+	// one that makes their main contact audible (`ao notify-user`) and the
+	// Autopilot rule, which applies only after AO says Autopilot is on. Anything
+	// beyond that is a deliberate choice.
+	if words := len(strings.Fields(style)); words > 600 {
+		t.Fatalf("communication style grew to %d words; keep it under 600", words)
 	}
 	if strings.Contains(strings.ToLower(style), "adhd") {
 		t.Fatalf("the style must not name the reader's condition:\n%s", style)

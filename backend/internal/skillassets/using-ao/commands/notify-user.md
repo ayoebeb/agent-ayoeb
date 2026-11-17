@@ -46,6 +46,10 @@ not that you have an update.
   sends nothing; ask in your reply as usual.
 - Pending approvals and input requests (the question dock) already raise this
   notification on their own. Do not declare them again.
+- While Autopilot runs for you, the human is not told: the command answers
+  "Nothing was sent to the user" and reminds you to decide instead. Choose your
+  recommended option and record it with `ao autopilot decide` (see
+  [autopilot.md](autopilot.md)).
 
 **Examples:**
 
