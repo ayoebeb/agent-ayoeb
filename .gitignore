@@ -79,6 +79,7 @@ frontend/daemon/
 frontend/browser-extension/
 frontend/tmux/
 frontend/resources/acp-runtime/
+frontend/resources/acp-runtime-dev/
 
 # pinned native binaries (browser automation, cloudflared) copied during package preparation
 frontend/agent-browser/

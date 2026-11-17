@@ -25,13 +25,26 @@ import {
 	pruneNodeDistribution,
 	runtimeSourceFiles,
 } from "./build-acp-runtime-helpers.mjs";
+import {
+	newRuntimeDir,
+	pruneRuntimeDirs,
+	readCurrentRuntimeDir,
+	runtimeBuildsRoot,
+	writeCurrentRuntimeDir,
+} from "./acp-runtime-versions.mjs";
 
 const NODE_VERSION = "22.23.2";
 const DOWNLOAD_ATTEMPTS = 3;
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = resolve(scriptsDir, "..");
 const sourceDir = join(frontendRoot, "acp-runtime");
-const outDir = join(frontendRoot, "resources", "acp-runtime");
+// `--dev` on Windows (the daily/dev build) builds into a fresh versioned
+// directory: running chat sessions lock the previous one. Everything else,
+// including packaged builds, keeps the fixed resources/acp-runtime.
+const versioned = process.platform === "win32" && process.argv.includes("--dev");
+const buildsRoot = runtimeBuildsRoot(frontendRoot);
+const currentDir = versioned ? readCurrentRuntimeDir(buildsRoot) : null;
+const outDir = versioned ? newRuntimeDir(buildsRoot) : join(frontendRoot, "resources", "acp-runtime");
 
 const platform = { darwin: "darwin", linux: "linux", win32: "win" }[process.platform];
 const arch = { x64: "x64", arm64: "arm64" }[process.arch];
@@ -56,28 +69,34 @@ const buildSignature = signature
 	.update(`node=${NODE_VERSION};platform=${platform};arch=${arch}`)
 	.digest("hex");
 const markerPath = join(outDir, ".ao-acp-runtime.json");
-const expectedNode = process.platform === "win32"
-	? join(outDir, "node", "node.exe")
-	: join(outDir, "node", "bin", "node");
-const expectedAdapter = join(
-	outDir,
-	"node_modules",
-	"@agentclientprotocol",
-	"claude-agent-acp",
-	"dist",
-	"index.js",
-);
-const claudeAdapter = join(
-	outDir,
-	"node_modules",
-	"@agentclientprotocol",
-	"claude-agent-acp",
-	"dist",
-	"acp-agent.js",
-);
-if (existsSync(markerPath) && existsSync(expectedNode) && existsSync(expectedAdapter)) {
-	const marker = JSON.parse(readFileSync(markerPath, "utf8"));
-	if (marker.signature === buildSignature) process.exit(0);
+const adapterRelative = ["node_modules", "@agentclientprotocol", "claude-agent-acp", "dist"];
+const claudeAdapter = join(outDir, ...adapterRelative, "acp-agent.js");
+
+let committed = false;
+
+function isCurrent(dir) {
+	if (!dir) return false;
+	const node = process.platform === "win32" ? join(dir, "node", "node.exe") : join(dir, "node", "bin", "node");
+	const marker = join(dir, ".ao-acp-runtime.json");
+	if (!existsSync(marker) || !existsSync(node) || !existsSync(join(dir, ...adapterRelative, "index.js"))) return false;
+	try {
+		return JSON.parse(readFileSync(marker, "utf8")).signature === buildSignature;
+	} catch {
+		return false;
+	}
+}
+
+if (isCurrent(versioned ? currentDir : outDir)) {
+	if (versioned) pruneRuntimeDirs(buildsRoot, { activeDir: currentDir });
+	process.exit(0);
+}
+
+if (versioned) {
+	// Never leave a half-built directory behind when the build fails; the
+	// manifest still names the previous good runtime.
+	process.on("exit", () => {
+		if (!committed) rmSync(outDir, { recursive: true, force: true });
+	});
 }
 
 rmSync(outDir, { recursive: true, force: true });
@@ -150,6 +169,16 @@ for (const name of nativeClaudePackages) {
 	}
 }
 writeFileSync(markerPath, `${JSON.stringify({ signature: buildSignature, node: NODE_VERSION }, null, 2)}\n`);
+if (versioned) {
+	// Point new sessions at this build only now that it is complete. Sessions
+	// already running keep the directory they started from.
+	writeCurrentRuntimeDir(buildsRoot, outDir);
+	committed = true;
+	const pruned = pruneRuntimeDirs(buildsRoot, { activeDir: outDir });
+	if (pruned.skipped.length) {
+		console.log(`ACP runtime: kept ${pruned.skipped.length} older build(s) that are still in use`);
+	}
+}
 
 function run(command, args, options = {}) {
 	const result = spawnSync(command, args, { stdio: "inherit", windowsHide: true, ...options });

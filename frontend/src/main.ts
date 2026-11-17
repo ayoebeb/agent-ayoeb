@@ -1,3 +1,4 @@
+import { devAcpRuntimeDir } from "./main/acp-runtime-dir";
 import { SideCloseRecovery } from "./main/side-close";
 import { SideLaunchRecovery } from "./main/side-launch-recovery";
 import { syncMacWindowButtons } from "./main/window-chrome";
@@ -1841,7 +1842,7 @@ function daemonEnv(forceKeep = keepDaemonAlive(process.env)): NodeJS.ProcessEnv 
 			process.env.AO_ACP_RUNTIME_DIR ??
 			(app.isPackaged
 				? path.join(process.resourcesPath, "acp-runtime")
-				: path.join(app.getAppPath(), "resources", "acp-runtime")),
+				: devAcpRuntimeDir(app.getAppPath())),
 		...(bundledTmuxBinary ? { AO_TMUX_BINARY: bundledTmuxBinary, AO_TMUX_SOCKET_NAME: "ao" } : {}),
 		// The packaged macOS app ships cloudflared, so turning on remote access
 		// never waits for an install. An explicit AO_CLOUDFLARED_PATH still wins.
@@ -2272,7 +2273,7 @@ function daemonLaunchEnv(): NodeJS.ProcessEnv {
 // and a no-op when the runtime is intact. Dev only: a packaged runtime is signed.
 async function repairDevAcpRuntime(): Promise<void> {
 	if (app.isPackaged || process.env.AO_ACP_RUNTIME_DIR) return;
-	const runtimeDir = path.join(app.getAppPath(), "resources", "acp-runtime");
+	const runtimeDir = devAcpRuntimeDir(app.getAppPath());
 	const adapter = path.join(
 		runtimeDir,
 		"node_modules",
@@ -2286,7 +2287,7 @@ async function repairDevAcpRuntime(): Promise<void> {
 	if (!existsSync(script)) return;
 	console.warn(`[ao] ACP runtime missing at ${runtimeDir}; rebuilding`);
 	await new Promise<void>((resolve) => {
-		const child = spawn(process.execPath, [script], {
+		const child = spawn(process.execPath, [script, "--dev"], {
 			cwd: app.getAppPath(),
 			env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
 			stdio: "inherit",
