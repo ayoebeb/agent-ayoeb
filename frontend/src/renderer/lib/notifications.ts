@@ -5,6 +5,7 @@ import { aoBridge } from "./bridge";
 import { apiClient, eventStreamBaseUrl, getApiBaseUrl, subscribeApiBaseUrl } from "./api-client";
 import { computeSseRetryDelayMs } from "./sse-backoff";
 import { localizedNotificationCopy, NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, refreshOrchestratorWaiting } from "./orchestrator-waiting";
+import { NOTIFICATION_TYPE_AUTOPILOT_PARKED } from "./autopilot";
 
 export type NotificationDTO = components["schemas"]["NotificationResponse"];
 export type NotificationsPage = components["schemas"]["ListNotificationsResponse"];
@@ -28,7 +29,12 @@ const MAX_CONFIRMED_NOTIFICATION_DELETIONS = 256;
  * Mirrors NotificationType.NeedsResolution on the backend — used here only to
  * keep `unresolvedCount` accurate on the unread/all caches.
  */
-const UNRESOLVABLE_TYPES = new Set(["needs_input", "ready_to_merge", NOTIFICATION_TYPE_ORCHESTRATOR_WAITING]);
+const UNRESOLVABLE_TYPES = new Set([
+	"needs_input",
+	"ready_to_merge",
+	NOTIFICATION_TYPE_ORCHESTRATOR_WAITING,
+	NOTIFICATION_TYPE_AUTOPILOT_PARKED,
+]);
 
 type NotificationsQueryKey = typeof unreadNotificationsQueryKey | typeof recentNotificationsQueryKey;
 

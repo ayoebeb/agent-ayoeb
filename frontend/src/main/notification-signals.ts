@@ -14,7 +14,8 @@ export type NotificationType =
 	| "ready_to_merge"
 	| "pr_merged"
 	| "pr_closed_unmerged"
-	| "orchestrator_waiting";
+	| "orchestrator_waiting"
+	| "autopilot_parked";
 
 /**
  * A project orchestrator waiting for the user: the user's main contact, whose
@@ -35,6 +36,8 @@ const ATTENTION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
 	"needs_input",
 	"ready_to_merge",
 	ORCHESTRATOR_WAITING_TYPE,
+	// Autopilot parked an item it must not do alone: it needs the user, like a blocked agent.
+	"autopilot_parked",
 ]);
 
 /**
@@ -131,5 +134,5 @@ export function toastSilent(
  * signal without a merged PR nagging as insistently as a blocked agent.
  */
 export function dockBounceType(type: string | undefined): "critical" | "informational" {
-	return type === "needs_input" || type === ORCHESTRATOR_WAITING_TYPE ? "critical" : "informational";
+	return type === "needs_input" || type === ORCHESTRATOR_WAITING_TYPE || type === "autopilot_parked" ? "critical" : "informational";
 }
