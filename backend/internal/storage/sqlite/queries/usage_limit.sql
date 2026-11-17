@@ -6,7 +6,10 @@
 -- The latest turn of each wanted session current conversation, for the sessions
 -- where it failed. A cancelled turn is a withdrawn prompt and a rolled-back or
 -- promoted one is hidden, so none of them count as the latest, the same rule
--- ListInterruptedSessions uses. The caller parses the error text for the limit.
+-- ListInterruptedSessions uses. A queued turn does not count either: it is
+-- waiting behind the failed turn (a failed turn holds the queue), so the session
+-- is still stopped on the limit, and the queued work is what a resume releases.
+-- The caller parses the error text for the limit.
 -- name: ListLatestFailedTurns :many
 WITH wanted_session AS (
     SELECT CAST(j.value AS TEXT) AS session_id
@@ -27,7 +30,7 @@ latest_turn AS (
         WHERE conversation_turns.conversation_id = session_conversation.conversation_id
           AND conversation_turns.promoted_to_turn_id IS NULL
           AND conversation_turns.rolled_back_at IS NULL
-          AND conversation_turns.state <> 'cancelled'
+          AND conversation_turns.state NOT IN ('cancelled', 'queued')
         ORDER BY conversation_turns.requested_at DESC, conversation_turns.rowid DESC
         LIMIT 1
     ) AS turn_id
@@ -51,7 +54,8 @@ WHERE turns.state = 'failed';
 -- has not been followed up (no stop row) and was completed since the cutoff, or
 -- is still waiting to be resumed (whatever its age: a weekly limit resets in
 -- days, and the watcher closes a stop only when its turn stopped being the
--- latest). This is the watcher sweep.
+-- latest). A queued turn behind the failed one does not make it older (see
+-- ListLatestFailedTurns). This is the watcher sweep.
 -- name: ListLimitStopCandidates :many
 SELECT CAST(conversations.current_session_id AS TEXT) AS session_id,
        turns.id AS turn_id,
@@ -78,7 +82,7 @@ WHERE turns.state = 'failed'
       WHERE newer.conversation_id = turns.conversation_id
         AND newer.promoted_to_turn_id IS NULL
         AND newer.rolled_back_at IS NULL
-        AND newer.state <> 'cancelled'
+        AND newer.state NOT IN ('cancelled', 'queued')
         AND (newer.requested_at > turns.requested_at
              OR (newer.requested_at = turns.requested_at AND newer.rowid > turns.rowid))
   );

@@ -2,6 +2,7 @@ package chat_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,5 +97,59 @@ func TestRecoveredPrimaryTurnHoldsQueuedWork(t *testing.T) {
 	assertTurnStaysQueued(t, h, "automation")
 	if got := h.conv.sentTexts(); len(got) != 1 || got[0] != "root" {
 		t.Fatalf("provider received %v, want only the root prompt", got)
+	}
+}
+
+// A failed turn (a usage-limit stop, say) holds the queue until something moves
+// it. The usage-limit watcher moves it with one "continue" send: that send must
+// start the work already queued (the two go out together, oldest first) rather
+// than only adding itself behind it, or the queue would sit for as long as
+// nobody wrote to the session.
+func TestSendAfterAFailedTurnReleasesTheWorkQueuedBehindIt(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	if _, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{
+		Text: "root", ClientMessageID: "c1", Origin: domain.MessageOriginHuman,
+	}); err != nil {
+		t.Fatalf("send root: %v", err)
+	}
+	h.conv.emit(ports.ChatEvent{Kind: ports.ChatEventTurnStarted, ProviderTurnID: "provider-turn-1"})
+	h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool {
+		return turnStateByText(t, s)["root"] == domain.TurnStateRunning
+	})
+	if _, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{
+		Text: "orchestrator follow-up", ClientMessageID: "c2", Origin: domain.MessageOriginAutomation,
+	}); err != nil {
+		t.Fatalf("queue the follow-up: %v", err)
+	}
+	h.conv.emit(ports.ChatEvent{
+		Kind: ports.ChatEventTurnCompleted, ProviderTurnID: "provider-turn-1",
+		TurnState: domain.TurnStateFailed,
+	})
+	h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool {
+		return turnStateByText(t, s)["root"] == domain.TurnStateFailed
+	})
+	assertTurnStaysQueued(t, h, "orchestrator follow-up")
+
+	// The watcher's resume.
+	if _, err := h.svc.Send(ctx, testSession, ports.ChatUserMessage{
+		Text: "continue where you left off", ClientMessageID: "usage-limit-resume:turn-1", Origin: domain.MessageOriginAutomation,
+	}); err != nil {
+		t.Fatalf("resume send: %v", err)
+	}
+	h.awaitSnapshot(t, func(s store.ConversationSnapshot) bool {
+		states := turnStateByText(t, s)
+		return states["orchestrator follow-up"] != domain.TurnStateQueued && states["continue where you left off"] != domain.TurnStateQueued
+	})
+	// The two queued messages go to the provider together, in enqueue order, as one turn.
+	got := h.conv.sentTexts()
+	if len(got) != 2 || got[0] != "root" {
+		t.Fatalf("provider received %v, want the root prompt and then one batch", got)
+	}
+	followUp := strings.Index(got[1], "orchestrator follow-up")
+	resume := strings.Index(got[1], "continue where you left off")
+	if followUp < 0 || resume < 0 || followUp > resume {
+		t.Fatalf("the released batch must hold the queued follow-up and then the resume message: %q", got[1])
 	}
 }

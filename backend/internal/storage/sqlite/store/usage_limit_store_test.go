@@ -33,8 +33,11 @@ func TestListLatestFailedTurnsFollowsTheLatestTurn(t *testing.T) {
 		t.Fatalf("resetsAt = %v, want %v", limit.ResetsAt, want)
 	}
 
-	// The person sends something new: the failed turn is no longer the latest.
+	// The person sends something new, and it starts running: the failed turn is no longer the latest.
 	appendBranchPrompt(t, s, session, conversation, "generation-root", "next", "carry on")
+	if err := s.SettleTurnByID(ctx, "turn-next", domain.TurnStateRunning, "", testNow.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	turns, err = s.ListLatestFailedTurns(ctx, []domain.SessionID{session.ID})
 	if err != nil || len(turns) != 0 {
 		t.Fatalf("after a newer turn: turns = %+v, err = %v", turns, err)
@@ -228,7 +231,51 @@ func TestLimitStopCandidatesKeepPendingStopsOlderThanTheCutoff(t *testing.T) {
 
 	// Once its turn is no longer the latest it drops out, whatever its age.
 	appendBranchPrompt(t, s, session, conversation, "generation-root", "next", "carry on")
+	if err := s.SettleTurnByID(ctx, "turn-next", domain.TurnStateRunning, "", testNow.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	if got, err := s.ListLimitStopCandidates(ctx, cutoff); err != nil || len(got) != 0 {
 		t.Fatalf("a superseded pending stop was listed: %+v, %v", got, err)
+	}
+}
+
+// A message queued behind the turn that hit the limit (a failed turn holds the
+// queue) is waiting for the resume, not a person moving past the stop: the
+// session still reads as limit-stopped, and the watcher still sees the stop.
+func TestQueuedTurnBehindALimitStopDoesNotSupersedeIt(t *testing.T) {
+	ctx := context.Background()
+	s, session, conversation := seededChatConversation(t)
+	appendBranchPrompt(t, s, session, conversation, "generation-root", "limited", "finish this task")
+	// Sent while the first turn is still running, so it queues behind it.
+	appendBranchPrompt(t, s, session, conversation, "generation-root", "queued", "plan step 2 and on")
+	queued, err := s.TurnByID(ctx, "turn-queued")
+	if err != nil || queued.State != domain.TurnStateQueued {
+		t.Fatalf("turn-queued = %+v, %v; want it queued behind the running turn", queued, err)
+	}
+	if err := s.SettleTurnByID(ctx, "turn-limited", domain.TurnStateFailed, storeLimitMessage, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if still, err := s.TurnByID(ctx, "turn-queued"); err != nil || still.State != domain.TurnStateQueued {
+		t.Fatalf("settling the failed turn changed the queued one: %+v, %v", still, err)
+	}
+
+	turns, err := s.ListLatestFailedTurns(ctx, []domain.SessionID{session.ID})
+	if err != nil || len(turns) != 1 || turns[0].TurnID != "turn-limited" {
+		t.Fatalf("a queued turn hid the limit stop: %+v, %v", turns, err)
+	}
+	candidates, err := s.ListLimitStopCandidates(ctx, testNow.Add(-time.Hour))
+	if err != nil || len(candidates) != 1 || candidates[0].TurnID != "turn-limited" {
+		t.Fatalf("a queued turn made the stop look superseded to the watcher: %+v, %v", candidates, err)
+	}
+
+	// Once the queued turn actually runs, the person is past the stop.
+	if err := s.SettleTurnByID(ctx, "turn-queued", domain.TurnStateRunning, "", testNow.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if turns, err := s.ListLatestFailedTurns(ctx, []domain.SessionID{session.ID}); err != nil || len(turns) != 0 {
+		t.Fatalf("a running turn after the stop must end it: %+v, %v", turns, err)
+	}
+	if candidates, err := s.ListLimitStopCandidates(ctx, testNow.Add(-time.Hour)); err != nil || len(candidates) != 0 {
+		t.Fatalf("a running turn after the stop must supersede it: %+v, %v", candidates, err)
 	}
 }
