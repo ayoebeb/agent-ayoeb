@@ -1,12 +1,13 @@
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { HIDDEN_DAILY_UPDATE, type DailyUpdateState } from "../shared/daily-update";
 
 /** What the watcher writes (see Invoke-UpdatePass); the last three are optional so an older watcher still works. */
 type PendingFile = { target?: unknown; commits?: unknown; scriptPath?: unknown; pwsh?: unknown; configFile?: unknown };
 
-type Pending = { target: string; changes: number; scriptPath: string; pwsh: string; configFile?: string };
+/** Unchecked: these come from a file anyone with write access could change. */
+type Pending = { target: string; changes: number; scriptPath: unknown; pwsh: unknown; configFile: unknown };
 
 type ChildLike = {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 'error' and 'exit' carry different arguments.
@@ -23,6 +24,9 @@ export type DailyUpdateDeps = {
 	writeFile?: (file: string, text: string) => void;
 	spawn?: SpawnLike;
 	now?: () => number;
+	/** True for an existing regular file. */
+	isFile?: (file: string) => boolean;
+	env?: NodeJS.ProcessEnv;
 };
 
 export const PENDING_FILE = "pending-restart.json";
@@ -30,11 +34,28 @@ export const PENDING_FILE = "pending-restart.json";
 export const NOTICE_SHOWN_FILE = "update-notice-shown.json";
 const HEARTBEAT_EVERY_MS = 15_000;
 
-/** Only a PowerShell executable by name; anything else falls back to the one on PATH. */
-function trustedPwsh(value: unknown): string {
-	if (typeof value !== "string" || !value) return "pwsh";
-	const name = path.win32.basename(value).toLowerCase();
-	return name === "pwsh.exe" || name === "powershell.exe" ? value : "pwsh";
+const win = path.win32;
+const lower = (value: string) => value.toLowerCase();
+
+/** The daily update is a Windows flow, so every path is judged as a Windows path, case-insensitively. */
+function insideDir(file: string, dir: string): boolean {
+	const relative = win.relative(lower(win.resolve(dir)), lower(win.resolve(file)));
+	return relative !== "" && !relative.startsWith("..") && !win.isAbsolute(relative);
+}
+
+/** A plain absolute path: no option-looking value, no control characters, no quotes. */
+function plainAbsolutePath(value: unknown): value is string {
+	return typeof value === "string" && win.isAbsolute(value) && !/[\x00-\x1f"]/.test(value) && !value.startsWith("-");
+}
+
+/** Where a PowerShell may live: the AO tools folder or a known system install. */
+function pwshRoots(dailyDir: string, env: NodeJS.ProcessEnv): string[] {
+	const roots = [win.join(win.dirname(win.resolve(dailyDir)), "tools")];
+	for (const key of ["ProgramFiles", "ProgramFiles(x86)"]) if (env[key]) roots.push(win.join(env[key] as string, "PowerShell"));
+	if (env.SystemRoot) roots.push(win.join(env.SystemRoot, "System32", "WindowsPowerShell"));
+	// The Microsoft Store pwsh is a launcher alias here.
+	if (env.LOCALAPPDATA) roots.push(win.join(env.LOCALAPPDATA, "Microsoft", "WindowsApps"));
+	return roots;
 }
 
 function parsePending(text: string, dailyDir: string): Pending | undefined {
@@ -46,21 +67,40 @@ function parsePending(text: string, dailyDir: string): Pending | undefined {
 	}
 	if (typeof raw.target !== "string" || !raw.target) return undefined;
 	const commits = Array.isArray(raw.commits) ? raw.commits.length : 0;
-	const fallbackScript = path.join(dailyDir, "scripts", "update-daily-ao.ps1");
 	return {
 		target: raw.target,
 		changes: Math.max(1, commits),
-		scriptPath: typeof raw.scriptPath === "string" && raw.scriptPath ? raw.scriptPath : fallbackScript,
-		pwsh: trustedPwsh(raw.pwsh),
-		// A config outside the daily folder is ignored, not run with.
-		...(typeof raw.configFile === "string" && raw.configFile && insideDir(raw.configFile, dailyDir) ? { configFile: raw.configFile } : {}),
+		scriptPath: raw.scriptPath ?? win.join(dailyDir, "scripts", "update-daily-ao.ps1"),
+		pwsh: raw.pwsh,
+		configFile: raw.configFile,
 	};
 }
 
-/** The script is only ever run from inside the daily dir, whatever the file says. */
-function insideDir(file: string, dir: string): boolean {
-	const relative = path.relative(path.resolve(dir), path.resolve(file));
-	return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+type Checked = { ok: true; command: string; args: string[] } | { ok: false; message: string };
+
+/** Everything that will be spawned must be an existing file in an expected place. Refuse, never repair. */
+function check(pending: Pending, dailyDir: string, env: NodeJS.ProcessEnv, isFile: (file: string) => boolean): Checked {
+	const { scriptPath, pwsh, configFile } = pending;
+	if (!plainAbsolutePath(scriptPath) || !insideDir(scriptPath, dailyDir) || !isFile(scriptPath)) {
+		return { ok: false, message: "The update script is not in the daily folder." };
+	}
+	const pwshName = typeof pwsh === "string" ? lower(win.basename(pwsh)) : "";
+	if (
+		!plainAbsolutePath(pwsh) ||
+		(pwshName !== "pwsh.exe" && pwshName !== "powershell.exe") ||
+		!pwshRoots(dailyDir, env).some((root) => insideDir(pwsh, root)) ||
+		!isFile(pwsh)
+	) {
+		return { ok: false, message: "PowerShell was not found in an expected place." };
+	}
+	const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Yes"];
+	if (configFile !== undefined) {
+		if (!plainAbsolutePath(configFile) || !insideDir(configFile, dailyDir) || !isFile(configFile)) {
+			return { ok: false, message: "The update config is not in the daily folder." };
+		}
+		args.push("-ConfigFile", configFile);
+	}
+	return { ok: true, command: pwsh, args };
 }
 
 export function createDailyUpdateController(deps: DailyUpdateDeps) {
@@ -70,6 +110,16 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 	const writeFile = deps.writeFile ?? ((file: string, text: string) => writeFileSync(file, text, "utf8"));
 	const spawn: SpawnLike = deps.spawn ?? (nodeSpawn as SpawnLike);
 	const now = deps.now ?? Date.now;
+	const env = deps.env ?? process.env;
+	const isFile =
+		deps.isFile ??
+		((file: string) => {
+			try {
+				return statSync(file).isFile();
+			} catch {
+				return false;
+			}
+		});
 
 	// The script's own outcome, for this app run. The file alone cannot say
 	// "restarting" or "failed": it just stays until the update succeeds.
@@ -114,17 +164,16 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 	const apply = (): DailyUpdateState => {
 		const pending = read();
 		if (!dailyDir || !pending || run?.phase === "restarting") return getState();
-		if (!insideDir(pending.scriptPath, dailyDir)) {
-			run = { phase: "failed", target: pending.target, message: "The update script is not in the daily folder." };
+		const checked = check(pending, dailyDir, env, isFile);
+		if (!checked.ok) {
+			run = { phase: "failed", target: pending.target, message: checked.message };
 			return getState();
 		}
-		const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", pending.scriptPath, "-Yes"];
-		if (pending.configFile) args.push("-ConfigFile", pending.configFile);
 		const target = pending.target;
 		run = { phase: "restarting", target };
 		try {
 			// Detached: the script stops this Electron and starts a new one; it must outlive us.
-			const child = spawn(pending.pwsh, args, { detached: true, stdio: "ignore", windowsHide: true });
+			const child = spawn(checked.command, checked.args, { detached: true, stdio: "ignore", windowsHide: true });
 			child.on("error", (error: Error) => {
 				run = { phase: "failed", target, message: error.message };
 			});
