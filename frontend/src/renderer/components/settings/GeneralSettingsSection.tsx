@@ -392,6 +392,8 @@ export function GeneralSettingsSection({
 	const setNavigationGestures = useUiStore((state) => state.setNavigationGestures);
 	const renderMath = useUiStore((state) => state.renderMath);
 	const setRenderMath = useUiStore((state) => state.setRenderMath);
+	const resourceStatus = useUiStore((state) => state.resourceStatus);
+	const setResourceStatus = useUiStore((state) => state.setResourceStatus);
 	const terminalCopyOnSelect = useUiStore((state) => state.terminalCopyOnSelect);
 	const setTerminalCopyOnSelect = useUiStore((state) => state.setTerminalCopyOnSelect);
 	const projectAvatars = useUiStore((state) => state.projectAvatars);
@@ -477,6 +479,9 @@ export function GeneralSettingsSection({
 				</SettingsRow>
 				<SettingsRow label={t("settings.renderMath")} description={t("settings.renderMathHint")}>
 					<Switch aria-label={t("settings.renderMath")} checked={renderMath} onCheckedChange={setRenderMath} />
+				</SettingsRow>
+				<SettingsRow label={t("settings.resourceStatus")} description={t("settings.resourceStatusHint")}>
+					<Switch aria-label={t("settings.resourceStatus")} checked={resourceStatus} onCheckedChange={setResourceStatus} />
 				</SettingsRow>
 			</SettingsSection>
 

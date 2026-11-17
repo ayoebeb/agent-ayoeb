@@ -55,6 +55,7 @@ import {
 } from "./shared/telemetry-policy";
 import type { MigrationState } from "./main/app-state";
 import type { PrivacyGuideRequest, PrivacyPane } from "./main/privacy-guide";
+import type { DailyUpdateState } from "./shared/daily-update";
 import type { UpdateSettings, UpdateStatus, UpdateInstallResult } from "./main/update-settings";
 import type { CloudAccount, CloudPendingSignIn } from "./shared/cloud-account";
 import {
@@ -901,6 +902,10 @@ const api = {
 				ipcRenderer.off("updates:telemetry", wrapped);
 			};
 		},
+	},
+	dailyUpdate: {
+		get: () => ipcRenderer.invoke("dailyUpdate:get") as Promise<DailyUpdateState>,
+		apply: () => ipcRenderer.invoke("dailyUpdate:apply") as Promise<DailyUpdateState>,
 	},
 	featureBuilds: {
 		list: () => ipcRenderer.invoke("featureBuilds:list") as Promise<FeatureBuild[]>,

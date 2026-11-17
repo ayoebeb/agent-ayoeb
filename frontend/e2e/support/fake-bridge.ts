@@ -407,6 +407,10 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 				},
 				// UpdatesSection calls featureBuilds.getActive() immediately on mount; an
 				// omitted namespace would surface as a swallowed React Query error.
+				dailyUpdate: {
+					get: async () => ({ state: "hidden" as const }),
+					apply: async () => ({ state: "hidden" as const }),
+				},
 				featureBuilds: {
 					list: async () => [],
 					getActive: async () => null,
@@ -1352,6 +1356,10 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 				},
 				// UpdatesSection calls featureBuilds.getActive() immediately on mount; an
 				// omitted namespace would surface as a swallowed React Query error.
+				dailyUpdate: {
+					get: async () => ({ state: "hidden" as const }),
+					apply: async () => ({ state: "hidden" as const }),
+				},
 				featureBuilds: {
 					list: async () => [],
 					getActive: async () => null,

@@ -419,6 +419,10 @@ export const aoBridge: AoBridge =
 			onStatus: () => () => undefined,
 			onTelemetry: () => () => undefined,
 		},
+		dailyUpdate: {
+			get: async () => ({ state: "hidden" }),
+			apply: async () => ({ state: "hidden" }),
+		},
 		featureBuilds: {
 			list: async () => [],
 			getActive: async () => null,

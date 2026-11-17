@@ -213,6 +213,8 @@ export type UiState = {
 	navigationGestures: boolean;
 	/** Typeset `$…$`, `$$…$$`, `\(…\)` and `\[…\]` in markdown. Default off: a lone `$` is also currency. */
 	renderMath: boolean;
+	/** The RAM and CPU status in the window's bottom-right corner. Default on; only an explicit "false" hides it. */
+	resourceStatus: boolean;
 	/** Show each project's repository owner avatar in the sidebar instead of a folder. Default on. */
 	projectAvatars: boolean;
 	/**
@@ -291,6 +293,7 @@ export type UiState = {
 	setChatSendKeyMode: (mode: ChatSendKeyMode) => void;
 	setNavigationGestures: (enabled: boolean) => void;
 	setRenderMath: (enabled: boolean) => void;
+	setResourceStatus: (enabled: boolean) => void;
 	setProjectAvatars: (enabled: boolean) => void;
 	setNewSidebarDesign: (enabled: boolean) => void;
 	/** True while the restart-to-update confirmation is open. */
@@ -371,6 +374,7 @@ const terminalCopyOnSelectStorageKey = "ao.terminalCopyOnSelect";
 const chatSendKeyModeStorageKey = "ao.chatSendKeyMode";
 const navigationGesturesStorageKey = "ao.navigationGestures";
 const renderMathStorageKey = "ao.renderMath";
+const resourceStatusStorageKey = "ao.resourceStatus";
 const projectAvatarsStorageKey = "ao.projectAvatars";
 const newSidebarDesignStorageKey = "ao.newSidebarDesign";
 function getLocalStorage() {
@@ -485,6 +489,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 	chatSendKeyMode: initialChatSendKeyMode(),
 	navigationGestures: getLocalStorage()?.getItem(navigationGesturesStorageKey) !== "false",
 	renderMath: getLocalStorage()?.getItem(renderMathStorageKey) === "true",
+	resourceStatus: getLocalStorage()?.getItem(resourceStatusStorageKey) !== "false",
 	projectAvatars: initialProjectAvatars(),
 	newSidebarDesign: getLocalStorage()?.getItem(newSidebarDesignStorageKey) !== "false",
 	restartingProjectIds: new Set<string>(),
@@ -579,6 +584,10 @@ export const useUiStore = create<UiState>((set, get) => ({
 	setRenderMath: (renderMath) => {
 		getLocalStorage()?.setItem(renderMathStorageKey, String(renderMath));
 		set({ renderMath });
+	},
+	setResourceStatus: (resourceStatus) => {
+		getLocalStorage()?.setItem(resourceStatusStorageKey, String(resourceStatus));
+		set({ resourceStatus });
 	},
 	setTerminalCopyOnSelect: (terminalCopyOnSelect) => {
 		getLocalStorage()?.setItem(terminalCopyOnSelectStorageKey, String(terminalCopyOnSelect));

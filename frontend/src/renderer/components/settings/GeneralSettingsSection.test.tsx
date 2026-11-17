@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../../hooks/useSettings";
+import { useUiStore } from "../../stores/ui-store";
 
 const { settingsMock, updateRetentionMock, updateUsageLimitResumeMock, updateOrchestratorWaitingMock, setSoundMock } = vi.hoisted(() => ({
 	settingsMock: vi.fn(),
@@ -214,5 +215,19 @@ describe("continuing sessions after a usage limit", () => {
 		renderSection();
 
 		expect(screen.queryByRole("switch", { name: "Continue after a usage limit" })).not.toBeInTheDocument();
+	});
+});
+
+describe("RAM and CPU status setting", () => {
+	it("is on by default and hides the corner status when switched off", async () => {
+		settingsMock.mockReturnValue(settings({}));
+		useUiStore.setState({ resourceStatus: true });
+		renderSection();
+
+		const toggle = screen.getByRole("switch", { name: "Show RAM and CPU status" });
+		expect(toggle).toBeChecked();
+		await userEvent.click(toggle);
+		expect(useUiStore.getState().resourceStatus).toBe(false);
+		expect(toggle).not.toBeChecked();
 	});
 });

@@ -27,6 +27,7 @@ import { PageTopbar } from "../components/PageTopbar";
 import { SessionTopbarProvider } from "../components/SessionTopbarPortal";
 import { OrchestratorReplacementDialog } from "../components/OrchestratorReplacementDialog";
 import { RestartToUpdateDialog } from "../components/RestartToUpdateDialog";
+import { AppMemoryIndicator } from "../components/SessionMemoryPanel";
 import { SessionImportDialog } from "../components/SessionImportDialog";
 import { Sidebar } from "../components/Sidebar";
 import type { CreateProjectInput } from "../components/CreateProjectFlow";
@@ -408,6 +409,8 @@ function ShellLayout() {
 	const remoteWorkspacesRef = useRef(remoteWorkspaces);
 	remoteWorkspacesRef.current = remoteWorkspaces;
 	const daemonStatus = useDaemonStatus(queryClient);
+	// The RAM and CPU status in the corner: on by default, hidden by a General setting.
+	const resourceStatusEnabled = useUiStore((state) => state.resourceStatus);
 	const daemonIsReady = daemonStatus.state === "ready";
 	// Warm the lazy chunks the first session open needs once the app is idle, so
 	// moving them off the startup path does not add a wait on first use.
@@ -1559,6 +1562,13 @@ const replacementErrorCount = Object.keys(orchestratorReplacementErrors).length;
 				<NewTaskNavigator />
 				<GlobalToast />
 				<RestartToUpdateDialog />
+				{resourceStatusEnabled && daemonStatus.state === "ready" ? (
+					<div className="pointer-events-none fixed bottom-1 right-2 z-40 flex" data-testid="resource-status-corner">
+						<div className="pointer-events-auto">
+							<AppMemoryIndicator />
+						</div>
+					</div>
+				) : null}
 				<SessionImportDialog />
 				{quitConfirmDialog}
 				<KeyboardShortcutsDialog

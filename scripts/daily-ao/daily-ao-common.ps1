@@ -402,6 +402,9 @@ function Set-DailyEnv($cfg, [string]$GoRoot, [string]$NodeDir) {
 	# The daemon must outlive Electron. Without this, any Electron exit
 	# (restart, crash) is treated as "desktop quit" and stops every agent.
 	$env:AO_KEEP_DAEMON = '1'
+	# Tells the app where the watcher leaves pending-restart.json: the app shows the
+	# "update ready" notice from it and runs the update script from here.
+	$env:AO_DAILY_DIR = $cfg.DailyDir
 	$env:VITE_WORKOS_CLIENT_ID = $cfg.WorkOsClientId
 	if ($cfg.CloudAuthRedirect) { $env:AO_CLOUD_AUTH_REDIRECT = $cfg.CloudAuthRedirect }
 	$env:GOPATH = $cfg.GoPath

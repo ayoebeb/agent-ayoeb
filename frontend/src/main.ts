@@ -269,6 +269,7 @@ import { buildLinuxAppMenuTemplate, buildMacAppMenuTemplate, buildWindowsAppMenu
 import { ancestorRepositorySetupWarning, resolveCheckedOutBranch, scanImportFolder } from "./main/import-folder-scan";
 import { parseOpenFolderPathArg } from "./main/open-folder-arg";
 import { registerRemotesIpc, remotesFilePath } from "./main/remotes-main";
+import { createDailyUpdateController } from "./main/daily-update";
 import { sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
 import { createLocalHostIdentity, readRemoteIdentity } from "./main/remote-request";
 import { RemoteRegistry } from "./main/remote-registry";
@@ -3903,6 +3904,12 @@ ipcMain.handle("featureBuilds:list", () => listFeatureBuilds());
 ipcMain.handle("featureBuilds:getActive", () => getActiveFeatureBuild());
 
 ipcMain.handle("updates:getStatus", (): UpdateStatus => getUpdateStatus());
+
+// The daily Ayo's "update ready" notice. AO_DAILY_DIR is set only by the daily
+// scripts, so a packaged or dev run never shows it.
+const dailyUpdate = createDailyUpdateController({ dailyDir: process.env.AO_DAILY_DIR });
+ipcMain.handle("dailyUpdate:get", () => dailyUpdate.getState());
+ipcMain.handle("dailyUpdate:apply", () => dailyUpdate.apply());
 ipcMain.handle("updates:check", async (_event, options?: UpdateCheckOptions) => {
 	const runFile = runFilePath();
 	if (!runFile) return;
