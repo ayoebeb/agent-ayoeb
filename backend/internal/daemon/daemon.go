@@ -73,6 +73,7 @@ import (
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	linkpreviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/linkpreview"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/permissionmemory"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/report"
@@ -404,7 +405,17 @@ func Run(buildVersion string) error {
 	// The review and chat services and the hook route start before the SCM
 	// observer they ask for early refreshes, so they hold a late-bound handle.
 	reviewRefresher := &scmReviewRefresher{}
+	// "Always allow" choices a user made, remembered per project: kept in the
+	// daemon's own store, written into each new Claude Code session workspace.
+	permissionMemory := permissionmemory.New(permissionmemory.Options{
+		Store:       store,
+		Sessions:    store,
+		AddRules:    claudecodeagent.AddPermissionRules,
+		RemoveRules: claudecodeagent.RemovePermissionRules,
+		Log:         log,
+	})
 	chatSvc := chatsvc.New(chatsvc.Options{
+		PermissionMemory:    permissionMemory,
 		PRChanged:           reviewRefresher.RequestSessionRefresh,
 		Store:               store,
 		Sessions:            store,
@@ -611,6 +622,9 @@ func Run(buildVersion string) error {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
 		}
 		return fmt.Errorf("wire session service: %w", err)
+	}
+	if binder, ok := wiredSessMgr.(projectPermissionBinder); ok {
+		binder.SetProjectPermissionApplier(permissionMemory)
 	}
 	if usage != nil {
 		sessionSvc.SetUsageArchiveFlush(func(context.Context) { usage.requestArchiveFlush() })
@@ -1151,57 +1165,58 @@ func Run(buildVersion string) error {
 	// the session's own must not replace its activity or transcript.
 	hookActivity := hookprocess.New(lcStack.LCM, store, runtimeAdapter, nil, log)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
-		Awake:              awakeSvc,
-		Projects:           projectSvc,
-		ArtifactVersions:   lcStack.ArtifactVersions,
-		HostID:             hostIdentity.HostID,
-		Endpoints:          bs,
-		Agents:             agentSvc,
-		CodexAccounts:      agentSvc,
-		AgentAccounts:      freshAccountUsage{agentAccountSvc, usagePipeline},
-		SystemChecks:       systemChecks,
-		Installer:          systemInstall,
-		ComputerUse:        computerUse,
-		Sessions:           sessionSvc,
-		Automations:        automationSvc,
-		DesktopWorkspaces:  sessionSvc,
-		PRs:                prActions,
-		Reviews:            reviewSvc,
-		Notifications:      notifier,
-		Reports:            reportSvc,
-		NotificationStream: notificationHub,
-		Push:               pushRegistry,
-		Presence:           presenceTracker,
-		DeviceRoster:       deviceRoster,
-		DeviceLive:         presenceTracker,
-		Import:             importsvc.New(importsvc.Deps{Store: store}),
-		SessionImport:      sessionImportSvc,
-		Directories:        fsbrowsersvc.New(),
-		ShellTerminals:     shellTermSvc,
-		CommandRuns:        shellTermSvc,
-		CommandRunKey:      httpd.DeriveCommandRunKey(browserRuntimeToken),
-		Cues:               cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
-		AgentAuth:          agentAuthSvc,
-		GitHub:             newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),
-		Conversations:      chatSvc,
-		ConversationSearch: store,
-		Settings:           settingsSvc,
-		CDC:                store,
-		Events:             cdcPipe.Broadcaster,
-		Activity:           hookActivity,
-		PRRefresh:          reviewRefresher,
-		NativeSessions:     nativeSessions,
-		UsageHooks:         usageCollector,
-		UsageSummary:       freshUsageSummary{usagesvc.NewSummaryReader(store), usagePipeline},
-		UsageReport:        freshUsageReport{usageReportReader(store, usagePricing), usagePipeline},
-		UsageLimitHistory:  usagesvc.NewLimitHistoryReader(store),
-		UsageLimitSetting:  store,
-		UsagePrices:        usagePrices(usagePricing),
-		SessionMemory:      memoryReader,
-		SessionSteps:       lcStack.LCM,
-		Telemetry:          telemetrySink,
-		TelemetryIdentity:  telemetryIdentity,
-		LifetimeSessions:   store.LifetimeSessions,
+		Awake:                  awakeSvc,
+		Projects:               projectSvc,
+		ProjectPermissionRules: permissionMemory,
+		ArtifactVersions:       lcStack.ArtifactVersions,
+		HostID:                 hostIdentity.HostID,
+		Endpoints:              bs,
+		Agents:                 agentSvc,
+		CodexAccounts:          agentSvc,
+		AgentAccounts:          freshAccountUsage{agentAccountSvc, usagePipeline},
+		SystemChecks:           systemChecks,
+		Installer:              systemInstall,
+		ComputerUse:            computerUse,
+		Sessions:               sessionSvc,
+		Automations:            automationSvc,
+		DesktopWorkspaces:      sessionSvc,
+		PRs:                    prActions,
+		Reviews:                reviewSvc,
+		Notifications:          notifier,
+		Reports:                reportSvc,
+		NotificationStream:     notificationHub,
+		Push:                   pushRegistry,
+		Presence:               presenceTracker,
+		DeviceRoster:           deviceRoster,
+		DeviceLive:             presenceTracker,
+		Import:                 importsvc.New(importsvc.Deps{Store: store}),
+		SessionImport:          sessionImportSvc,
+		Directories:            fsbrowsersvc.New(),
+		ShellTerminals:         shellTermSvc,
+		CommandRuns:            shellTermSvc,
+		CommandRunKey:          httpd.DeriveCommandRunKey(browserRuntimeToken),
+		Cues:                   cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
+		AgentAuth:              agentAuthSvc,
+		GitHub:                 newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),
+		Conversations:          chatSvc,
+		ConversationSearch:     store,
+		Settings:               settingsSvc,
+		CDC:                    store,
+		Events:                 cdcPipe.Broadcaster,
+		Activity:               hookActivity,
+		PRRefresh:              reviewRefresher,
+		NativeSessions:         nativeSessions,
+		UsageHooks:             usageCollector,
+		UsageSummary:           freshUsageSummary{usagesvc.NewSummaryReader(store), usagePipeline},
+		UsageReport:            freshUsageReport{usageReportReader(store, usagePricing), usagePipeline},
+		UsageLimitHistory:      usagesvc.NewLimitHistoryReader(store),
+		UsageLimitSetting:      store,
+		UsagePrices:            usagePrices(usagePricing),
+		SessionMemory:          memoryReader,
+		SessionSteps:           lcStack.LCM,
+		Telemetry:              telemetrySink,
+		TelemetryIdentity:      telemetryIdentity,
+		LifetimeSessions:       store.LifetimeSessions,
 		UsageFlush: func(ctx context.Context) {
 			if usage != nil {
 				usage.flush(ctx, false)

@@ -1,5 +1,5 @@
 import type { AppIcon } from "./icons";
-import { Bot, FolderGit2, KeyRound, Loader2, MonitorCog, Play, ScrollText, TriangleAlert, Wrench } from "@/components/app-icons";
+import { Bot, FolderGit2, KeyRound, Loader2, MonitorCog, Play, ScrollText, ShieldCheck, TriangleAlert, Wrench } from "@/components/app-icons";
 import * as Dialog from "@radix-ui/react-dialog";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +19,7 @@ import { ProjectSettingsForm, type ProjectSettingsSaveState, type ProjectSetting
 import { CloudProjectScriptsSettings, ProjectScriptsSettings } from "./ProjectScriptsSettings";
 import { CloudProjectInstructionsSettings, CloudProjectRepositoriesSettings } from "./CloudProjectLayoutSettings";
 import { CloudProjectEnvironmentSettings, ProjectEnvironmentSettings } from "./ProjectEnvironmentSettings";
+import { ProjectPermissionsSettings } from "./ProjectPermissionsSettings";
 import { useCloudProjectsQuery, workspaceQueryOptions } from "../hooks/useWorkspaceQuery";
 import { CuesSettings } from "./CuesDialog";
 import { PageTopbar, PageTopbarTitle } from "./PageTopbar";
@@ -136,6 +137,8 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 	if (!remoteHostId) projectSections.push({ id: "scripts", label: t("settings.project.scripts"), icon: Wrench });
 	if (!remoteHostId) {
 		projectSections.push({ id: "environment", label: t("settings.project.environment"), icon: KeyRound });
+		// The "Always allow" choices of this project's local Claude Code sessions.
+		if (!isCloudProjectSettings) projectSections.push({ id: "permissions", label: t("settings.project.permissions"), icon: ShieldCheck });
 		projectSections.push({ id: "cues", label: t("cues.title"), icon: Play });
 	}
 
@@ -331,6 +334,9 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 				return isCloudProjectSettings && cloudOrgId !== undefined
 					? <CloudProjectEnvironmentSettings projectId={displaySettings.projectId} cloudOrgId={cloudOrgId} onSaveState={setProjectSaveState} />
 					: <ProjectEnvironmentSettings projectId={displaySettings.projectId} onSaveState={setProjectSaveState} />;
+			}
+			if (displaySettings?.scope === "project" && !remoteHostId && !isCloudProjectSettings && activeProjectSection === "permissions") {
+				return <ProjectPermissionsSettings projectId={displaySettings.projectId} />;
 			}
 			if (displaySettings?.scope === "project") {
 				return <ProjectSettingsForm projectId={displaySettings.projectId} hostId={remoteHostId} cloudOrgId={cloudOrgId} section={activeProjectSection as ProjectFormSection} onSaveState={setProjectSaveState} />;
