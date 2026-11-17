@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -127,7 +128,7 @@ func TestSearchFlattensTicketsAndSendsJQL(t *testing.T) {
 			search = &r
 		}
 	}
-	if search == nil || search.Method != "POST" || !strings.Contains(search.Body, `project = \"YIA\" ORDER BY updated DESC`) {
+	if search == nil || search.Method != http.MethodPost || !strings.Contains(search.Body, `project = \"YIA\" ORDER BY updated DESC`) {
 		t.Fatalf("search request = %+v", search)
 	}
 }

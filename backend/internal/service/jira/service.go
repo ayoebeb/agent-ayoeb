@@ -233,7 +233,7 @@ type StartResult struct {
 
 var (
 	projectKeyRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{1,19}$`)
-	issueKeyRe   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{1,19}-[0-9]{1,9}$`)
+	issueKeyRe   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{1,19}-\d{1,9}$`)
 )
 
 // Status returns the project's connection, or a zero Connection when none.
@@ -643,7 +643,7 @@ func EffectiveJQL(projectKey, custom string) string {
 	if strings.TrimSpace(custom) != "" {
 		return strings.TrimSpace(custom)
 	}
-	return fmt.Sprintf(`project = "%s" AND (statusCategory != Done OR resolutiondate >= -7d) ORDER BY updated DESC`, projectKey)
+	return fmt.Sprintf(`project = %q AND (statusCategory != Done OR resolutiondate >= -7d) ORDER BY updated DESC`, projectKey)
 }
 
 // layoutColumns groups tickets into the Jira board's columns when the board is
@@ -676,10 +676,10 @@ func toTicket(issue jiraclient.Issue, url string, sessions []TicketSession) Tick
 }
 
 func columnsFromBoard(tickets []Ticket, board jiraclient.Board) []BoardColumn {
-	columns := make([]BoardColumn, len(board.Columns))
+	columns := make([]BoardColumn, 0, len(board.Columns)+1)
 	byStatus := map[string]int{}
 	for i, col := range board.Columns {
-		columns[i] = BoardColumn{Name: col.Name, Tickets: []Ticket{}}
+		columns = append(columns, BoardColumn{Name: col.Name, Tickets: []Ticket{}})
 		for _, id := range col.StatusIDs {
 			byStatus[id] = i
 		}

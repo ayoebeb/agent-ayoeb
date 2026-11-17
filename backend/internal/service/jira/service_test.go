@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -468,7 +469,7 @@ func TestStartRejectsBadKeysMissingTicketsAndStaysReadOnly(t *testing.T) {
 	}
 	// Read-only toward Jira: only GETs, plus the search POST.
 	for _, r := range f.jira.Requests() {
-		if r.Method != "GET" && !(r.Method == "POST" && r.Path == "/rest/api/3/search/jql") {
+		if r.Method != http.MethodGet && (r.Method != http.MethodPost || r.Path != "/rest/api/3/search/jql") {
 			t.Fatalf("service wrote to Jira: %+v", r)
 		}
 	}

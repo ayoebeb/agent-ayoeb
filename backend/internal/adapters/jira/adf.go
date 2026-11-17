@@ -213,7 +213,7 @@ func splitAcceptanceCriteria(description string) (rest, criteria string) {
 		}
 	}
 	var section []string
-	if m := acHeading.FindStringSubmatch(lines[start]); m != nil && strings.TrimSpace(m[1]) != "" {
+	if m := acHeading.FindStringSubmatch(lines[start]); len(m) > 1 && strings.TrimSpace(m[1]) != "" {
 		section = append(section, strings.TrimSpace(m[1]))
 	}
 	section = append(section, lines[start+1:end]...)
