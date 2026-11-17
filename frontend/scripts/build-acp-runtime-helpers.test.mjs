@@ -16,6 +16,7 @@ import {
 	archiveExtraction,
 	createWorkDirectory,
 	npmInvocation,
+	patchClaudeAlwaysAllowScope,
 	patchClaudeContextUsage,
 	patchClaudeFoldedPromptSettlement,
 	patchClaudeHibernationCheck,
@@ -616,6 +617,252 @@ function onMessage(message) {
 
 		expect(() => patchClaudeSteerSettlement(adapterPath)).toThrow(/steer settlement patch/);
 		expect(readFileSync(adapterPath, "utf8")).toBe(changed);
+	});
+});
+
+// The permission request of claude-agent-acp 0.70's canUseTool, at its upstream
+// indentation, with the two helpers it calls reduced to what the tests observe.
+const alwaysAllowConsumer = [
+	"function permissionMetadataForAlwaysAllow(suggestions, toolName) {",
+	'    const effective = suggestions && suggestions.length > 0 ? suggestions : [{ type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "session" }];',
+	"    return { version: 1, changes: effective };",
+	"}",
+	"async function canUseTool(requestPermissionFromClient, toolName, toolInput, suggestions) {",
+	"            const response = await requestPermissionFromClient({",
+	"                options: [",
+	'                    { kind: "reject_once", name: "Deny", optionId: "reject" },',
+	'                    { kind: "allow_once", name: "Allow Once", optionId: "allow" },',
+	"                    {",
+	'                        kind: "allow_always",',
+	'                        name: "Always Allow",',
+	'                        optionId: "allow_always",',
+	"                        _meta: {",
+	"                            permission: permissionMetadataForAlwaysAllow(suggestions, toolName),",
+	"                        },",
+	"                    },",
+	"                ],",
+	"            });",
+	'            if (response.outcome?.outcome === "selected" &&',
+	'                (response.outcome.optionId === "allow" || response.outcome.optionId === "allow_always")) {',
+	"                // If Claude Code has suggestions, it will update their settings already",
+	'                if (response.outcome.optionId === "allow_always") {',
+	"                    return {",
+	'                        behavior: "allow",',
+	"                        updatedInput: toolInput,",
+	"                        updatedPermissions: suggestions ?? [",
+	"                            {",
+	'                                type: "addRules",',
+	"                                rules: [{ toolName }],",
+	'                                behavior: "allow",',
+	'                                destination: "session",',
+	"                            },",
+	"                        ],",
+	"                    };",
+	"                }",
+	'                return { behavior: "allow", updatedInput: toolInput };',
+	"            }",
+	"            else {",
+	'                return { behavior: "deny", message: "User refused permission to run tool" };',
+	"            }",
+	"}",
+].join("\n");
+
+describe("patchClaudeAlwaysAllowScope", () => {
+	function patchedAdapter() {
+		const adapterPath = join(temporaryDirectory(), "acp-agent.js");
+		writeFileSync(adapterPath, alwaysAllowConsumer);
+		expect(patchClaudeAlwaysAllowScope(adapterPath)).toBe(true);
+		return { adapterPath, source: readFileSync(adapterPath, "utf8") };
+	}
+
+	// Runs the patched permission request against a client that picks `optionId`.
+	// Returns what the client was offered and what Claude Code is told to apply.
+	async function ask(toolName, toolInput, suggestions, optionId) {
+		const { canUseTool } = new Function(`${patchedAdapter().source}\nreturn { canUseTool };`)();
+		let offered;
+		const result = await canUseTool(
+			async (request) => {
+				offered = request.options;
+				return { outcome: { outcome: "selected", optionId } };
+			},
+			toolName,
+			toolInput,
+			suggestions,
+		);
+		return { offered, result };
+	}
+
+	const exactRule = (command) => [
+		{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: command }], behavior: "allow", destination: "localSettings" },
+	];
+	const rulesOf = (updates) => updates.flatMap((update) => update.rules.map((rule) => rule.ruleContent ?? rule.toolName));
+
+	it("patches once and does not touch the unrelated permission paths", () => {
+		const { adapterPath, source } = patchedAdapter();
+		expect(patchClaudeAlwaysAllowScope(adapterPath)).toBe(false);
+		expect(readFileSync(adapterPath, "utf8")).toBe(source);
+		expect(source).toContain('{ kind: "reject_once", name: "Deny", optionId: "reject" },');
+		expect(source).toContain('{ kind: "allow_once", name: "Allow Once", optionId: "allow" },');
+	});
+
+	it("fails packaging, leaving the adapter alone, when the pinned permission code changes", () => {
+		const anchors = [
+			"function permissionMetadataForAlwaysAllow(suggestions, toolName) {",
+			'name: "Always Allow",',
+			'response.outcome.optionId === "allow_always")) {',
+			"updatedPermissions: suggestions ?? [",
+		];
+		for (const anchor of anchors) {
+			const adapterPath = join(temporaryDirectory(), "acp-agent.js");
+			const changed = alwaysAllowConsumer.replace(anchor, anchor.replace(/\w+/, "changed"));
+			writeFileSync(adapterPath, changed);
+			expect(() => patchClaudeAlwaysAllowScope(adapterPath), anchor).toThrow(/always-allow scope patch/);
+			expect(readFileSync(adapterPath, "utf8")).toBe(changed);
+		}
+	});
+
+	it("keeps allow_always narrow and offers the command kind as a separate choice", async () => {
+		const command = 'node -e "console.log(1)"';
+		const first = await ask("Bash", { command }, exactRule(command), "allow_always");
+		expect(first.offered.map((option) => [option.optionId, option.kind, option.name])).toEqual([
+			["reject", "reject_once", "Deny"],
+			["allow", "allow_once", "Allow Once"],
+			["allow_always", "allow_always", "Always allow only this exact command"],
+			["allow_always_class", "allow_always", 'Always allow "node -e ..." in this workspace'],
+		]);
+		// The metadata a client shows is the rule that will be applied.
+		expect(rulesOf(first.offered[2]._meta.permission.changes)).toEqual([command]);
+		expect(rulesOf(first.offered[3]._meta.permission.changes)).toEqual(["node -e *"]);
+		// A worker that sends the documented allow_always id never grants a class.
+		expect(first.result).toEqual({
+			behavior: "allow",
+			updatedInput: { command },
+			updatedPermissions: exactRule(command),
+		});
+
+		const kind = await ask("Bash", { command }, exactRule(command), "allow_always_class");
+		expect(kind.result).toEqual({
+			behavior: "allow",
+			updatedInput: { command },
+			updatedPermissions: [
+				{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "node -e *" }], behavior: "allow", destination: "localSettings" },
+			],
+		});
+	});
+
+	it.each([
+		['node -e "console.log(1)"', "node -e *"],
+		['python -c "print(1)"', "python -c *"],
+		["python3 -c x", "python3 -c *"],
+		["node -p 1+1", "node -p *"],
+		['node.exe -e "x"', "node.exe -e *"],
+		["python script.py", "python script.py *"],
+		["node script.js --flag", "node script.js *"],
+		["pytest tests/a.py", "pytest tests/a.py *"],
+		['node -e "a; b"', "node -e *"],
+		// Programs outside the allowlist never get a wildcard from AO, whatever
+		// their flags look like: Claude Code's own rule stands.
+		["rm -rf node_modules", undefined],
+		["rm -rf dir", undefined],
+		["git --no-pager push --force", undefined],
+		["git --no-pager log", undefined],
+		["chmod -R 777 x", undefined],
+		["chown -R me x", undefined],
+		["mv -f a b", undefined],
+		["curl -s -m 1 http://127.0.0.1:1/", undefined],
+		["curl -s -d @secrets.txt http://127.0.0.1:1/", undefined],
+		["wget -O out.sh http://127.0.0.1:1/", undefined],
+		["npx --no-install some-package", undefined],
+		["ssh -o x host", undefined],
+		["docker --context x rm y", undefined],
+		// Claude Code's own rule stands for these too.
+		["git add *", undefined],
+		["make build *", undefined],
+		["node --version", undefined],
+		["curl http://127.0.0.1:1/ -m 1", undefined],
+		['bash -c "echo hi"', undefined],
+		['sudo node -e "x"', undefined],
+		["FOO=bar node --version", undefined],
+		['node -e "$HOME"', undefined],
+		["node -e `id`", undefined],
+		['node -e "a\\"b"', undefined],
+		["node -e x && rm -rf y", undefined],
+		["node -e x | cat", undefined],
+		["node -e (x)", undefined],
+		['node -e "unterminated', undefined],
+	])("%s becomes %s", async (command, widened) => {
+		const { offered } = await ask("Bash", { command }, exactRule(command), "allow");
+		const always = offered.filter((option) => option.kind === "allow_always");
+		if (widened === undefined) {
+			expect(always.map((option) => [option.optionId, option.name])).toEqual([["allow_always", "Always Allow"]]);
+			return;
+		}
+		expect(always.map((option) => option.optionId)).toEqual(["allow_always", "allow_always_class"]);
+		expect(rulesOf(always[0]._meta.permission.changes)).toEqual([command]);
+		expect(rulesOf(always[1]._meta.permission.changes)).toEqual([widened]);
+	});
+
+	it("keeps Claude Code's behaviour for edits and for a request with no suggestions", async () => {
+		const setMode = [{ type: "setMode", mode: "acceptEdits", destination: "session" }];
+		const edit = await ask("Write", { file_path: "a.txt" }, setMode, "allow_always");
+		expect(edit.offered.filter((option) => option.kind === "allow_always").map((option) => option.optionId)).toEqual(["allow_always"]);
+		expect(edit.result.updatedPermissions).toEqual(setMode);
+
+		const bare = await ask("Bash", { command: "node -e x" }, undefined, "allow_always");
+		expect(bare.offered.filter((option) => option.kind === "allow_always").map((option) => option.optionId)).toEqual(["allow_always"]);
+		expect(bare.result.updatedPermissions).toEqual([
+			{ type: "addRules", rules: [{ toolName: "Bash" }], behavior: "allow", destination: "session" },
+		]);
+	});
+
+	it("lets an MCP tool be remembered alone or as the whole server, only when asked", async () => {
+		const tool = "mcp__atlassian__createJiraIssue";
+		const suggestions = [{ type: "addRules", rules: [{ toolName: tool }], behavior: "allow", destination: "localSettings" }];
+
+		const alone = await ask(tool, {}, suggestions, "allow_always");
+		expect(alone.offered.filter((option) => option.kind === "allow_always").map((option) => [option.optionId, option.name])).toEqual([
+			["allow_always", "Always allow this tool in this workspace"],
+			["allow_always_server", "Always allow all atlassian tools in this workspace"],
+		]);
+		expect(alone.result.updatedPermissions).toEqual(suggestions);
+
+		const server = await ask(tool, {}, suggestions, "allow_always_server");
+		expect(server.result.updatedPermissions).toEqual([
+			{ type: "addRules", rules: [{ toolName: "mcp__atlassian" }], behavior: "allow", destination: "localSettings" },
+		]);
+
+		// With no suggestion to copy a destination from, the wider grant stays in memory.
+		const unsuggested = await ask(tool, {}, undefined, "allow_always_server");
+		expect(unsuggested.result.updatedPermissions[0].destination).toBe("session");
+		const once = await ask(tool, {}, suggestions, "allow");
+		expect(once.result).toEqual({ behavior: "allow", updatedInput: {} });
+	});
+
+	it("refuses an always-choice that was not offered for the tool", async () => {
+		const command = 'node -e "x"';
+		// allow_always_exact is the id an earlier revision of this patch offered.
+		for (const optionId of ["allow_always_server", "allow_always_exact", "allow_always_anything"]) {
+			const { result } = await ask("Bash", { command }, exactRule(command), optionId);
+			expect(result.behavior, optionId).toBe("deny");
+		}
+		const { result } = await ask("Bash", { command }, exactRule(command), "reject");
+		expect(result.behavior).toBe("deny");
+	});
+
+	it("restores Claude Code's own scope when AO_CLAUDE_EXACT_ALWAYS_ALLOW is 1", async () => {
+		const previous = process.env.AO_CLAUDE_EXACT_ALWAYS_ALLOW;
+		process.env.AO_CLAUDE_EXACT_ALWAYS_ALLOW = "1";
+		try {
+			const command = 'node -e "x"';
+			const bash = await ask("Bash", { command }, exactRule(command), "allow_always");
+			expect(bash.offered.filter((option) => option.kind === "allow_always")).toHaveLength(1);
+			expect(bash.result.updatedPermissions).toEqual(exactRule(command));
+			const mcp = await ask("mcp__atlassian__createJiraIssue", {}, undefined, "allow_always");
+			expect(mcp.offered.filter((option) => option.kind === "allow_always")).toHaveLength(1);
+		} finally {
+			if (previous === undefined) delete process.env.AO_CLAUDE_EXACT_ALWAYS_ALLOW;
+			else process.env.AO_CLAUDE_EXACT_ALWAYS_ALLOW = previous;
+		}
 	});
 });
 

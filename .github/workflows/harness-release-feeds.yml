@@ -26,8 +26,9 @@ concurrency:
 
 jobs:
   live-feeds:
-    # Forks inherit the schedule but nobody watches their runs.
-    if: github.event_name != 'schedule' || !github.event.repository.fork
+    # Copies inherit the schedule but nobody watches their runs, and a private
+    # copy is billed for each one. Pull requests and manual runs still go ahead.
+    if: github.event_name != 'schedule' || github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:

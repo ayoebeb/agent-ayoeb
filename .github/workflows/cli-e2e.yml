@@ -6,6 +6,9 @@ on:
       native:
         type: boolean
         required: true
+      macos:
+        type: boolean
+        required: true
 
 permissions:
   contents: read
@@ -20,7 +23,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.native && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
+        # Windows runs with the rest of the native coverage. macOS bills ten
+        # minutes for each one, so it also needs the macOS paths (or a weekly run).
+        os: ${{ fromJSON(inputs.native && (inputs.macos && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","windows-latest"]') || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:

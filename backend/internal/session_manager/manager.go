@@ -404,6 +404,8 @@ type Manager struct {
 	agents    ports.AgentResolver
 	workspace ports.Workspace
 	store     Store
+	// projectPermissions is late-bound by SetProjectPermissionApplier.
+	projectPermissions ProjectPermissionApplier
 	// agentReadiness is late-bound by SetAgentReadiness.
 	agentReadiness      ports.AgentReadinessProvider
 	backgroundTaskUsage BackgroundTaskUsage
@@ -650,6 +652,18 @@ func (m *Manager) SetTerminalInputGate(gate TerminalInputGate) {
 // SetAgentReadiness completes daemon wiring before request handling begins.
 func (m *Manager) SetAgentReadiness(provider ports.AgentReadinessProvider) {
 	m.agentReadiness = provider
+}
+
+// ProjectPermissionApplier writes a project's remembered tool permissions into
+// a session workspace before its agent starts.
+type ProjectPermissionApplier interface {
+	ApplyToWorkspace(ctx context.Context, id domain.SessionID, workspacePath string) error
+}
+
+// SetProjectPermissionApplier completes daemon wiring before request handling
+// begins. Nil leaves workspaces with only what the agent wrote itself.
+func (m *Manager) SetProjectPermissionApplier(applier ProjectPermissionApplier) {
+	m.projectPermissions = applier
 }
 
 // BackgroundTaskUsage counts the provider calls AO makes on a session's behalf.
@@ -6962,6 +6976,13 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 	}); err != nil {
 		m.cleanupPreparedAgentWorkspace(ctx, agent, id, workspacePath, env)
 		return fmt.Errorf("install hooks: %w", err)
+	}
+	// The user's earlier "Always allow" choices for this project. A workspace
+	// without them only asks again, so a failure here must not stop the launch.
+	if m.projectPermissions != nil {
+		if err := m.projectPermissions.ApplyToWorkspace(ctx, id, workspacePath); err != nil {
+			m.logger.Warn("could not apply the project's remembered permissions", "session", id, "error", err)
+		}
 	}
 	if pl, ok := agent.(preLauncher); ok {
 		if err := pl.PreLaunch(ctx, ports.LaunchConfig{

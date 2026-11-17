@@ -68,6 +68,9 @@ type Service struct {
 	recheckAccount         func(domain.SessionID, domain.AgentHarness)
 	prChanged              func(domain.SessionID)
 	onCodexCapacityChanged func(domain.SessionID, string, ports.CodexCapacityObservation)
+	// permissionMemory remembers "Always allow" choices per project. Nil keeps a
+	// choice in its own workspace, as before.
+	permissionMemory PermissionMemory
 	// onModelChanged syncs ChatUI's model override (including clearing it) to
 	// session metadata before the next prompt routes or a later TUI rebuild.
 	onModelChanged   func(domain.SessionID, string)
@@ -211,6 +214,10 @@ type Options struct {
 	// globally active AO Codex account. The callback owns profile-independent
 	// account state; conversation rows are not the authority for Codex capacity.
 	OnCodexCapacityChanged func(domain.SessionID, string, ports.CodexCapacityObservation)
+	// PermissionMemory remembers the tool permission a user chose "Always allow"
+	// for, for every future session of the project. Nil leaves a choice in the
+	// workspace it was made in.
+	PermissionMemory PermissionMemory
 	// OnModelChanged syncs ChatUI's model override to session metadata before
 	// the next prompt routes. Nil leaves session metadata unchanged.
 	OnModelChanged func(domain.SessionID, string)
@@ -261,6 +268,7 @@ func New(opts Options) *Service {
 		recheckAccount:         opts.RecheckAccount,
 		prChanged:              opts.PRChanged,
 		onCodexCapacityChanged: opts.OnCodexCapacityChanged,
+		permissionMemory:       opts.PermissionMemory,
 		onModelChanged:         opts.OnModelChanged,
 		stopProviderHost:       opts.StopProviderHost,
 		renders:                opts.Renders,
@@ -1083,6 +1091,7 @@ func (s *Service) startLocked(ctx context.Context, cfg StartConfig) (*Controller
 	// replaced can be told apart from the current one's.
 	controller := newController(
 		cfg.SessionID, owner, conversation, generation, cfg.Harness, conv, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.recheckAccount, s.prChanged, s.onCodexCapacityChanged, s.reader)
+	controller.permissionMemory = s.permissionMemory
 	var commitProviderHistory func(context.Context) error
 	if liveReconnect {
 		if err := s.store.FailReservedQueuedBatch(ctx, conversation.ID, s.now()); err != nil {
