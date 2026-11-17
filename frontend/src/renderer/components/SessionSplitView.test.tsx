@@ -13,6 +13,7 @@ import { TooltipProvider } from "./ui/tooltip";
 const navigate = vi.fn();
 const openOrchestrator = vi.fn();
 let workspaces: WorkspaceSummary[] = [];
+let remoteWorkspaces: WorkspaceSummary[] = [];
 
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@tanstack/react-router")>()),
@@ -21,6 +22,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 vi.mock("../hooks/useWorkspaceQuery", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../hooks/useWorkspaceQuery")>()),
 	useWorkspaceQuery: () => ({ data: workspaces }),
+	useRemoteWorkspaces: () => ({ data: remoteWorkspaces }),
 }));
 vi.mock("../hooks/useProjectOrchestratorAction", () => ({
 	useProjectOrchestratorAction: () => ({ openOrchestrator, isSpawning: false, isProjectRestarting: false, isProvisioning: false, spawnError: "" }),
@@ -37,11 +39,11 @@ function workspace(id: string, sessions: WorkspaceSession[]): WorkspaceSummary {
 
 const shortcutSpy = vi.fn();
 /** Stands in for SessionView: shows what its pane tells it and takes a session shortcut. */
-function FakeSession({ sessionId }: SessionPaneViewProps) {
+function FakeSession({ sessionId, hostId }: SessionPaneViewProps) {
 	const pane = useSessionPane();
 	useSessionShortcut("toggle-terminal", () => shortcutSpy(sessionId));
 	return (
-		<div data-focused-pane={pane?.focused ? "yes" : "no"} data-testid={`view-${sessionId}`}>
+		<div data-focused-pane={pane?.focused ? "yes" : "no"} data-host={hostId} data-testid={`view-${sessionId}`}>
 			<SessionTabsTopbar tabs={<span>{sessionId}</span>} />
 		</div>
 	);
@@ -53,15 +55,15 @@ const b: SessionPaneRef = { kind: "session", sessionId: "b", projectId: "p2" };
 const empty: SessionPaneRef = { kind: "orchestrator", projectId: "p3" };
 
 /** Subscribes to the split as LocalSessionHost does. */
-function Host({ routedSessionId, routedPaneKey }: { routedSessionId: string; routedPaneKey: string }) {
+function Host({ routedSessionId, routedPaneKey, routedHostId }: { routedSessionId: string; routedPaneKey: string; routedHostId?: string }) {
 	const split = useSessionSplitStore((state) => state.split);
-	return split ? <SessionSplitView renderSession={renderSession} routedPaneKey={routedPaneKey} routedSessionId={routedSessionId} split={split} /> : null;
+	return split ? <SessionSplitView renderSession={renderSession} routedHostId={routedHostId} routedPaneKey={routedPaneKey} routedSessionId={routedSessionId} split={split} /> : null;
 }
 
-function renderSplit(routedSessionId: string, routedPaneKey: string) {
+function renderSplit(routedSessionId: string, routedPaneKey: string, routedHostId?: string) {
 	return render(
 		<TooltipProvider>
-			<Host routedPaneKey={routedPaneKey} routedSessionId={routedSessionId} />
+			<Host routedHostId={routedHostId} routedPaneKey={routedPaneKey} routedSessionId={routedSessionId} />
 		</TooltipProvider>,
 	);
 }
@@ -75,6 +77,7 @@ describe("SessionSplitView", () => {
 		window.localStorage.clear();
 		navigate.mockReset();
 		shortcutSpy.mockReset();
+		remoteWorkspaces = [];
 		workspaces = [
 			workspace("p1", [session("a", "p1")]),
 			workspace("p2", [session("b", "p2")]),
@@ -197,5 +200,74 @@ describe("SessionSplitView", () => {
 		expect(screen.queryByTestId("view-b")).toBeNull();
 		expect(within(pane("session:b")).getByText("This session has ended.")).toBeInTheDocument();
 		expect(within(pane("session:b")).getByTestId("session-pane-empty")).toHaveAttribute("data-pane-state", "ended");
+	});
+
+	describe("with panes from different computers", () => {
+		const remoteA: SessionPaneRef = { kind: "session", sessionId: "a", projectId: "p1", hostId: "host-2" };
+		const remoteOrchestrator: SessionPaneRef = { kind: "orchestrator", projectId: "p9", hostId: "host-2" };
+		const remoteKey = "session:remote:host-2:a";
+
+		beforeEach(() => {
+			remoteWorkspaces = [
+				{ ...workspace("p1", [session("a", "p1", { hostId: "host-2" })]), hostId: "host-2" } as WorkspaceSummary,
+			];
+		});
+
+		it("gives each pane its own computer, even with the same session id, and names the computer", () => {
+			useSessionSplitStore.setState({ split: openSplit([a, remoteA], "session:a") });
+			renderSplit("a", "session:a");
+			const views = screen.getAllByTestId("view-a");
+			expect(views.map((view) => view.getAttribute("data-host"))).toEqual([null, "host-2"]);
+			expect(within(pane("session:a")).getByTestId("session-pane-host")).toHaveTextContent("This computer");
+			expect(within(pane(remoteKey)).getByTestId("session-pane-host")).toHaveTextContent("host-2");
+		});
+
+		it("names no computer while every pane is on the same one", () => {
+			renderSplit("a", "session:a");
+			expect(screen.queryByTestId("session-pane-host")).toBeNull();
+		});
+
+		it("focuses a remote pane by routing to its host", () => {
+			useSessionSplitStore.setState({ split: openSplit([a, remoteA], "session:a") });
+			renderSplit("a", "session:a");
+			fireEvent.pointerDown(within(pane(remoteKey)).getByTestId("view-a"));
+			expect(navigate).toHaveBeenCalledWith({
+				to: "/host/$hostId/project/$projectId/session/$sessionId",
+				params: { hostId: "host-2", projectId: "p1", sessionId: "a" },
+				replace: true,
+			});
+			expect(useSessionSplitStore.getState().split?.focus).toBe(remoteKey);
+		});
+
+		it("focuses a local pane from a remote route by routing to the local session", () => {
+			useSessionSplitStore.setState({ split: openSplit([a, remoteA], remoteKey) });
+			renderSplit("a", remoteKey, "host-2");
+			fireEvent.pointerDown(within(pane("session:a")).getByTestId("view-a"));
+			expect(navigate).toHaveBeenCalledWith({
+				to: "/projects/$projectId/sessions/$sessionId",
+				params: { projectId: "p1", sessionId: "a" },
+				replace: true,
+			});
+		});
+
+		it("keeps the other panes working when a computer is offline", () => {
+			remoteWorkspaces = [];
+			useSessionSplitStore.setState({ split: openSplit([a, remoteA, remoteOrchestrator], "session:a") });
+			renderSplit("a", "session:a");
+			// The remote session pane still renders its session view, which shows the offline state itself.
+			expect(within(pane(remoteKey)).getByTestId("view-a")).toHaveAttribute("data-host", "host-2");
+			// A remote orchestrator cannot resolve without its project list.
+			expect(within(pane("orchestrator:remote:host-2:p9")).getByRole("alert")).toHaveTextContent("Host is offline");
+			// The local pane is untouched.
+			expect(within(pane("session:a")).getByTestId("view-a")).toHaveAttribute("data-focused-pane", "yes");
+		});
+
+		it("closes a remote pane and returns to the local one", () => {
+			useSessionSplitStore.setState({ split: openSplit([a, remoteA], remoteKey) });
+			renderSplit("a", remoteKey, "host-2");
+			fireEvent.click(within(pane(remoteKey)).getByTestId("session-pane-close"));
+			expect(useSessionSplitStore.getState().split).toBeNull();
+			expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ to: "/projects/$projectId/sessions/$sessionId", replace: true }));
+		});
 	});
 });

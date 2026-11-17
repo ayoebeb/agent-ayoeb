@@ -564,7 +564,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		enableBeforeUnload: chatDraftBoundaries.length > 0,
 		shouldBlockFn: async (navigation) => {
 			// Focusing another pane of the split moves the route, but this pane stays mounted.
-			if (pane?.keepsSplit((navigation?.next?.params as { sessionId?: string } | undefined)?.sessionId)) return false;
+			const nextParams = navigation?.next?.params as { sessionId?: string; hostId?: string } | undefined;
+			if (pane?.keepsSplit(nextParams?.sessionId, nextParams?.hostId)) return false;
 			const decision = await confirmUnsafeDraftLeave();
 			if (decision.kind === "cancelled") {
 				if (hostId && !remoteHostsEnabled) setRemoteHosts(true);
