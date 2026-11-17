@@ -102,6 +102,8 @@ type APIDeps struct {
 	AgentAuth   controllers.AgentAuthService
 	// GitHub is the local GitHub PAT + repos surface.
 	GitHub controllers.GitHubPATService
+	// Jira is the per-project Jira connection, board and start-from-ticket surface.
+	Jira controllers.JiraService
 	// LinkPreview unfurls external URLs for the renderer's hover cards; nil
 	// leaves the route answering 501.
 	LinkPreview controllers.LinkPreviewService
@@ -182,6 +184,7 @@ type API struct {
 	agentAuth              *controllers.AgentAuthController
 	linkPreview            *controllers.LinkPreviewController
 	github                 *controllers.GitHubController
+	jira                   *controllers.JiraController
 	events                 *EventsController
 }
 
@@ -254,6 +257,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		agentAuth:     &controllers.AgentAuthController{Svc: deps.AgentAuth},
 		linkPreview:   &controllers.LinkPreviewController{Svc: deps.LinkPreview},
 		github:        &controllers.GitHubController{Svc: deps.GitHub},
+		jira:          &controllers.JiraController{Svc: deps.Jira},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
@@ -268,7 +272,9 @@ func setupRoute(req *http.Request) bool {
 	switch chi.RouteContext(req.Context()).RoutePattern() {
 	case "/api/v1/sessions", "/api/v1/orchestrators", "/api/v1/sessions/{sessionId}/restore",
 		// The first open of an imported chat runs Setup in its new workspace.
-		"/api/v1/sessions/{sessionId}/resume-agent":
+		"/api/v1/sessions/{sessionId}/resume-agent",
+		// Sending a Jira ticket starts the project's orchestrator when it has none.
+		"/api/v1/projects/{id}/jira/tickets/{issueKey}/start":
 		return true
 	}
 	return false
@@ -398,6 +404,7 @@ func (a *API) Register(root chi.Router) {
 			a.agentAuth.Register(r)
 			a.linkPreview.Register(r)
 			a.github.Register(r)
+			a.jira.Register(r)
 			// Sibling REST controllers plug in here.
 		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.

@@ -1198,6 +1198,7 @@ func Run(buildVersion string) error {
 		Cues:                   cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
 		AgentAuth:              agentAuthSvc,
 		GitHub:                 newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),
+		Jira:                   newJiraService(cfg.DataDir, store, sessionSvc),
 		Conversations:          chatSvc,
 		ConversationSearch:     store,
 		Settings:               settingsSvc,

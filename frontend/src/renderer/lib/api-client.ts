@@ -154,6 +154,10 @@ const ROUTE_TEMPLATES = [
 	"/api/v1/projects/initialize",
 	"/api/v1/projects/{id}",
 	"/api/v1/projects/{id}/config",
+	"/api/v1/projects/{id}/jira",
+	"/api/v1/projects/{id}/jira/test",
+	"/api/v1/projects/{id}/jira/board",
+	"/api/v1/projects/{id}/jira/tickets/{issueKey}/start",
 	"/api/v1/prs/{id}/merge",
 	"/api/v1/prs/{id}/resolve-comments",
 	"/api/v1/sessions",
@@ -264,6 +268,14 @@ const EXPECTED_API_ERROR_CODES = new Set([
 	"HOST_IDENTITY_UNVERIFIED",
 	"CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE",
 	"SHELL_TERMINAL_NOT_FOUND",
+	// A mistyped Jira token, a site that is offline or a project not yet
+	// connected is the user's to fix and shows in the Jira view itself.
+	"JIRA_AUTH_FAILED",
+	"JIRA_UNREACHABLE",
+	"JIRA_NOT_CONNECTED",
+	"JIRA_BAD_QUERY",
+	"JIRA_INVALID_INPUT",
+	"JIRA_NOT_FOUND",
 ]);
 
 // Conversation probes that 409 while the chat controller is not ready.
