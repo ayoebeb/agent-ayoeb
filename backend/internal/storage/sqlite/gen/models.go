@@ -624,6 +624,17 @@ type Project struct {
 	Kind          string
 }
 
+type ProjectPermissionRule struct {
+	ID              string
+	ProjectID       string
+	Tool            string
+	Content         string
+	Kind            string
+	Label           string
+	SourceSessionID string
+	CreatedAt       time.Time
+}
+
 type Report struct {
 	ID                 string
 	SessionID          string
