@@ -47,7 +47,7 @@ SELECT COUNT(*)
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting')
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting', 'autopilot_parked')
 `
 
 func (q *Queries) CountUnresolvedNotifications(ctx context.Context) (int64, error) {
@@ -561,7 +561,7 @@ SELECT id, session_id, project_id, pr_url, type, title, body, status, created_at
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting')
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting', 'autopilot_parked')
   AND (
     CAST(?1 AS TEXT) = ''
     OR created_at < ?2
