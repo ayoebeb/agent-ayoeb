@@ -5,13 +5,20 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  # A push to main starts the native macOS jobs only when macOS paths change, so
+  # this is what still runs them, and everything else, in full once a week.
+  schedule:
+    - cron: "37 4 * * 1"
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer push to main cancels the run for the one before it, so a batch of
+  # quick merges only finishes the last run. That run covers the whole tree, and
+  # scripts/ci-lanes.mjs only narrows a push whose base commit's run finished green.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
   changes:
@@ -20,10 +27,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # Reads whether the run on a push's base commit finished green.
+      actions: read
     outputs:
       lanes: ${{ steps.pick.outputs.lanes }}
       frontend: ${{ steps.pick.outputs.frontend }}
       full: ${{ steps.pick.outputs.full }}
+      macos: ${{ steps.pick.outputs.macos }}
       vitest: ${{ steps.pick.outputs.vitest }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +59,7 @@ jobs:
     uses: ./.github/workflows/cli-e2e.yml
     with:
       native: ${{ needs.changes.outputs.full == 'true' }}
+      macos: ${{ needs.changes.outputs.macos == 'true' }}
 
   frontend:
     needs: changes

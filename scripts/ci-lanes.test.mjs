@@ -11,42 +11,93 @@ const pr = (paths, extra = {}) => ({
 });
 const everyLane = Object.keys(LANES).filter(lane => lane !== 'mac-native');
 
-test('a push to main runs every lane in full', () => {
-  assert.deepEqual(pickLanes({ event: 'push' }), { lanes: Object.keys(LANES), full: true, macos: true, vitest: 'all' });
-});
-
-const push = paths => ({
+const push = (paths, extra = {}) => ({
   event: 'push',
+  baselineGreen: true,
   files: paths.map(path => (typeof path === 'string' ? { status: 'modified', filename: path } : path)),
+  ...extra,
+});
+const allLanes = Object.keys(LANES);
+const withoutMacos = allLanes.filter(lane => lane !== 'mac-native');
+
+test('a push to main runs every lane in full', () => {
+  assert.deepEqual(pickLanes({ event: 'push' }), { lanes: allLanes, full: true, macos: true, vitest: 'all' });
 });
 
-test('a push whose files are unknown runs every lane in full', () => {
-  const full = { lanes: Object.keys(LANES), full: true, macos: true, vitest: 'all' };
+test('a weekly or manual run runs every lane in full, with macOS', () => {
+  const full = { lanes: allLanes, full: true, macos: true, vitest: 'all' };
+  assert.deepEqual(pickLanes({ event: 'schedule' }), full);
+  assert.deepEqual(pickLanes({ event: 'workflow_dispatch' }), full);
+});
+
+test('a push whose files are unknown runs every lane in full, with macOS', () => {
+  const full = { lanes: allLanes, full: true, macos: true, vitest: 'all' };
   assert.deepEqual(pickLanes({ event: 'push', files: null }), full);
   assert.deepEqual(pickLanes(push([])), full);
 });
 
-test('a push that changes code any heavy lane reads runs every lane in full', () => {
-  const full = { lanes: Object.keys(LANES), full: true, macos: true, vitest: 'all' };
-  for (const path of ['backend/a.go', 'frontend/src/renderer/a.ts', 'packages/shared/a.ts', 'test/cli/Dockerfile', 'frontend/native/a.swift', 'pricing/a.json', 'package.json']) {
+test('a push that changes code any heavy lane reads runs every lane in full, but only starts macOS for macOS paths', () => {
+  const full = { lanes: withoutMacos, full: true, macos: false, vitest: 'all' };
+  for (const path of ['backend/a.go', 'frontend/src/renderer/a.ts', 'packages/shared/a.ts', 'test/cli/Dockerfile', 'pricing/a.json', 'package.json']) {
     assert.deepEqual(pickLanes(push([path])), full, path);
   }
   assert.deepEqual(pickLanes(push(['README.md', 'backend/a.go'])), full);
   assert.deepEqual(pickLanes(push([{ status: 'renamed', filename: 'docs/a.go', previous_filename: 'backend/a.go' }])), full);
+  for (const path of ['frontend/native/a.swift', 'frontend/assets/dmg/background.png', 'frontend/scripts/build-mac-dmg.mjs']) {
+    assert.deepEqual(pickLanes(push([path])), { lanes: allLanes, full: true, macos: true, vitest: 'all' }, path);
+  }
 });
 
-test('a push that changes a workflow or the lane rules runs every lane in full', () => {
-  assert.equal(pickLanes(push(['.github/workflows/go.yml'])).full, true);
-  assert.equal(pickLanes(push(['scripts/ci-lanes.mjs'])).full, true);
-  assert.equal(pickLanes(push(['.github/actions/setup-go-cached/action.yml', 'README.md'])).full, true);
+test('a push that changes a workflow or the lane rules runs every lane in full, with macOS', () => {
+  const full = { lanes: allLanes, full: true, macos: true, vitest: 'all' };
+  assert.deepEqual(pickLanes(push(['.github/workflows/go.yml'])), full);
+  assert.deepEqual(pickLanes(push(['scripts/ci-lanes.mjs'])), full);
+  assert.deepEqual(pickLanes(push(['.github/actions/setup-go-cached/action.yml', 'README.md'])), full);
 });
 
-test('a truncated push diff runs every lane in full', () => {
+test('a truncated push diff runs every lane in full, with macOS', () => {
   const files = Array.from({ length: 3000 }, (_, i) => `docs/${i}.md`);
-  assert.equal(pickLanes(push(files)).full, true);
+  assert.deepEqual(pickLanes(push(files)), { lanes: allLanes, full: true, macos: true, vitest: 'all' });
 });
 
-test('a push that only changes files no heavy lane reads runs only the lanes it touches', () => {
+test('a push whose base commit has no green CI run runs every lane in full', () => {
+  const none = { lanes: [], full: false, macos: false, vitest: '' };
+  assert.deepEqual(pickLanes(push(['README.md'])), none);
+  const full = { lanes: withoutMacos, full: true, macos: false, vitest: 'all' };
+  assert.deepEqual(pickLanes(push(['README.md'], { baselineGreen: false })), full);
+  assert.deepEqual(pickLanes(push(['README.md'], { baselineGreen: undefined })), full);
+  assert.deepEqual(pickLanes({ event: 'push', files: [{ status: 'modified', filename: 'README.md' }] }), full);
+});
+
+test('a push that changes a path nobody listed as independent runs every lane in full, even if no lane rule matches it', () => {
+  const full = { lanes: withoutMacos, full: true, macos: false, vitest: 'all' };
+  const unlisted = [
+    'translations/a.json',
+    'contracts/other.json',
+    'contracts/session-start-interface.json',
+    'integrations/a.md',
+    'desktop-version-floor.json',
+    'flake.nix',
+    'flake.lock',
+    '.gitmodules',
+    'private/ao-cloud',
+    'experiments/a.ts',
+    'assets/icon.png',
+    'LICENSE',
+    'docs/assets/readme/a.png',
+    '.github/scripts/go-test-parallel.sh',
+  ];
+  for (const path of unlisted) {
+    assert.deepEqual(pickLanes(push([path])), full, path);
+    assert.deepEqual(pickLanes(push(['README.md', path])), full, `README.md + ${path}`);
+  }
+  for (const path of unlisted) {
+    // The same path on a PR runs no lane: the full push is what covers it.
+    if (!/^(contracts\/session|\.github\/scripts\/go-test)/.test(path)) assert.deepEqual(pickLanes(pr([path])).lanes, [], `PR ${path}`);
+  }
+});
+
+test('a push that only changes files no heavy lane reads runs only the lanes it touches, without macOS', () => {
   const none = { lanes: [], full: false, macos: false, vitest: '' };
   assert.deepEqual(pickLanes(push(['README.md', 'docs/ci.md', 'AGENTS.md', 'CONTRIBUTING.md'])), none);
   assert.deepEqual(pickLanes(push(['scripts/daily-ao/update.ps1'])), { ...none, lanes: ['config'] });
@@ -141,7 +192,7 @@ test('vitest runs all files when related selection cannot be trusted', () => {
 
 test('outputs are one GitHub output line each', () => {
   const text = outputs(pickLanes(pr(['frontend/src/docs/content/a.mdx'])));
-  assert.equal(text, 'lanes=["docs"]\nfrontend=true\nfull=false\nvitest=\n');
+  assert.equal(text, 'lanes=["docs"]\nfrontend=true\nfull=false\nmacos=false\nvitest=\n');
 });
 
 test('every lane is used by a workflow', () => {

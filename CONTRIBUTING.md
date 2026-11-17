@@ -80,10 +80,18 @@ The AO Cloud control plane (the hosted service behind Cloud Agents) is not in th
 files and starts only the lanes those files can affect; the rules live in
 `scripts/ci-lanes.mjs`. `ci-ok` passes when every lane that started passes, so
 it is the one check to watch. A change to a workflow or to the lane rules starts
-every Linux lane, and a push to `main` runs every lane in full. The one
-exception is a push whose files only start the `config`, `docs`, `cloud` or
-`mobile` lanes, or none: nothing the other lanes read changed, so a push like
-that runs just the lanes it starts.
+every Linux lane, and a push to `main` runs every lane in full, apart from the
+two cases below. A newer push to `main` cancels the run for the one before it,
+so a batch of quick merges only finishes the last run.
+
+A push whose files are all docs, root Markdown, `scripts/`, non-workflow files
+under `.github/`, `frontend/src/docs/`, `contracts/cloud/` or `packages/mobile/`
+runs just the lanes those start, if the run on the commit it builds on finished
+green. Any other path, even one no lane rule matches, runs everything.
+
+A push starts the native macOS jobs only when macOS paths change, when a workflow
+or the lane rules change, or when its changed files cannot be read. A weekly run
+(Monday) runs every lane in full, with macOS.
 
 On a PR, vitest runs the tests related to the changed frontend files plus the
 files listed in `frontend/scripts/ci-vitest-always-run.txt`. Add a test to that
@@ -105,7 +113,7 @@ without a label.
 
 Label changes alone do not restart CI. CI reads the labels when it runs, so
 push again or re-run the latest CI run after changing them. Main pushes retain
-full native coverage, except the pushes described above.
+full Windows coverage; macOS is as described above.
 
 ### Weekly contributor call
 
