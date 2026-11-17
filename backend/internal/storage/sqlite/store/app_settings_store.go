@@ -60,10 +60,10 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 		HarnessDefaults: defaults,
 		// Normalized on read: a value written by a build that knows a mode this
 		// one does not must still resolve to something dispatchable.
-		DefaultSessionMode:   domain.NormalizeSessionMode(row.DefaultSessionMode),
-		VersionRefresh:       row.VersionRefresh,
-		ComputerUse:          row.ComputerUse,
-		SessionRetentionDays: int(row.SessionRetentionDays),
+		DefaultSessionMode:                 domain.NormalizeSessionMode(row.DefaultSessionMode),
+		VersionRefresh:                     row.VersionRefresh,
+		ComputerUse:                        row.ComputerUse,
+		SessionRetentionDays:               int(row.SessionRetentionDays),
 		OrchestratorWaitingEnabled:         row.OrchestratorWaitingEnabled != 0,
 		OrchestratorWaitingRenotifyMinutes: int(row.OrchestratorWaitingRenotifyMinutes),
 		UsageLimitAutoResume:               row.UsageLimitAutoResume,

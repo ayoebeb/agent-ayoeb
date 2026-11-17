@@ -23,11 +23,11 @@ func (s settingsStore) GetAppSettings(ctx context.Context) (settingssvc.Snapshot
 		return settingssvc.Snapshot{}, err
 	}
 	return settingssvc.Snapshot{
-		DefaultSessionMode:   row.DefaultSessionMode,
-		HarnessDefaults:      row.HarnessDefaults,
-		VersionRefresh:       row.VersionRefresh,
-		ComputerUse:          row.ComputerUse,
-		SessionRetentionDays: row.SessionRetentionDays,
+		DefaultSessionMode:                 row.DefaultSessionMode,
+		HarnessDefaults:                    row.HarnessDefaults,
+		VersionRefresh:                     row.VersionRefresh,
+		ComputerUse:                        row.ComputerUse,
+		SessionRetentionDays:               row.SessionRetentionDays,
 		OrchestratorWaitingEnabled:         row.OrchestratorWaitingEnabled,
 		OrchestratorWaitingRenotifyMinutes: row.OrchestratorWaitingRenotifyMinutes,
 		UsageLimitAutoResume:               row.UsageLimitAutoResume,
