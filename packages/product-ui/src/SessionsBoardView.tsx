@@ -153,26 +153,79 @@ export function SessionsBoardGridView<TSession extends BoardSessionPresentation>
 	}
 
 	return (
-		<div
-			className="board-horizontal-scrollbar h-full overflow-x-auto overflow-y-hidden"
-			data-testid="board-horizontal-scroll"
-		>
-			<div className="relative grid h-full min-w-[64rem] grid-cols-4 divide-x divide-border-strong xl:min-w-0">
-				<div
-					aria-hidden="true"
-					className="pointer-events-none absolute inset-x-0 top-12 z-10 border-t border-border-strong"
+		<BoardColumnsGrid>
+			{columns.map((column) => (
+				<BoardColumnView
+					column={column}
+					key={column.column}
+					labels={labels}
+					renderSessionCard={renderSessionCard}
+					sessions={byColumn.get(column.column) ?? []}
 				/>
-				{columns.map((column) => (
-					<BoardColumnView
-						column={column}
-						key={column.column}
-						labels={labels}
-						renderSessionCard={renderSessionCard}
-						sessions={byColumn.get(column.column) ?? []}
-					/>
-				))}
+			))}
+		</BoardColumnsGrid>
+	);
+}
+
+/**
+ * The board's scroll area and column grid. The Agents board and the Jira board
+ * both render their columns in it, so widths, gaps and dividers match. Columns
+ * are at least 16rem wide; the four Agents columns fill a wide window.
+ */
+export function BoardColumnsGrid({
+	children,
+	columnCount = 4,
+	scrollTestId = "board-horizontal-scroll",
+}: {
+	children: ReactNode;
+	columnCount?: number;
+	scrollTestId?: string;
+}) {
+	const count = Math.max(columnCount, 1);
+	return (
+		<div className="board-horizontal-scrollbar h-full overflow-x-auto overflow-y-hidden" data-testid={scrollTestId}>
+			<div
+				className={cn("relative grid h-full divide-x divide-border-strong", count === 4 && "min-w-[64rem] grid-cols-4 xl:min-w-0")}
+				style={count === 4 ? undefined : { gridTemplateColumns: `repeat(${count}, minmax(16rem, 1fr))`, minWidth: `${count * 16}rem` }}
+			>
+				<div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-12 z-10 border-t border-border-strong" />
+				{children}
 			</div>
 		</div>
+	);
+}
+
+/** One board column: the header (dot, name, count) over a scrolling stack of cards. */
+export function BoardColumnFrame({
+	ariaLabel,
+	children,
+	column,
+	count,
+	dot,
+	label,
+	labelClassName,
+	testId = "board-column",
+}: {
+	ariaLabel: string;
+	children: ReactNode;
+	column?: string;
+	count: number;
+	dot: string;
+	label: string;
+	labelClassName?: string;
+	testId?: string;
+}) {
+	return (
+		<section aria-label={ariaLabel} className="flex min-w-0 flex-col overflow-hidden" data-testid={testId} data-column={column}>
+			<div className="flex h-12 shrink-0 items-center gap-2.5 px-4">
+				<span data-testid="board-column-swatch" className="size-[var(--size-swatch)] rounded-full" style={{ backgroundColor: dot }} />
+				<span className={cn("min-w-0 truncate text-xs font-medium", labelClassName)}>{label}</span>
+				<span className="ml-auto tabular-nums text-xs leading-none text-passive">{count}</span>
+			</div>
+			<div className="board-scrollbar min-h-0 flex-1 overflow-y-auto pl-3 pr-2 pb-3 pt-3">
+				<div className="flex min-h-full flex-col gap-2.5">{children}</div>
+			</div>
+		</section>
 	);
 }
 
@@ -193,31 +246,96 @@ function BoardColumnView<TSession extends BoardSessionPresentation>({
 		return attentionPriority || right.updatedAt.localeCompare(left.updatedAt);
 	});
 	return (
-		<section
-			aria-label={labels.columnAria(column.label)}
-			className="flex min-w-0 flex-col overflow-hidden"
-			data-testid="board-column"
-			data-column={column.column}
+		<BoardColumnFrame
+			ariaLabel={labels.columnAria(column.label)}
+			column={column.column}
+			count={ordered.length}
+			dot={column.dot}
+			label={column.label}
+			labelClassName={column.titleClassName}
 		>
-			<div className="flex h-12 shrink-0 items-center gap-2.5 px-4">
-				<span
-					data-testid="board-column-swatch"
-					className="size-[var(--size-swatch)] rounded-full"
-					style={{ backgroundColor: column.dot }}
-				/>
-				<span className={cn("text-xs font-medium", column.titleClassName)}>
-					{column.label}
-				</span>
-				<span className="ml-auto tabular-nums text-xs leading-none text-passive">{ordered.length}</span>
+			{ordered.map((session) => (
+				<Fragment key={session.id}>{renderSessionCard(session)}</Fragment>
+			))}
+		</BoardColumnFrame>
+	);
+}
+
+// The card shell's class sets. SessionCardView and BoardCardView share them so
+// every board's cards stay identical. The title is joined as a plain string, not
+// through cn(): tailwind-merge reads text-sm-md and text-foreground as one group.
+const BOARD_CARD_SURFACE = "group relative w-full rounded-lg border text-left transition-[background-color,box-shadow,transform] duration-[120ms] ease-out";
+const BOARD_CARD_INTERACTIVE = "cursor-pointer hover:bg-interactive-hover focus-within:bg-interactive-hover active:scale-[0.99] has-[button:active]:scale-100 has-[a:active]:scale-100";
+const BOARD_CARD_TITLE = "line-clamp-2 overflow-hidden text-balance text-sm-md font-semibold leading-tight tracking-tight text-foreground";
+const BOARD_CARD_META = "flex min-w-0 items-center gap-1.5 font-sans text-2xs text-muted-foreground";
+const BOARD_CARD_FOOTER = "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-t border-border px-3.5 py-2.5";
+
+/**
+ * A generic board card in the Agents card's shell: border, radius, padding,
+ * compact title, a small meta line, sub-rows, and a footer with a coloured
+ * status label on the left and the time on the right. The Jira board uses it.
+ */
+export function BoardCardView({
+	action,
+	children,
+	footerAction,
+	meta,
+	onOpen,
+	openLabel,
+	statusClassName,
+	statusLabel,
+	testId = "board-card",
+	time,
+	timeTitle,
+	title,
+	dataKey,
+}: {
+	/** A control beside the title, such as "Open in Jira". */
+	action?: ReactNode;
+	/** Sub-rows under the title, like the Agents card's PR rows. */
+	children?: ReactNode;
+	/** A small control in the footer, before the time. */
+	footerAction?: ReactNode;
+	/** The small line under the title. */
+	meta?: ReactNode;
+	onOpen?: () => void;
+	openLabel?: string;
+	statusClassName?: string;
+	statusLabel: string;
+	testId?: string;
+	time?: string;
+	timeTitle?: string;
+	title: string;
+	dataKey?: string;
+}) {
+	return (
+		<div
+			onClick={onOpen}
+			className={cn(BOARD_CARD_SURFACE, "border-border bg-surface", onOpen && BOARD_CARD_INTERACTIVE)}
+			data-testid={testId}
+			data-ticket-key={dataKey}
+		>
+			{onOpen ? <button aria-label={openLabel ?? title} className="pointer-events-none absolute inset-0 outline-none" type="button" /> : null}
+			<div className="px-3.5 pb-2.5 pt-2.5">
+				<div className="flex min-w-0 items-center gap-2.5">
+					<div className={`min-w-0 flex-1 ${BOARD_CARD_TITLE}`} title={title}>{title}</div>
+					{action ? <div className="relative z-10 -mr-1 shrink-0 self-center">{action}</div> : null}
+				</div>
+				{meta ? <div className={cn("mt-1.5", BOARD_CARD_META)}>{meta}</div> : null}
 			</div>
-			<div className="board-scrollbar min-h-0 flex-1 overflow-y-auto pl-3 pr-2 pb-3 pt-3">
-				<div className="flex min-h-full flex-col gap-2.5">
-					{ordered.map((session) => (
-						<Fragment key={session.id}>{renderSessionCard(session)}</Fragment>
-					))}
+			{children ? <div className="relative z-10 flex min-w-0 flex-col gap-1 px-3.5 pb-2">{children}</div> : null}
+			<div className={BOARD_CARD_FOOTER}>
+				<div className="flex min-w-0 flex-1">
+					<span className={cn("inline-flex min-w-0 max-w-full items-center text-2xs font-medium", statusClassName)} data-testid="board-card-status">
+						<span className="min-w-0 truncate">{statusLabel}</span>
+					</span>
+				</div>
+				<div className="relative z-10 ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap text-2xs text-muted-foreground">
+					{footerAction}
+					{time ? <span className="tabular-nums text-muted-foreground" title={timeTitle}>{time}</span> : null}
 				</div>
 			</div>
-		</section>
+		</div>
 	);
 }
 
@@ -342,10 +460,10 @@ export function SessionCardView({
 				still
 					? // A hover preview: one elevated surface, no outline, no motion.
 						"relative w-full rounded-lg bg-popover text-left"
-					: "group relative w-full rounded-lg border border-border text-left transition-[background-color,box-shadow,transform] duration-[120ms] ease-out",
+					: cn(BOARD_CARD_SURFACE, "border-border"),
 				!still && ((session.plainSurface ? undefined : badge.cardClassName) ?? "border-border bg-surface"),
 				interactive &&
-					"cursor-pointer hover:bg-interactive-hover focus-within:bg-interactive-hover active:scale-[0.99] has-[button:active]:scale-100 has-[a:active]:scale-100",
+					BOARD_CARD_INTERACTIVE,
 				needsAttention &&
 					(still
 						? "bg-[color-mix(in_srgb,var(--color-status-needs-you)_10%,var(--popover))]"
@@ -370,7 +488,7 @@ export function SessionCardView({
 				<div className={cn("flex min-w-0 items-center", still ? "gap-2" : "gap-2.5")}>
 					{renderAvatar(session.provider)}
 					<div
-						className="min-w-0 flex-1 line-clamp-2 overflow-hidden text-balance text-sm-md font-semibold leading-tight tracking-tight text-foreground"
+						className={`min-w-0 flex-1 ${BOARD_CARD_TITLE}`}
 						title={session.title}
 					>
 						{session.title}

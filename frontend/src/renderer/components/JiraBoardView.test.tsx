@@ -99,13 +99,48 @@ describe("JiraBoardView", () => {
 		expect(columns.map((column) => within(column).getAllByText(/To Do|In Progress|Done/)[0].textContent)).toEqual(["To Do", "In Progress", "Done"]);
 		const todo = within(columns[0]);
 		const card = todo.getByText("Add CSV export").closest("[data-testid=jira-card]") as HTMLElement;
+		// The Agents card's shell: title, a "KEY · type · priority" meta line, and a footer
+		// with the coloured Jira status on the left and how long ago it changed on the right.
 		expect(within(card).getByText("YIA-10")).toBeInTheDocument();
-		expect(within(card).getByText("Story · High")).toBeInTheDocument();
-		expect(within(card).getByText("Ada Example")).toBeInTheDocument();
-		expect(within(columns[1]).getByText("Unassigned")).toBeInTheDocument();
+		expect(card.textContent).toContain("YIA-10 · Story · High");
+		expect(within(card).getByTestId("board-card-status")).toHaveTextContent("To Do");
+		expect(within(card).getByTestId("board-card-status").className).toContain("text-muted-foreground");
+		expect(within(columns[1]).getByTestId("board-card-status")).toHaveTextContent("In Progress");
+		expect(within(columns[1]).getByTestId("board-card-status").className).toContain("text-status-working");
+		expect(card.querySelector("[title]:not([aria-label])")).not.toBeNull();
+		// Ada's own ticket carries no avatar; Bo's does.
+		expect(within(card).queryByRole("img")).not.toBeInTheDocument();
+		const bo = within(columns[0]).getByText("Fix login redirect").closest("[data-testid=jira-card]") as HTMLElement;
+		expect(within(bo).getByRole("img", { name: "Assigned to Bo Builder" })).toHaveTextContent("BB");
 
 		await userEvent.click(within(card).getByRole("button", { name: "Open in Jira" }));
 		expect(openLinkMock).toHaveBeenCalledWith("https://yoobi.atlassian.net/browse/YIA-10");
+	});
+
+	it("shows no assignee avatars and no filter when everything is assigned to me", async () => {
+		const mine: JiraBoard = {
+			...board, projectKey: undefined, boardName: undefined, total: 2,
+			columns: [{ name: "To Do", tickets: [ticket("WEB-3", "Own ticket", { assignee: ada }), ticket("API-9", "Another own", { assignee: ada, status: { id: "3", name: "In Review", category: "indeterminate" } })] }],
+		};
+		serveBoard(() => ok(mine));
+		renderBoard();
+
+		const card = (await screen.findByText("Own ticket")).closest("[data-testid=jira-card]") as HTMLElement;
+		// The ticket's Jira project is its key's prefix, shown in the meta line.
+		expect(card.textContent).toContain("WEB-3");
+		expect(screen.queryByRole("img")).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Assigned to me" })).not.toBeInTheDocument();
+		// With no board or project key, the toolbar says what the board is.
+		expect(screen.getByTestId("jira-board")).toHaveTextContent("Assigned to me · 2");
+	});
+
+	it("starting a ticket from its card does not also open its details", async () => {
+		serveBoard();
+		daemon.replies["POST /api/v1/projects/{id}/jira/tickets/{issueKey}/start"] = () => ok({ issueKey: "YIA-10", orchestratorId: "orch-1" }, 202);
+		renderBoard();
+		await userEvent.click(await screen.findByRole("button", { name: "Start YIA-10 with the orchestrator" }));
+		await waitFor(() => expect(daemon.calls.some((call) => call.method === "POST")).toBe(true));
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
 	it("filters to the tickets assigned to the connected account", async () => {

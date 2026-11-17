@@ -170,3 +170,33 @@ describe("sameJiraSite", () => {
 		expect(sameJiraSite("http://127.0.0.1:47810", "https://127.0.0.1:47810")).toBe(false);
 	});
 });
+import { hasOtherAssignees, ticketCategoryTextClass, ticketMeta } from "./jira";
+
+describe("card helpers", () => {
+	const ticket = (overrides: Partial<JiraTicket> = {}): JiraTicket => ({
+		key: "WEB-12", summary: "S", url: "https://x.atlassian.net/browse/WEB-12", status: { id: "1", name: "To Do", category: "new" }, ...overrides,
+	});
+
+	it("builds the meta line from the key, type and priority, skipping what Jira left out", () => {
+		expect(ticketMeta(ticket({ issueType: "Bug", priority: "High" }))).toEqual(["WEB-12", "Bug", "High"]);
+		expect(ticketMeta(ticket({ priority: "High" }))).toEqual(["WEB-12", "High"]);
+		expect(ticketMeta(ticket())).toEqual(["WEB-12"]);
+	});
+
+	it("colours a status by its workflow category", () => {
+		expect(ticketCategoryTextClass("new")).toBe("text-muted-foreground");
+		expect(ticketCategoryTextClass(undefined)).toBe("text-muted-foreground");
+		expect(ticketCategoryTextClass("indeterminate")).toBe("text-status-working");
+		expect(ticketCategoryTextClass("done")).toBe("text-status-ready");
+	});
+
+	it("knows when a board holds someone else's tickets", () => {
+		const board = (assignees: (string | undefined)[], accountId: string | null = "me"): JiraBoard => ({
+			siteUrl: "", jql: "", total: assignees.length, fetchedAt: "", accountId: accountId ?? undefined,
+			columns: [{ name: "To Do", tickets: assignees.map((id, i) => ticket({ key: `A-${i}`, assignee: id ? { accountId: id, displayName: id } : undefined })) }],
+		});
+		expect(hasOtherAssignees(board(["me", "me", undefined]))).toBe(false);
+		expect(hasOtherAssignees(board(["me", "bo"]))).toBe(true);
+		expect(hasOtherAssignees(board(["bo"], null))).toBe(false);
+	});
+});

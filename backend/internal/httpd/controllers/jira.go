@@ -44,7 +44,7 @@ type JiraConnectRequest struct {
 	Email   string `json:"email" maxLength:"320" description:"Email address of the Atlassian account that owns the API token."`
 	// APIToken is write-only. Leave it empty to keep the token already stored.
 	APIToken   string `json:"apiToken,omitempty" maxLength:"2048" description:"Atlassian API token. Write-only: it is stored locally and never returned. Empty keeps the stored token."`
-	ProjectKey string `json:"projectKey,omitempty" maxLength:"32" description:"Jira project key, for example YIA. Required unless jql is set."`
+	ProjectKey string `json:"projectKey,omitempty" maxLength:"32" description:"Jira project key, for example YIA. Optional, empty shows every ticket assigned to you in any Jira project."`
 	BoardID    int    `json:"boardId,omitempty" description:"Jira board id. Omit to use the project's first board."`
 	JQL        string `json:"jql,omitempty" maxLength:"4096" description:"Optional JQL that chooses the tickets. Overrides the project key's default query."`
 }

@@ -173,3 +173,21 @@ export function ticketTaskBrief(ticket: JiraTicket): string {
 	if (ticket.acceptanceCriteria?.trim()) parts.push(`Acceptance criteria:\n${ticket.acceptanceCriteria.trim()}`);
 	return parts.join("\n\n");
 }
+
+/** The card's small meta line as parts: the key first, then type and priority when Jira gave them. */
+export function ticketMeta(ticket: JiraTicket): string[] {
+	return [ticket.key, ticket.issueType, ticket.priority].filter((part): part is string => Boolean(part));
+}
+
+/** Text colour for a ticket's status label, from its Jira workflow category. */
+export function ticketCategoryTextClass(category: string | undefined): string {
+	if (category === "done") return "text-status-ready";
+	if (category === "indeterminate") return "text-status-working";
+	return "text-muted-foreground";
+}
+
+/** Whether any ticket on the board is assigned to someone other than the connected account. */
+export function hasOtherAssignees(board: JiraBoard): boolean {
+	if (!board.accountId) return false;
+	return board.columns.some((column) => column.tickets.some((ticket) => ticket.assignee && ticket.assignee.accountId !== board.accountId));
+}

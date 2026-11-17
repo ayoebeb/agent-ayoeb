@@ -20203,7 +20203,8 @@ components:
           maxLength: 4096
           type: string
         projectKey:
-          description: Jira project key, for example YIA. Required unless jql is set.
+          description: Jira project key, for example YIA. Optional, empty shows every
+            ticket assigned to you in any Jira project.
           maxLength: 32
           type: string
         siteUrl:

@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, ExternalLink, Plug, RefreshCw } from "@/components/app-icons";
+import { BoardCardView, BoardColumnFrame, BoardColumnsGrid } from "@aoagents/product-ui";
+import { AlertTriangle, ExternalLink, LoaderCircle, Plug, RefreshCw, Send } from "@/components/app-icons";
 import { useJiraBoard, useJiraConnection } from "../hooks/useJira";
 import {
 	columnTone,
@@ -10,6 +11,9 @@ import {
 	jiraQueryKeys,
 	latestSentSessionId,
 	onlyAssignedTo,
+	ticketCategoryTextClass,
+	ticketMeta,
+	hasOtherAssignees,
 	sessionsForTicket,
 	startJiraTicket,
 	type JiraBoard,
@@ -17,6 +21,7 @@ import {
 	type JiraTicket,
 } from "../lib/jira";
 import { openLinkInSystemBrowser } from "../lib/external-link-policy";
+import { formatTimeCompact } from "../lib/format-time";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import type { WorkspaceSession } from "../types/workspace";
@@ -29,6 +34,12 @@ const TONE_DOT = {
 	todo: "var(--color-text-passive)",
 	progress: "var(--color-status-working)",
 	done: "var(--color-status-ready)",
+} as const;
+
+const TONE_TITLE = {
+	todo: "text-muted-foreground",
+	progress: "text-status-working",
+	done: "text-status-ready",
 } as const;
 
 type JiraBoardViewProps = {
@@ -76,6 +87,7 @@ export function JiraBoardView({ projectId, hostId, sessions, onOpenSettings, onO
 	});
 
 	const data = board.data;
+	const othersShown = useMemo(() => (data ? hasOtherAssignees(data) : false), [data]);
 	const view = useMemo(() => (data && mineOnly ? onlyAssignedTo(data, data.accountId) : data), [data, mineOnly]);
 	const openTicket = useMemo(() => data?.columns.flatMap((column) => column.tickets).find((ticket) => ticket.key === openKey), [data, openKey]);
 
@@ -103,23 +115,27 @@ export function JiraBoardView({ projectId, hostId, sessions, onOpenSettings, onO
 	const empty = data.total === 0;
 	const mineEmpty = !empty && mineOnly && shown.total === 0;
 	const updated = formatClock(data.fetchedAt);
+	// Without a Jira board or project key the board is simply what is assigned to the person.
+	const scope = data.boardName || data.projectKey || t("jira.assignedToMe");
 
 	return (
 		<div className="flex h-full min-h-0 flex-col" data-testid="jira-board" data-project-id={projectId}>
 			<div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-				<Button
-					type="button"
-					variant="quiet"
-					size="xs"
-					aria-pressed={mineOnly}
-					data-active={mineOnly ? "true" : undefined}
-					disabled={!data.accountId}
-					onClick={() => setMineOnly((current) => !current)}
-				>
-					{t("jira.assignedToMe")}
-				</Button>
-				<span className="min-w-0 flex-1 truncate text-2xs text-passive" title={data.boardName ?? data.projectKey}>
-					{[data.boardName ?? data.projectKey, String(shown.total)].filter(Boolean).join(" · ")}
+				{othersShown ? (
+					<Button
+						type="button"
+						variant="quiet"
+						size="xs"
+						aria-pressed={mineOnly}
+						data-active={mineOnly ? "true" : undefined}
+						disabled={!data.accountId}
+						onClick={() => setMineOnly((current) => !current)}
+					>
+						{t("jira.assignedToMe")}
+					</Button>
+				) : null}
+				<span className="min-w-0 flex-1 truncate text-2xs text-passive" title={scope}>
+					{[scope, String(shown.total)].filter(Boolean).join(" · ")}
 				</span>
 				<span className="shrink-0 text-2xs tabular-nums text-passive">{t("jira.updatedAt", { time: updated })}</span>
 				<Tooltip>
@@ -157,6 +173,7 @@ export function JiraBoardView({ projectId, hostId, sessions, onOpenSettings, onO
 					<JiraColumns
 						board={shown}
 						sessions={sessions}
+						accountId={data.accountId}
 						startingKey={startingKey}
 						onOpen={(ticket) => setOpenKey(ticket.key)}
 						onStart={(ticket) => start.mutate(ticket.key)}
@@ -180,9 +197,11 @@ export function JiraBoardView({ projectId, hostId, sessions, onOpenSettings, onO
 	);
 }
 
-function JiraColumns({ board, sessions, startingKey, onOpen, onStart, onOpenSession, onOpenOrchestrator }: {
+function JiraColumns({ board, sessions, accountId, startingKey, onOpen, onStart, onOpenSession, onOpenOrchestrator }: {
 	board: JiraBoard;
 	sessions: readonly WorkspaceSession[];
+	/** The connected Jira account; a ticket of anyone else shows its assignee. */
+	accountId?: string;
 	startingKey?: string;
 	onOpen: (ticket: JiraTicket) => void;
 	onStart: (ticket: JiraTicket) => void;
@@ -191,48 +210,50 @@ function JiraColumns({ board, sessions, startingKey, onOpen, onStart, onOpenSess
 }) {
 	const { t } = useTranslation();
 	return (
-		<div className="board-horizontal-scrollbar h-full overflow-x-auto overflow-y-hidden" data-testid="jira-board-scroll">
-			<div
-				className="relative grid h-full divide-x divide-border-strong"
-				style={{ gridTemplateColumns: `repeat(${Math.max(board.columns.length, 1)}, minmax(16rem, 1fr))`, minWidth: `${board.columns.length * 16}rem` }}
-			>
-				<div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-12 z-10 border-t border-border-strong" />
-				{board.columns.map((column) => {
-					const name = column.other ? t("jira.column.other") : column.name;
-					return (
-						<section key={`${column.other ? "other" : "col"}:${column.name}`} aria-label={t("jira.column.aria", { name })} className="flex min-w-0 flex-col overflow-hidden" data-testid="jira-column">
-							<div className="flex h-12 shrink-0 items-center gap-2.5 px-4">
-								<span className="size-[var(--size-swatch)] rounded-full" style={{ backgroundColor: TONE_DOT[columnTone(column)] }} aria-hidden="true" />
-								<span className="min-w-0 truncate text-xs font-medium">{name}</span>
-								<span className="ml-auto tabular-nums text-xs leading-none text-passive">{column.tickets.length}</span>
-							</div>
-							<div className="board-scrollbar min-h-0 flex-1 overflow-y-auto pb-3 pl-3 pr-2 pt-3">
-								<div className="flex min-h-full flex-col gap-2.5">
-									{column.tickets.map((ticket) => (
-										<JiraTicketCard
-											key={ticket.key}
-											ticket={ticket}
-											linked={sessionsForTicket(ticket.key, sessions)}
-											orchestratorLinked={latestSentSessionId(ticket)}
-											starting={startingKey === ticket.key}
-											onOpen={() => onOpen(ticket)}
-											onStart={() => onStart(ticket)}
-											onOpenSession={onOpenSession}
-											onOpenOrchestrator={onOpenOrchestrator}
-										/>
-									))}
-								</div>
-							</div>
-						</section>
-					);
-				})}
-			</div>
-		</div>
+		<BoardColumnsGrid columnCount={board.columns.length} scrollTestId="jira-board-scroll">
+			{board.columns.map((column) => {
+				const name = column.other ? t("jira.column.other") : column.name;
+				const tone = columnTone(column);
+				return (
+					<BoardColumnFrame
+						key={`${column.other ? "other" : "col"}:${column.name}`}
+						ariaLabel={t("jira.column.aria", { name })}
+						count={column.tickets.length}
+						dot={TONE_DOT[tone]}
+						label={name}
+						labelClassName={TONE_TITLE[tone]}
+						testId="jira-column"
+					>
+						{column.tickets.map((ticket) => (
+							<JiraTicketCard
+								key={ticket.key}
+								ticket={ticket}
+								showAssignee={Boolean(accountId) && Boolean(ticket.assignee) && ticket.assignee?.accountId !== accountId}
+								linked={sessionsForTicket(ticket.key, sessions)}
+								orchestratorLinked={latestSentSessionId(ticket)}
+								starting={startingKey === ticket.key}
+								onOpen={() => onOpen(ticket)}
+								onStart={() => onStart(ticket)}
+								onOpenSession={onOpenSession}
+								onOpenOrchestrator={onOpenOrchestrator}
+							/>
+						))}
+					</BoardColumnFrame>
+				);
+			})}
+		</BoardColumnsGrid>
 	);
 }
 
-function JiraTicketCard({ ticket, linked, orchestratorLinked, starting, onOpen, onStart, onOpenSession, onOpenOrchestrator }: {
+/**
+ * A ticket in the Agents card's shell (see BoardCardView): the summary as the
+ * title, "KEY · type · priority" as the meta line, sessions working on it as
+ * sub-rows, and a footer with the Jira status and how long ago it changed.
+ */
+function JiraTicketCard({ ticket, showAssignee, linked, orchestratorLinked, starting, onOpen, onStart, onOpenSession, onOpenOrchestrator }: {
 	ticket: JiraTicket;
+	/** The ticket is someone else's (a custom JQL), so say whose. */
+	showAssignee: boolean;
 	linked: WorkspaceSession[];
 	/** The orchestrator session this ticket was last sent to, when it was. */
 	orchestratorLinked?: string;
@@ -243,66 +264,93 @@ function JiraTicketCard({ ticket, linked, orchestratorLinked, starting, onOpen, 
 	onOpenOrchestrator: (sessionId: string) => void;
 }) {
 	const { t } = useTranslation();
-	const meta = [ticket.issueType, ticket.priority].filter(Boolean).join(" · ");
+	const meta = ticketMeta(ticket);
 	const assignee = ticket.assignee?.displayName;
+	const hoverReveal = "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100";
+	const rowClass = "inline-flex min-w-0 max-w-full items-center gap-1.5 py-0.5 text-2xs text-muted-foreground hover:underline";
 	return (
-		<article
-			className="group relative flex w-full flex-col gap-2 rounded-lg border border-border bg-surface px-3.5 py-3 text-left transition-colors duration-[120ms] ease-out hover:bg-interactive-hover motion-reduce:transition-none"
-			data-testid="jira-card"
-			data-ticket-key={ticket.key}
-		>
-			<div className="flex min-w-0 items-center gap-2">
-				<span className="shrink-0 font-mono text-2xs text-muted-foreground">{ticket.key}</span>
-				<span className="min-w-0 flex-1 truncate text-2xs text-passive">{meta}</span>
+		<BoardCardView
+			testId="jira-card"
+			dataKey={ticket.key}
+			title={ticket.summary}
+			openLabel={t("jira.card.openDetails", { key: ticket.key })}
+			onOpen={onOpen}
+			meta={
+				<span className="min-w-0 truncate" title={meta.join(" · ")}>
+					<span className="font-mono">{meta[0]}</span>
+					{meta.slice(1).map((part) => <span key={part}> · {part}</span>)}
+				</span>
+			}
+			action={
 				<Tooltip>
 					<TooltipTrigger asChild>
-						<Button type="button" variant="quiet" size="icon-xs" className="relative z-10" aria-label={t("jira.openInJira")} onClick={() => void openLinkInSystemBrowser(ticket.url)}>
+						<Button
+							type="button"
+							variant="quiet"
+							size="icon-sm"
+							className={cn("rounded-sm", hoverReveal)}
+							aria-label={t("jira.openInJira")}
+							onClick={(event) => { event.stopPropagation(); void openLinkInSystemBrowser(ticket.url); }}
+						>
 							<ExternalLink className="size-icon-sm" aria-hidden="true" />
 						</Button>
 					</TooltipTrigger>
 					<TooltipContent side="bottom">{t("jira.openInJira")}</TooltipContent>
 				</Tooltip>
-			</div>
-			{/* The title is the card's one primary hit target; it stretches over the card, under the action buttons. */}
-			<Pressable
-				className="text-sm font-medium leading-snug text-foreground after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:outline-2 focus-visible:after:outline-ring"
-				aria-label={t("jira.card.openDetails", { key: ticket.key })}
-				onClick={onOpen}
-			>
-				{ticket.summary}
-			</Pressable>
-			<div className="flex min-w-0 items-center gap-2 text-2xs text-muted-foreground">
-				<span
-					className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-interactive-active text-[10px] font-medium text-foreground"
-					aria-hidden="true"
-				>
-					{assignee ? initialsOf(assignee) : "–"}
-				</span>
-				<span className="min-w-0 truncate">{assignee ?? t("jira.unassigned")}</span>
-			</div>
-			{linked.length > 0 || orchestratorLinked ? (
-				<div className="relative z-10 flex min-w-0 flex-col gap-1">
+			}
+			statusLabel={ticket.status.name}
+			statusClassName={ticketCategoryTextClass(ticket.status.category)}
+			time={ticket.updatedAt ? formatTimeCompact(ticket.updatedAt) : undefined}
+			timeTitle={ticket.updatedAt ? new Date(ticket.updatedAt).toLocaleString() : undefined}
+			footerAction={
+				<>
+					{showAssignee && assignee ? (
+						<span
+							className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-interactive-active text-[10px] font-medium text-foreground"
+							title={t("jira.assignedTo", { name: assignee })}
+							role="img"
+							aria-label={t("jira.assignedTo", { name: assignee })}
+						>
+							{initialsOf(assignee)}
+						</span>
+					) : null}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								type="button"
+								variant="quiet"
+								size="icon-xs"
+								disabled={starting}
+								aria-busy={starting}
+								aria-label={t("jira.startAria", { key: ticket.key })}
+								onClick={(event) => { event.stopPropagation(); onStart(); }}
+							>
+								{starting ? <LoaderCircle className="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Send className="size-icon-sm" aria-hidden="true" />}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="bottom">{starting ? t("jira.starting") : t("jira.start")}</TooltipContent>
+					</Tooltip>
+				</>
+			}
+		>
+			{orchestratorLinked || linked.length > 0 ? (
+				<>
 					{orchestratorLinked ? (
-						<Button type="button" variant="ghost" size="xs" className="w-fit max-w-full justify-start" onClick={() => onOpenOrchestrator(orchestratorLinked)}>
+						<Pressable className={rowClass} onClick={(event) => { event.stopPropagation(); onOpenOrchestrator(orchestratorLinked); }}>
 							<span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: "var(--color-status-working)" }} aria-hidden="true" />
 							<span className="truncate">{t("jira.sentToOrchestrator")}</span>
-						</Button>
+						</Pressable>
 					) : null}
 					{linked.slice(0, 2).map((session) => (
-						<Button key={session.id} type="button" variant="ghost" size="xs" className="w-fit max-w-full justify-start" onClick={() => onOpenSession(session)}>
+						<Pressable key={session.id} className={rowClass} onClick={(event) => { event.stopPropagation(); onOpenSession(session); }}>
 							<span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: "var(--color-status-working)" }} aria-hidden="true" />
 							<span className="truncate">{session.title}</span>
-						</Button>
+						</Pressable>
 					))}
-					{linked.length > 2 ? <span className="px-2 text-2xs text-passive">{t("jira.moreSessions", { more: linked.length - 2 })}</span> : null}
-				</div>
+					{linked.length > 2 ? <span className="text-2xs text-passive">{t("jira.moreSessions", { more: linked.length - 2 })}</span> : null}
+				</>
 			) : null}
-			<div className="relative z-10 flex items-center pt-0.5">
-				<Button type="button" variant="secondary" size="xs" disabled={starting} aria-busy={starting} aria-label={t("jira.startAria", { key: ticket.key })} onClick={onStart}>
-					{starting ? t("jira.starting") : t("jira.start")}
-				</Button>
-			</div>
-		</article>
+		</BoardCardView>
 	);
 }
 
