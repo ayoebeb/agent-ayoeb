@@ -143,8 +143,10 @@ function getLegacySessionStatusDotView(
  *  - "ready", green: a PR you can merge
  *  - "review", orange alert: a person's review is next
  *  - "merged", purple and dimmed: a PR that has landed, nothing left to do
+ *  - "limit", amber gauge: the agent stopped on its provider's usage limit and
+ *    cannot continue until the window resets (AO continues it by itself)
  */
-export type SessionRowMarker = "attention" | "ready" | "review" | "merged";
+export type SessionRowMarker = "attention" | "ready" | "review" | "merged" | "limit";
 
 /**
  * What a sidebar row says about its session, if anything, from the daemon's
@@ -165,6 +167,8 @@ export function getSessionRowMarker(session: {
 
 	if (sessionNeedsInput(session)) return "attention";
 	if (display === "CI failing" || display === "Changes requested") return "attention";
+	// Ahead of the pull request phrases: a limit-stopped agent cannot act on them.
+	if (display === "Usage limit" || session.status === "usage_limit") return "limit";
 	if (!display && (session.status === "ci_failed" || session.status === "changes_requested")) {
 		return "attention";
 	}

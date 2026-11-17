@@ -74,6 +74,13 @@ describe("notificationTarget", () => {
 		expect(notificationTarget({ type: "review_completed", sessionId: "s1", prUrl: "https://github.com/acme/repo/pull/42", hostId: "forgotten" }, new Set(["host-a", "host-b"]))).toBe("/");
 	});
 
+	// One notification per account and limit window: it names a session, not a pull request.
+	it("opens the session behind a usage-limit notification", () => {
+		expect(notificationTarget({ type: "usage_limit", sessionId: "s 1", hostId: "host-a" }, "host-a")).toBe("/session/s%201?hostId=host-a");
+		expect(notificationVisual(darkTheme, "usage_limit")).toMatchObject({ label: "Usage limit", color: darkTheme.amber });
+		expect(notificationAction({ type: "usage_limit", sessionId: "s1" }, { terminated: true, sessionsReady: true })).toEqual({ kind: "open", sessionId: "s1" });
+	});
+
 	it("falls back to the PR list when a review result payload is incomplete", () => {
 		expect(notificationTarget({ type: "review_completed", sessionId: "s1", hostId: "host-a" }, "host-a")).toBe("/prs?hostId=host-a");
 		expect(notificationTarget({ type: "review_changes_requested", prUrl: "https://github.com/acme/repo/pull/43", hostId: "host-a" }, "host-a")).toBe("/prs?hostId=host-a");

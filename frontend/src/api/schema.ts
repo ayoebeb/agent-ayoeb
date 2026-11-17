@@ -4383,6 +4383,23 @@ export interface paths {
         patch: operations["updateSessionRetention"];
         trace?: never;
     };
+    "/api/v1/settings/usage-limit-resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Choose whether AO continues sessions after a usage limit resets, and how many at once */
+        patch: operations["updateUsageLimitResume"];
+        trace?: never;
+    };
     "/api/v1/settings/version-refresh": {
         parameters: {
             query?: never;
@@ -5892,7 +5909,7 @@ export interface components {
             createdAt: string;
             displayName?: string;
             /** @enum {string} */
-            displayStatus: "Working" | "Blocked" | "Exited" | "No signal" | "Interrupted" | "Awaiting PR" | "Fixing CI failures" | "Addressing comments" | "Needs review" | "Review scheduled" | "Reviewing" | "Review failed" | "Review pending" | "Draft" | "CI failing" | "Commented" | "Changes requested" | "Needs human review" | "Mergeable" | "Approved" | "Merged" | "Closed without merge" | "Terminated";
+            displayStatus: "Working" | "Blocked" | "Exited" | "No signal" | "Interrupted" | "Usage limit" | "Awaiting PR" | "Fixing CI failures" | "Addressing comments" | "Needs review" | "Review scheduled" | "Reviewing" | "Review failed" | "Review pending" | "Draft" | "CI failing" | "Commented" | "Changes requested" | "Needs human review" | "Mergeable" | "Approved" | "Merged" | "Closed without merge" | "Terminated";
             harness?: string;
             /** Format: date-time */
             hibernatedAt?: null | string;
@@ -5935,7 +5952,7 @@ export interface components {
             scmStatus?: "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "commented" | "approved" | "mergeable" | "merged";
             staleBinary?: components["schemas"]["SessionStaleBinary"];
             /** @enum {string} */
-            status: "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "commented" | "approved" | "mergeable" | "merged" | "needs_input" | "exited" | "idle" | "terminated" | "no_signal";
+            status: "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "commented" | "approved" | "mergeable" | "merged" | "needs_input" | "exited" | "idle" | "terminated" | "no_signal" | "usage_limit";
             /** @enum {string} */
             statusReadiness: "checking" | "ready" | "unavailable";
             terminalGeneration?: string;
@@ -5944,6 +5961,7 @@ export interface components {
             terminateOnPrMerge: boolean;
             /** Format: date-time */
             updatedAt: string;
+            usageLimit?: components["schemas"]["SessionUsageLimit"];
             /** @enum {string} */
             workspaceCleanup?: "pending" | "removed" | "preserved_dirty" | "failed" | "not_applicable";
             workspaceCleanupReportOnly?: boolean;
@@ -7446,7 +7464,11 @@ export interface components {
             agentResponse: string;
             /** Format: date-time */
             at: string;
+            /** @description Why a failed turn failed, such as a usage-limit message. */
+            error?: string;
             harness?: string;
+            /** @description The turn's state when it did not complete: failed, interrupted or running. */
+            state?: string;
             userRequest: string;
         };
         SessionImportCandidate: {
@@ -7695,6 +7717,34 @@ export interface components {
             startedAt: string;
             tool: string;
         };
+        SessionUsageLimit: {
+            /** @description The provider's message for the stop. */
+            message: string;
+            /**
+             * Format: date-time
+             * @description When the limit window resets; absent when unknown.
+             */
+            resetsAt?: null | string;
+            /**
+             * @description What AO will do: continue after the reset (scheduled), wait for a free resume slot (waiting), or leave it alone (off).
+             * @enum {string}
+             */
+            resume: "scheduled" | "waiting" | "off";
+            /**
+             * @description Why AO will not continue the session by itself.
+             * @enum {string}
+             */
+            resumeOffReason?: "disabled" | "unknown_reset" | "cancelled" | "retry_scheduled" | "repeated" | "unavailable";
+            /**
+             * Format: date-time
+             * @description When the turn stopped.
+             */
+            stoppedAt: string;
+            /** @description The turn that stopped on the limit. */
+            turnId: string;
+            /** @description The limit that was hit, in the provider's words, such as 5-hour or weekly. */
+            window?: string;
+        };
         SessionWait: {
             /** @enum {string} */
             reason: "working" | "command" | "approval" | "starting" | "reviewer" | "resume";
@@ -7862,6 +7912,10 @@ export interface components {
             /** @description Days an archived session whose worktree is released is kept before the daemon deletes it permanently; 0 keeps it. */
             sessionRetentionDays: number;
             trackerIntakeEnabled: boolean;
+            /** @description When a session stops on the provider's usage limit, AO continues it after the limit resets. */
+            usageLimitAutoResume: boolean;
+            /** @description How many sessions AO continues at once after a usage limit resets, so they do not all spend the next window together. */
+            usageLimitMaxResumes: number;
             /** @description After a harness update, idle open sessions restart on the new release instead of running the old one until they happen to restart. */
             versionRefresh: boolean;
         };
@@ -8398,6 +8452,12 @@ export interface components {
         UpdateShellTerminalRequest: {
             /** @description New tab title for the shell terminal. Trimmed; must be non-empty. */
             title: string;
+        };
+        UpdateUsageLimitResumeRequest: {
+            /** @description Continue sessions stopped on a usage limit once it resets. */
+            enabled: null | boolean;
+            /** @description Most continued turns that run at once. */
+            maxConcurrent: null | number;
         };
         UpdateVersionRefreshRequest: {
             enabled: null | boolean;
@@ -25027,6 +25087,57 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["UpdateSessionRetentionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    updateUsageLimitResume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUsageLimitResumeRequest"];
             };
         };
         responses: {

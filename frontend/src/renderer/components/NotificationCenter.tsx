@@ -8,6 +8,7 @@ import {
 	BellRing,
 	CheckCheck,
 	CircleAlert,
+	Gauge,
 	GitMerge,
 	GitPullRequest,
 	GitPullRequestArrow,
@@ -1365,6 +1366,8 @@ function notificationIcon(type: string) {
 			return CheckCheck;
 		case "ready_to_merge":
 			return GitPullRequestArrow;
+		case "usage_limit":
+			return Gauge;
 		case "agent_failed":
 			return CircleAlert;
 		case "agent_completed":
@@ -1386,6 +1389,7 @@ function notificationIconClass(type: string): string {
 		case "needs_input":
 		case "review_feedback":
 		case "review_changes_requested":
+		case "usage_limit":
 			return "text-warning";
 		case "agent_failed":
 			return "text-error";

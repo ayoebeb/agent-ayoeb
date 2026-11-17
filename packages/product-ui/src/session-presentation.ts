@@ -37,6 +37,7 @@ const englishLabels: Record<SessionPresentationMessageKey, string> = {
 	"status.needs_input": "Input needed",
 	"status.exited": "Exited",
 	"status.no_signal": "No signal",
+	"status.usage_limit": "Usage limit",
 	"status.ci_failed": "CI failed",
 	"status.changes_requested": "Changes requested",
 	"status.commented": "Commented",
@@ -75,6 +76,7 @@ const englishLabels: Record<SessionPresentationMessageKey, string> = {
 	"displayStatus.exited": "Exited",
 	"displayStatus.noSignal": "No signal",
 	"displayStatus.interrupted": "Interrupted",
+	"displayStatus.usageLimit": "Usage limit",
 	"displayStatus.awaitingPr": "Awaiting PR",
 	"displayStatus.fixingCiFailures": "Fixing CI failures",
 	"displayStatus.addressingComments": "Addressing comments",
@@ -106,6 +108,7 @@ export const displayStatusLabelKeys: Record<DisplayStatus, `displayStatus.${stri
 	Exited: "displayStatus.exited",
 	"No signal": "displayStatus.noSignal",
 	Interrupted: "displayStatus.interrupted",
+	"Usage limit": "displayStatus.usageLimit",
 	"Awaiting PR": "displayStatus.awaitingPr",
 	"Fixing CI failures": "displayStatus.fixingCiFailures",
 	"Addressing comments": "displayStatus.addressingComments",
@@ -233,6 +236,8 @@ const sessionStatusStyles: Record<SessionStatus, Omit<SessionStatusView, "label"
 	needs_input: { className: "text-status-needs-you", dotClassName: "bg-status-needs-you" },
 	exited: { className: "text-status-exited", dotClassName: "bg-status-exited" },
 	no_signal: { className: "text-status-unknown", dotClassName: "bg-status-unknown" },
+	// Caution, not failure: the agent is paused until its limit window resets.
+	usage_limit: { className: "text-status-in-review", dotClassName: "bg-status-in-review" },
 	ci_failed: { className: "text-status-exited", dotClassName: "bg-status-exited" },
 	changes_requested: { className: "text-status-needs-you", dotClassName: "bg-status-needs-you" },
 	commented: { className: "text-status-in-review", dotClassName: "bg-status-in-review" },
@@ -462,6 +467,8 @@ export function attentionZone(input: SessionStatus | SessionStatusModel): Attent
 			return "pending";
 		case "working":
 		case "idle":
+		// Paused until its window resets, which AO handles: nothing for the person to do.
+		case "usage_limit":
 			return "working";
 	}
 }

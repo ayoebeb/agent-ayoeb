@@ -122,6 +122,14 @@ export function toWorkspaceSession(
 		scmStatus,
 		kanbanColumn,
 		displayStatus: session.displayStatus || undefined,
+		usageLimit: session.usageLimit
+			? {
+					window: session.usageLimit.window || undefined,
+					resetsAt: session.usageLimit.resetsAt ?? undefined,
+					resume: session.usageLimit.resume,
+					resumeOffReason: session.usageLimit.resumeOffReason || undefined,
+				}
+			: undefined,
 		statusReadiness,
 		provisionState: session.provisionState,
 		...(typeof session.workspacePublished === "boolean" ? { workspacePublished: session.workspacePublished } : {}),
@@ -234,6 +242,14 @@ function toLocalWorkspaceSession(
 		scmStatus,
 		kanbanColumn,
 		displayStatus: session.displayStatus || undefined,
+		usageLimit: session.usageLimit
+			? {
+					window: session.usageLimit.window || undefined,
+					resetsAt: session.usageLimit.resetsAt ?? undefined,
+					resume: session.usageLimit.resume,
+					resumeOffReason: session.usageLimit.resumeOffReason || undefined,
+				}
+			: undefined,
 		provisionState: session.provisionState,
 		...(typeof session.workspacePublished === "boolean" ? { workspacePublished: session.workspacePublished } : {}),
 		provisionError: session.provisionError || undefined,
