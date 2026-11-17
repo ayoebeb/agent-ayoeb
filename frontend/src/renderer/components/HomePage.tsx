@@ -24,6 +24,7 @@ import {
 } from "../types/workspace";
 import { CreateProjectFlow } from "./CreateProjectFlow";
 import { DaemonStartupLoader } from "./DaemonStartupLoader";
+import { HomeWaitingLine } from "./HomeWaitingLine";
 import { SessionImportOffer } from "./SessionImportOffer";
 import { NAV_ROW_HIGHLIGHT_HOST_CLASS, NavRowHighlight } from "./NavRowHighlight";
 import { dragStyle } from "./PageTopbar";
@@ -40,6 +41,10 @@ import { useEdgeFadeRef } from "../hooks/useEdgeFade";
  *   Scratchpad "+"). Never add a fifth row. Connect Mobile is settings-only.
  * - Recent rows use shared {@link NavRowHighlight} (same as sidebar), not a
  *   flat `hover:bg-interactive-hover` wash.
+ * - One quiet line ({@link HomeWaitingLine}) sits above the heading, and only
+ *   while an orchestrator is waiting for the user: it names the one that waits,
+ *   or counts them and leads to the Projects page. Nothing else is added above
+ *   the grid (DESIGN.md decisions log, 2026-11-17).
  * - One heading ({@link HOME_SECTION_TITLE_CLASS}) above the grid: Get started
  *   with no projects, otherwise Jump back right in. Recent-project rows sit
  *   under the grid with no heading of their own; each is one compact line
@@ -274,6 +279,7 @@ function HomePageContent() {
 			<div className="w-full max-w-[640px]">
 				<div className="space-y-6">
 					<section className="space-y-3 px-3" style={firstRunPromptOpen ? { visibility: "hidden" } : undefined}>
+							<HomeWaitingLine />
 						<div className="flex items-baseline justify-between gap-4">
 							<h1 className={HOME_SECTION_TITLE_CLASS}>{recentProjects.length === 0 ? t("home.getStarted") : t("home.jumpBack")}</h1>
 						</div>

@@ -28,6 +28,7 @@ import {
 	GitPullRequest,
 	LoaderCircle,
 	Download,
+	LayoutDashboard,
 	LayoutGrid,
 	Package,
 	Folder,
@@ -177,7 +178,7 @@ import { useCloudSession } from "../lib/cloud-session";
 import type { RemoteHost } from "../hooks/useRemoteHosts";
 import { sessionNavigateTarget } from "../lib/navigate-to-session";
 import { LOCAL_HOST, sessionUiKey } from "../lib/hosts";
-import { useProjectOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
+import { useOrchestratorWaiting, useProjectOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
 import { RemoteHostsSection } from "./RemoteHostsSection";
 import { beginSessionRowDrag } from "../lib/pane-drag";
 import { MAX_SPLIT_PANES, paneDragKey, sessionPaneKey, type SelectionKind, type SessionPaneRef } from "../lib/session-split";
@@ -547,6 +548,7 @@ function useSelection() {
 	const goAutomations = useCallback(() => void navigate({ to: "/automations" }), [navigate]);
 	const goArtifacts = useCallback(() => void navigate({ to: "/artifacts" }), [navigate]);
 	const goUsage = useCallback(() => void navigate({ to: "/usage" }), [navigate]);
+	const goProjects = useCallback(() => void navigate({ to: "/projects" }), [navigate]);
 	const goStandaloneBoard = useCallback(() => void navigate({ to: "/sessions" }), [navigate]);
 	const goGlobalSettings = useCallback(() => openGlobalSettings(), [openGlobalSettings]);
 	// Asking to connect a phone is the consent to turn Connect Mobile on, so the code starts preparing at once.
@@ -574,6 +576,7 @@ function useSelection() {
 		isAutomations: pathname === "/automations",
 		isArtifacts: pathname === "/artifacts",
 		isUsage: pathname === "/usage",
+		isProjects: pathname === "/projects",
 		activeRemoteHostId: params.hostId,
 		activeRemoteProjectId: params.hostId ? params.projectId : undefined,
 		activeRemoteSessionId: params.hostId ? params.sessionId : undefined,
@@ -583,6 +586,7 @@ function useSelection() {
 		goAutomations,
 		goArtifacts,
 		goUsage,
+		goProjects,
 		goStandaloneBoard,
 		// Settings is a modal — open it in place so the current page (session
 		// terminal, board, etc.) stays underneath.
@@ -591,7 +595,7 @@ function useSelection() {
 		goSettings,
 		goProject,
 		goSession,
-	}), [goArtifacts, goAutomations, goUsage, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
+	}), [goArtifacts, goAutomations, goUsage, goProjects, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
 }
 
 /*
@@ -969,6 +973,8 @@ export function Sidebar({
 	const developerMode = useUiStore((s) => s.developerMode);
 	// Cloud projects count only while the control plane keeps artifacts, as on the Artifacts page.
 	const cloudArtifacts = useCloudOffering().artifacts;
+	// Orchestrators waiting for the user, on this computer and every connected one.
+	const waitingTotal = useOrchestratorWaiting().waiting.length;
 	const artifactTotal = useMemo(
 		() => artifactCount(groupArtifactsByProject(cloudArtifacts ? workspaces : workspaces.filter((workspace) => workspace.kind !== "cloud"))),
 		[cloudArtifacts, workspaces],
@@ -1374,6 +1380,16 @@ export function Sidebar({
 					</SidebarGroup>
 				) : null}
 				<SidebarMenu className="mb-3 gap-0.5 group-data-[collapsible=icon]:gap-1">
+					<SidebarMenuItem>
+						<SidebarTopNavRow
+							active={selection.isProjects}
+							icon={<LayoutDashboard aria-hidden="true" />}
+							label={t("projects.navOverview")}
+							onClick={selection.goProjects}
+							tooltip={isCollapsed ? t("projects.navOverview") : undefined}
+							trailing={waitingTotal > 0 ? String(waitingTotal) : undefined}
+						/>
+					</SidebarMenuItem>
 					<SidebarMenuItem>
 						<SidebarTopNavRow
 							active={selection.isAutomations}

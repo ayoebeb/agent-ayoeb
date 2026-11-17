@@ -193,7 +193,10 @@ vi.mock("../hooks/useSettings", () => ({
 // Which orchestrators are waiting for the user comes from the daemon; these tests
 // decide it per project instead.
 const { orchestratorWaitingMock } = vi.hoisted(() => ({ orchestratorWaitingMock: vi.fn() }));
-vi.mock("../hooks/useOrchestratorWaiting", () => ({ useProjectOrchestratorWaiting: orchestratorWaitingMock }));
+vi.mock("../hooks/useOrchestratorWaiting", () => ({
+	useProjectOrchestratorWaiting: orchestratorWaitingMock,
+	useOrchestratorWaiting: () => ({ waiting: [] }),
+}));
 
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock, POST: postMock },
