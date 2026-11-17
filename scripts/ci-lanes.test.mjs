@@ -15,6 +15,48 @@ test('a push to main runs every lane in full', () => {
   assert.deepEqual(pickLanes({ event: 'push' }), { lanes: Object.keys(LANES), full: true, macos: true, vitest: 'all' });
 });
 
+const push = paths => ({
+  event: 'push',
+  files: paths.map(path => (typeof path === 'string' ? { status: 'modified', filename: path } : path)),
+});
+
+test('a push whose files are unknown runs every lane in full', () => {
+  const full = { lanes: Object.keys(LANES), full: true, macos: true, vitest: 'all' };
+  assert.deepEqual(pickLanes({ event: 'push', files: null }), full);
+  assert.deepEqual(pickLanes(push([])), full);
+});
+
+test('a push that changes code any heavy lane reads runs every lane in full', () => {
+  const full = { lanes: Object.keys(LANES), full: true, macos: true, vitest: 'all' };
+  for (const path of ['backend/a.go', 'frontend/src/renderer/a.ts', 'packages/shared/a.ts', 'test/cli/Dockerfile', 'frontend/native/a.swift', 'pricing/a.json', 'package.json']) {
+    assert.deepEqual(pickLanes(push([path])), full, path);
+  }
+  assert.deepEqual(pickLanes(push(['README.md', 'backend/a.go'])), full);
+  assert.deepEqual(pickLanes(push([{ status: 'renamed', filename: 'docs/a.go', previous_filename: 'backend/a.go' }])), full);
+});
+
+test('a push that changes a workflow or the lane rules runs every lane in full', () => {
+  assert.equal(pickLanes(push(['.github/workflows/go.yml'])).full, true);
+  assert.equal(pickLanes(push(['scripts/ci-lanes.mjs'])).full, true);
+  assert.equal(pickLanes(push(['.github/actions/setup-go-cached/action.yml', 'README.md'])).full, true);
+});
+
+test('a truncated push diff runs every lane in full', () => {
+  const files = Array.from({ length: 3000 }, (_, i) => `docs/${i}.md`);
+  assert.equal(pickLanes(push(files)).full, true);
+});
+
+test('a push that only changes files no heavy lane reads runs only the lanes it touches', () => {
+  const none = { lanes: [], full: false, macos: false, vitest: '' };
+  assert.deepEqual(pickLanes(push(['README.md', 'docs/ci.md', 'AGENTS.md', 'CONTRIBUTING.md'])), none);
+  assert.deepEqual(pickLanes(push(['scripts/daily-ao/update.ps1'])), { ...none, lanes: ['config'] });
+  assert.deepEqual(pickLanes(push(['.github/scripts/pr-review-leaderboard.mjs'])), { ...none, lanes: ['config'] });
+  assert.deepEqual(pickLanes(push(['frontend/src/docs/content/a.mdx'])), { ...none, lanes: ['docs'] });
+  assert.deepEqual(pickLanes(push(['contracts/cloud/openapi.yaml'])), { ...none, lanes: ['cloud'] });
+  assert.deepEqual(pickLanes(push(['packages/mobile/a.ts', 'README.md'])), { ...none, lanes: ['mobile'] });
+  assert.deepEqual(pickLanes(push(['scripts/a.mjs', 'frontend/src/docs/a.mdx'])), { ...none, lanes: ['docs', 'config'] });
+});
+
 test('drafts and stacked PRs run no lanes, even with ci:full', () => {
   const none = { lanes: [], full: false, macos: false, vitest: '' };
   assert.deepEqual(pickLanes(pr(['backend/a.go'], { draft: true, labels: ['ci:full'] })), none);

@@ -33,6 +33,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
         run: node scripts/ci-lanes.mjs >> "$GITHUB_OUTPUT"
 
   go:

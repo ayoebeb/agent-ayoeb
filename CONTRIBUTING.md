@@ -80,7 +80,10 @@ The AO Cloud control plane (the hosted service behind Cloud Agents) is not in th
 files and starts only the lanes those files can affect; the rules live in
 `scripts/ci-lanes.mjs`. `ci-ok` passes when every lane that started passes, so
 it is the one check to watch. A change to a workflow or to the lane rules starts
-every Linux lane, and a push to `main` runs every lane in full.
+every Linux lane, and a push to `main` runs every lane in full. The one
+exception is a push whose files only start the `config`, `docs`, `cloud` or
+`mobile` lanes, or none: nothing the other lanes read changed, so a push like
+that runs just the lanes it starts.
 
 On a PR, vitest runs the tests related to the changed frontend files plus the
 files listed in `frontend/scripts/ci-vitest-always-run.txt`. Add a test to that
@@ -102,7 +105,7 @@ without a label.
 
 Label changes alone do not restart CI. CI reads the labels when it runs, so
 push again or re-run the latest CI run after changing them. Main pushes retain
-full native coverage.
+full native coverage, except the pushes described above.
 
 ### Weekly contributor call
 
