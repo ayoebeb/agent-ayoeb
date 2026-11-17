@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -437,7 +438,9 @@ func (s *Service) deliver(ctx context.Context, projectID, issueKey string, store
 		return StartResult{}, err
 	}
 	if err := s.recordLink(projectID, issueKey, orchestratorID); err != nil {
-		return StartResult{}, fmt.Errorf("remember ticket link: %w", err)
+		// The brief is already with the orchestrator. Failing here would drop the
+		// duplicate guard and let a retry send it again, so the link is best effort.
+		slog.Warn("jira: could not remember ticket link", "project", projectID, "issue", issueKey, "error", err)
 	}
 	return StartResult{IssueKey: issueKey, OrchestratorID: orchestratorID, Spawned: spawned}, nil
 }

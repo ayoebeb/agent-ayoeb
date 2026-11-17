@@ -708,3 +708,23 @@ func TestStartRefusesATicketOutsideTheProjectUnlessTheJQLIsTheirOwn(t *testing.T
 		t.Fatalf("Start under a custom JQL = %+v, %v", res, err)
 	}
 }
+
+// If the link cannot be saved after the brief was sent, Start still succeeds and
+// a quick retry is a duplicate, not a second send.
+func TestStartKeepsTheDuplicateGuardWhenTheLinkCannotBeSaved(t *testing.T) {
+	f := newFixture(t)
+	f.connect()
+	f.orch.active = "orch-1"
+	// A directory where the links file belongs makes reading and writing it fail.
+	if err := os.Mkdir(filepath.Join(f.dir, "jira-links.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.svc.Start(context.Background(), projectID, "YIA-10")
+	if err != nil || res.OrchestratorID != "orch-1" || len(f.orch.sent) != 1 {
+		t.Fatalf("Start = %+v, %v; sent %d", res, err, len(f.orch.sent))
+	}
+	res, err = f.svc.Start(context.Background(), projectID, "YIA-10")
+	if err != nil || !res.Duplicate || len(f.orch.sent) != 1 {
+		t.Fatalf("retry = %+v, %v; sent %d", res, err, len(f.orch.sent))
+	}
+}
