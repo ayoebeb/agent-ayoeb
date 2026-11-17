@@ -15,6 +15,7 @@ import { Route as ShellUsageRouteImport } from './routes/_shell.usage'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellSessionsRouteImport } from './routes/_shell.sessions'
 import { Route as ShellNewRouteImport } from './routes/_shell.new'
+import { Route as ShellMachinesRouteImport } from './routes/_shell.machines'
 import { Route as ShellAutomationsRouteImport } from './routes/_shell.automations'
 import { Route as ShellArtifactsRouteImport } from './routes/_shell.artifacts'
 import { Route as ShellSessionsIndexRouteImport } from './routes/_shell.sessions.index'
@@ -53,6 +54,11 @@ const ShellSessionsRoute = ShellSessionsRouteImport.update({
 const ShellNewRoute = ShellNewRouteImport.update({
   id: '/new',
   path: '/new',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellMachinesRoute = ShellMachinesRouteImport.update({
+  id: '/machines',
+  path: '/machines',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellAutomationsRoute = ShellAutomationsRouteImport.update({
@@ -115,6 +121,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/artifacts': typeof ShellArtifactsRoute
   '/automations': typeof ShellAutomationsRoute
+  '/machines': typeof ShellMachinesRoute
   '/new': typeof ShellNewRoute
   '/sessions': typeof ShellSessionsRouteWithChildren
   '/settings': typeof ShellSettingsRoute
@@ -131,6 +138,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/artifacts': typeof ShellArtifactsRoute
   '/automations': typeof ShellAutomationsRoute
+  '/machines': typeof ShellMachinesRoute
   '/new': typeof ShellNewRoute
   '/settings': typeof ShellSettingsRoute
   '/usage': typeof ShellUsageRoute
@@ -149,6 +157,7 @@ export interface FileRoutesById {
   '/_shell': typeof ShellRouteWithChildren
   '/_shell/artifacts': typeof ShellArtifactsRoute
   '/_shell/automations': typeof ShellAutomationsRoute
+  '/_shell/machines': typeof ShellMachinesRoute
   '/_shell/new': typeof ShellNewRoute
   '/_shell/sessions': typeof ShellSessionsRouteWithChildren
   '/_shell/settings': typeof ShellSettingsRoute
@@ -169,6 +178,7 @@ export interface FileRouteTypes {
     | '/'
     | '/artifacts'
     | '/automations'
+    | '/machines'
     | '/new'
     | '/sessions'
     | '/settings'
@@ -185,6 +195,7 @@ export interface FileRouteTypes {
   to:
     | '/artifacts'
     | '/automations'
+    | '/machines'
     | '/new'
     | '/settings'
     | '/usage'
@@ -202,6 +213,7 @@ export interface FileRouteTypes {
     | '/_shell'
     | '/_shell/artifacts'
     | '/_shell/automations'
+    | '/_shell/machines'
     | '/_shell/new'
     | '/_shell/sessions'
     | '/_shell/settings'
@@ -263,6 +275,13 @@ declare module '@tanstack/react-router' {
       path: '/new'
       fullPath: '/new'
       preLoaderRoute: typeof ShellNewRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/machines': {
+      id: '/_shell/machines'
+      path: '/machines'
+      fullPath: '/machines'
+      preLoaderRoute: typeof ShellMachinesRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/automations': {
@@ -355,6 +374,7 @@ const ShellSessionsRouteWithChildren = ShellSessionsRoute._addFileChildren(
 interface ShellRouteChildren {
   ShellArtifactsRoute: typeof ShellArtifactsRoute
   ShellAutomationsRoute: typeof ShellAutomationsRoute
+  ShellMachinesRoute: typeof ShellMachinesRoute
   ShellNewRoute: typeof ShellNewRoute
   ShellSessionsRoute: typeof ShellSessionsRouteWithChildren
   ShellSettingsRoute: typeof ShellSettingsRoute
@@ -371,6 +391,7 @@ interface ShellRouteChildren {
 const ShellRouteChildren: ShellRouteChildren = {
   ShellArtifactsRoute: ShellArtifactsRoute,
   ShellAutomationsRoute: ShellAutomationsRoute,
+  ShellMachinesRoute: ShellMachinesRoute,
   ShellNewRoute: ShellNewRoute,
   ShellSessionsRoute: ShellSessionsRouteWithChildren,
   ShellSettingsRoute: ShellSettingsRoute,

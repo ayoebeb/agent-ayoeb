@@ -36,6 +36,8 @@ export type DaemonProbe = {
 	appImagePath?: string;
 	/** The daemon also serves [::1] at its port; absent from an older daemon. */
 	ipv6Loopback?: boolean;
+	/** The Ayo release the daemon runs; absent from an older daemon or a development build. */
+	version?: string;
 };
 
 /** A /healthz|/readyz probe of a loopback port; resolves null when nothing valid answers. */
@@ -72,6 +74,7 @@ export function parseDaemonProbe(endpoint: "healthz" | "readyz", body: unknown):
 			typeof candidate.startupWorkingDirectory === "string" ? candidate.startupWorkingDirectory : undefined,
 		appImagePath: typeof candidate.appImagePath === "string" ? candidate.appImagePath : undefined,
 		...(candidate.ipv6Loopback === true ? { ipv6Loopback: true } : {}),
+		...(typeof candidate.version === "string" && candidate.version.trim() !== "" ? { version: candidate.version.trim() } : {}),
 	};
 }
 

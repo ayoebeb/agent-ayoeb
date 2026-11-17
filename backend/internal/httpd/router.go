@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -462,6 +463,13 @@ func daemonProbePayload(status string, cfg config.Config, ipv6Loopback bool) map
 	}
 	if cfg.StartupWorkingDirectory != "" {
 		payload["startupWorkingDirectory"] = cfg.StartupWorkingDirectory
+	}
+	// The release this daemon runs, so a desktop can tell when a linked computer
+	// has fallen behind. Only the authenticated remote listener and the loopback
+	// listener serve this payload; the one unauthenticated route stays
+	// GET /api/v1/identity. Omitted for a development build, which has none.
+	if version := strings.TrimSpace(cfg.Telemetry.AppVersion); version != "" {
+		payload["version"] = version
 	}
 	// AO_APPIMAGE is set by the Electron app at spawn time when it runs from an
 	// AppImage. The value is the stable outer .AppImage file path, which the

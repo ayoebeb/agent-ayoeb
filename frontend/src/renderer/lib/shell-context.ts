@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import type { components } from "../../api/schema";
 import type { useDaemonStatus } from "../hooks/useDaemonStatus";
+import type { RemoteHost } from "../hooks/useRemoteHosts";
 
 // Shared state the persistent _shell layout owns and route content reads. The
 // daemon status effect (IPC poll + event transport) must run exactly once, so
@@ -30,6 +31,10 @@ export type ShellContextValue = {
 		path: string;
 		importKind: "project" | "workspace";
 	}) => Promise<components["schemas"]["ImportValidationResult"]>;
+	/** The linked computers the shell's one connection manager tracks, for pages that list them. */
+	remoteHosts?: RemoteHost[];
+	/** Re-read the account's computers and reconnect the ones that are offline. */
+	refreshRemoteHosts?: () => Promise<void>;
 };
 
 const ShellContext = createContext<ShellContextValue | null>(null);

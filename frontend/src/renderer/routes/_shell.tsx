@@ -1480,6 +1480,8 @@ const replacementErrorCount = Object.keys(orchestratorReplacementErrors).length;
 			openRemoteProjectSettings: (hostId: string, projectId: string) => openProjectSettings(projectId, hostId),
 			openProject,
 			validateImport,
+			remoteHosts,
+			refreshRemoteHosts,
 		}),
 		[
 			cloneProject,
@@ -1488,6 +1490,8 @@ const replacementErrorCount = Object.keys(orchestratorReplacementErrors).length;
 			initializeProjectRepository,
 			openProjectSettings,
 			openProject,
+			refreshRemoteHosts,
+			remoteHosts,
 			validateImport,
 			workspaceStartupState,
 		],
