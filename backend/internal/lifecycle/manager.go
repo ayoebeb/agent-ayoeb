@@ -432,7 +432,7 @@ func (m *Manager) mutate(ctx context.Context, id domain.SessionID, fn func(domai
 // input arrived, or because the session ended — has nothing left to resolve.
 func needsInputResolutions(prev, next domain.SessionRecord, now time.Time) []ports.NotificationResolution {
 	var out []ports.NotificationResolution
-	if prev.Activity.State.NeedsInput() && !(next.Activity.State.NeedsInput() && !next.IsTerminated) {
+	if prev.Activity.State.NeedsInput() && (!next.Activity.State.NeedsInput() || next.IsTerminated) {
 		out = append(out, ports.NotificationResolution{
 			Type:       domain.NotificationNeedsInput,
 			SessionID:  next.ID,
