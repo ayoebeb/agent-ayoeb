@@ -1,3 +1,4 @@
+import { crewGroupOf } from "./crew";
 import { LOCAL_HOST, type HostId } from "./hosts";
 import { waitingForProject, type OrchestratorWaiting } from "./orchestrator-waiting";
 import {
@@ -7,7 +8,6 @@ import {
 	isOrchestratorSession,
 	newestActiveOrchestrator,
 	sessionAgentExited,
-	sessionIsActive,
 	type PullRequestFacts,
 	type WorkspaceSession,
 	type WorkspaceSummary,
@@ -86,8 +86,9 @@ export function orchestratorStateOf(
 	}
 }
 
+/** A worker that is not finished, by the same rule the control room's crew rail uses, so the two counts agree. */
 function isLiveWorker(session: WorkspaceSession): boolean {
-	return !isOrchestratorSession(session) && sessionIsActive(session) && session.status !== "merged";
+	return !isOrchestratorSession(session) && crewGroupOf(session) !== "done";
 }
 
 export function summarizePullRequests(sessions: readonly WorkspaceSession[]): PullRequestSummary {
