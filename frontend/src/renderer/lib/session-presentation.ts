@@ -228,7 +228,7 @@ export function sessionNeedsInput(session: {
 
 // Mirrors the board card's needs-attention check; waiting on input is handled
 // before this by sessionNeedsInput.
-function sessionNeedsYou(session: {
+export function sessionNeedsYou(session: {
 	displayStatus?: string;
 	status: SessionStatus;
 }): boolean {

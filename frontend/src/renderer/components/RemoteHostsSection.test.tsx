@@ -27,6 +27,20 @@ it("keeps host-specific offline controls around shared project rows", () => {
 	expect(onRetry).toHaveBeenCalledOnce();
 });
 
+it("offers the Computers page only when it can open one and a host is linked", () => {
+	const onOpenComputers = vi.fn();
+	const props = { workspaces: [], renderProject: vi.fn(), onRetry: vi.fn() };
+	const host = { hostId: "box-a", label: "Box A", url: "https://a.test", status: "connected" as const };
+	const { rerender } = render(<SidebarProvider><SidebarMenu><RemoteHostsSection {...props} hosts={[host]} onOpenComputers={onOpenComputers} /></SidebarMenu></SidebarProvider>);
+	fireEvent.click(screen.getByRole("button", { name: "Computers" }));
+	expect(onOpenComputers).toHaveBeenCalledOnce();
+
+	rerender(<SidebarProvider><SidebarMenu><RemoteHostsSection {...props} hosts={[host]} /></SidebarMenu></SidebarProvider>);
+	expect(screen.queryByRole("button", { name: "Computers" })).toBeNull();
+	rerender(<SidebarProvider><SidebarMenu><RemoteHostsSection {...props} hosts={[]} onOpenComputers={onOpenComputers} /></SidebarMenu></SidebarProvider>);
+	expect(screen.queryByRole("button", { name: "Computers" })).toBeNull();
+});
+
 it("shows the last saved projects of a host that is offline or connecting", () => {
 	const renderProject = vi.fn((host: { hostId: string }, workspace: { name: string }) =>
 		<SidebarMenuItem data-testid={`project-${host.hostId}`}>{workspace.name}</SidebarMenuItem>);

@@ -450,3 +450,65 @@ describe("palette search requests", () => {
 		expect(useUiStore.getState().chatMessageFocusRequest).toBeNull();
 	});
 });
+
+describe("orchestrator control room", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+		useUiStore.setState({ inspectorSessions: {}, controlRooms: {} });
+	});
+
+	it("opens an orchestrator on its crew, open, and does not reopen it after the person closed it", () => {
+		const store = useUiStore.getState();
+		store.initializeInspectorSession("orch", false, true, true, true);
+		expect(useUiStore.getState().inspectorSessions.orch).toMatchObject({ isOpen: true, view: "crew", initialized: true });
+
+		store.setInspectorOpen("orch", false);
+		store.initializeInspectorSession("orch", false, true, true, true);
+		expect(useUiStore.getState().inspectorSessions.orch?.isOpen).toBe(false);
+	});
+
+	it("leaves a worker on Summary, closed", () => {
+		useUiStore.getState().initializeInspectorSession("worker", false, true);
+		expect(useUiStore.getState().inspectorSessions.worker).toMatchObject({ isOpen: false, view: "summary" });
+	});
+
+	it("keeps a remembered Files sidebar ahead of the crew", () => {
+		window.localStorage.setItem(filesSidebarStorageKey("orch"), "open");
+		useUiStore.getState().initializeInspectorSession("orch", false, true, true, true);
+		expect(useUiStore.getState().inspectorSessions.orch).toMatchObject({ isOpen: true, view: "files" });
+	});
+
+	it("starts on the Session tab with all agents", () => {
+		expect(useUiStore.getState().controlRooms.orch).toBeUndefined();
+		useUiStore.getState().setControlRoom("orch", {});
+		expect(useUiStore.getState().controlRooms.orch).toBeUndefined();
+	});
+
+	it("keeps the scope when the tab changes, and returns to all agents with null", () => {
+		const store = useUiStore.getState();
+		store.setControlRoom("orch", { tab: "changes", scope: "w-1" });
+		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "changes", scope: "w-1" });
+
+		store.setControlRoom("orch", { tab: "terminal" });
+		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "terminal", scope: "w-1" });
+
+		store.setControlRoom("orch", { scope: null });
+		expect(useUiStore.getState().controlRooms.orch).toEqual({ tab: "terminal", scope: undefined });
+	});
+
+	it("does not replace the state when nothing changed", () => {
+		const store = useUiStore.getState();
+		store.setControlRoom("orch", { tab: "commits", scope: "w-2" });
+		const before = useUiStore.getState().controlRooms;
+		store.setControlRoom("orch", { tab: "commits", scope: "w-2" });
+		expect(useUiStore.getState().controlRooms).toBe(before);
+	});
+
+	it("keeps each orchestrator's room apart", () => {
+		const store = useUiStore.getState();
+		store.setControlRoom("a", { tab: "files", scope: "w-1" });
+		store.setControlRoom("b", { tab: "commits" });
+		expect(useUiStore.getState().controlRooms.a).toEqual({ tab: "files", scope: "w-1" });
+		expect(useUiStore.getState().controlRooms.b).toEqual({ tab: "commits", scope: undefined });
+	});
+});

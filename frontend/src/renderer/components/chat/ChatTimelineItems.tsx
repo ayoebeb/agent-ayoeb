@@ -1349,7 +1349,7 @@ export function AssistantMessage({
 		>
 			<div data-chat-message-body="">
 				<CodeRunScope.Provider value={message.id}>
-					<ChatMarkdown text={visibleText} streaming={renderingStreaming} />
+					<ChatMarkdown text={visibleText} streaming={renderingStreaming} messageId={message.id} />
 				</CodeRunScope.Provider>
 			</div>
 			{showActions ? (

@@ -1,4 +1,5 @@
-export type SessionLinkTarget = { projectId: string; sessionId: string };
+/** A session, and optionally a heading anchor inside its chat (`ao://sessions/{project}/{session}#{anchor}`). */
+export type SessionLinkTarget = { projectId: string; sessionId: string; anchor?: string };
 export type ArtifactLinkTarget = SessionLinkTarget & { path: string };
 export type ResolvedSessionLink = SessionLinkTarget & { isTerminated: boolean };
 export type SessionLinkWorkspace = {
@@ -24,11 +25,19 @@ const TRAILING_DELIMITERS = [
 	["‹", "›"],
 ] as const;
 
-/** Strictly parse the in-app session route, `ao://sessions/{project}/{session}`. */
+/**
+ * Strictly parse the in-app session route, `ao://sessions/{project}/{session}`,
+ * with at most one `#anchor` naming a heading in that session's chat.
+ */
 export function parseSessionLink(value: string): SessionLinkTarget | undefined {
-	const segments = linkSegments(value);
+	const hash = value.indexOf("#");
+	const segments = linkSegments(hash < 0 ? value : value.slice(0, hash));
 	if (segments?.length !== 2) return undefined;
-	return sessionTarget(segments);
+	const target = sessionTarget(segments);
+	if (!target || hash < 0) return target;
+	const raw = value.slice(hash + 1);
+	const anchor = /[#?/]/.test(raw) ? undefined : decodeSegment(raw);
+	return anchor?.trim() ? { ...target, anchor } : undefined;
 }
 
 /** Strictly parse the in-app artifact route, `ao://sessions/{project}/{session}/artifacts/{path}`. */
