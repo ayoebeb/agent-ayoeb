@@ -4611,5 +4611,6 @@
 	"jira.tab.label": "Board view",
 	"jira.truncated": "Showing the first {{shown}} tickets. Narrow the query in project settings to see the rest.",
 	"jira.unassigned": "Unassigned",
-	"jira.updatedAt": "Updated {{time}}"
+	"jira.updatedAt": "Updated {{time}}",
+	"jira.settings.apiTokenNew": "Enter the token for this site and email"
 }

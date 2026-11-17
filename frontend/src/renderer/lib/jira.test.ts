@@ -23,6 +23,7 @@ import {
 	JiraRequestError,
 	latestSentSessionId,
 	onlyAssignedTo,
+	sameJiraSite,
 	sessionsForTicket,
 	startJiraTicket,
 	testJira,
@@ -157,5 +158,15 @@ describe("ticketTaskBrief", () => {
 		const brief = ticketTaskBrief(ticket("YIA-10", { summary: "Add CSV export", description: "Users want CSV.", acceptanceCriteria: "- exports all rows" }));
 		expect(brief).toBe("YIA-10: Add CSV export\n\nLink: https://yoobi.atlassian.net/browse/YIA-10\n\nDescription:\nUsers want CSV.\n\nAcceptance criteria:\n- exports all rows");
 		expect(ticketTaskBrief(ticket("YIA-11"))).toBe("YIA-11: Summary of YIA-11\n\nLink: https://yoobi.atlassian.net/browse/YIA-11");
+	});
+});
+
+describe("sameJiraSite", () => {
+	it("compares sites the way the daemon does, so a saved token is kept only for the same site", () => {
+		expect(sameJiraSite("https://yoobi.atlassian.net", "yoobi.atlassian.net")).toBe(true);
+		expect(sameJiraSite("https://yoobi.atlassian.net/", "HTTPS://YOOBI.Atlassian.net/jira/software/projects/YIA/boards/1")).toBe(true);
+		expect(sameJiraSite("https://yoobi.atlassian.net", "https://other.atlassian.net")).toBe(false);
+		expect(sameJiraSite("http://127.0.0.1:47810", "http://127.0.0.1:47811")).toBe(false);
+		expect(sameJiraSite("http://127.0.0.1:47810", "https://127.0.0.1:47810")).toBe(false);
 	});
 });

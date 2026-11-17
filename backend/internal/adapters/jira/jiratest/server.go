@@ -5,7 +5,6 @@
 package jiratest
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -113,8 +112,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.Status, map[string]any{"errorMessages": []string{"forced status"}})
 		return
 	}
-	want := "Basic " + base64.StdEncoding.EncodeToString([]byte(s.Email+":"+s.Token))
-	if r.Header.Get("Authorization") != want {
+	// Atlassian treats the account email case-insensitively; the token is exact.
+	email, token, hasAuth := r.BasicAuth()
+	if !hasAuth || !strings.EqualFold(email, s.Email) || token != s.Token {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"message": "Basic auth with API token required"})
 		return
 	}

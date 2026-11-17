@@ -4612,5 +4612,6 @@
 	"jira.tab.label": "看板视图",
 	"jira.truncated": "显示前 {{shown}} 个工单。请在项目设置中缩小查询范围以查看其余工单。",
 	"jira.unassigned": "未分配",
-	"jira.updatedAt": "更新于 {{time}}"
+	"jira.updatedAt": "更新于 {{time}}",
+	"jira.settings.apiTokenNew": "请输入此站点和邮箱对应的令牌"
 }

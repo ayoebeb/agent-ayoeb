@@ -4744,5 +4744,6 @@
 	"jira.tab.label": "Vue du tableau",
 	"jira.truncated": "Affichage des {{shown}} premiers tickets. Affinez la requête dans les paramètres du projet pour voir le reste.",
 	"jira.unassigned": "Non assigné",
-	"jira.updatedAt": "Actualisé {{time}}"
+	"jira.updatedAt": "Actualisé {{time}}",
+	"jira.settings.apiTokenNew": "Saisissez le jeton de ce site et de cet e-mail"
 }

@@ -4744,5 +4744,6 @@
 	"jira.tab.label": "Visualização do quadro",
 	"jira.truncated": "Mostrando os primeiros {{shown}} tickets. Restrinja a consulta nas configurações do projeto para ver o resto.",
 	"jira.unassigned": "Sem responsável",
-	"jira.updatedAt": "Atualizado {{time}}"
+	"jira.updatedAt": "Atualizado {{time}}",
+	"jira.settings.apiTokenNew": "Informe o token deste site e e-mail"
 }

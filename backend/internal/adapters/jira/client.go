@@ -134,7 +134,8 @@ func NormalizeSiteURL(raw string) (string, error) {
 	default:
 		return "", errors.New("site URL must use https")
 	}
-	return u.Scheme + "://" + u.Host, nil
+	// A host is case-insensitive; one spelling keeps "is this the same site" honest.
+	return u.Scheme + "://" + strings.ToLower(u.Host), nil
 }
 
 func isLoopbackHost(host string) bool {

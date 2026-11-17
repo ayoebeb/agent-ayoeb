@@ -156,4 +156,38 @@ describe("JiraConnectionSettings", () => {
 		await waitFor(() => expect(daemon.calls.some((call) => call.method === "DELETE")).toBe(true));
 		await waitFor(() => expect(screen.getByLabelText("Jira site")).toHaveValue(""));
 	});
-});
+
+	it("asks for the token again as soon as the site or email changes, so a saved token is never sent elsewhere", async () => {
+		daemon.replies["GET /api/v1/projects/{id}/jira"] = () => ok({ connected: true, siteUrl: "https://yoobi.atlassian.net", email: "ada@example.com", projectKey: "YIA" });
+		renderSettings();
+		await waitFor(() => expect(screen.getByLabelText("Jira site")).toHaveValue("https://yoobi.atlassian.net"));
+		const save = screen.getByRole("button", { name: "Save" });
+		const test = screen.getByRole("button", { name: "Test connection" });
+		const site = screen.getByLabelText("Jira site");
+		const token = screen.getByLabelText("API token");
+		expect(save).toBeEnabled();
+		expect(token).toHaveAttribute("placeholder", "Saved. Leave empty to keep it.");
+
+		// The same site and account written another way keeps the saved token.
+		await userEvent.clear(site);
+		await userEvent.type(site, "YOOBI.atlassian.net/");
+		expect(save).toBeEnabled();
+
+		// Another site needs a token of its own.
+		await userEvent.clear(site);
+		await userEvent.type(site, "https://other.atlassian.net");
+		expect(save).toBeDisabled();
+		expect(test).toBeDisabled();
+		expect(token).toHaveAttribute("placeholder", "Enter the token for this site and email");
+		await userEvent.type(token, "token-for-the-other-site");
+		expect(save).toBeEnabled();
+		await userEvent.clear(token);
+
+		// So does another account on the same site.
+		await userEvent.clear(site);
+		await userEvent.type(site, "https://yoobi.atlassian.net");
+		expect(save).toBeEnabled();
+		await userEvent.clear(screen.getByLabelText("Atlassian email"));
+		await userEvent.type(screen.getByLabelText("Atlassian email"), "someone.else@example.com");
+		expect(save).toBeDisabled();
+	});});

@@ -204,3 +204,26 @@ func TestJiraRoutesAnswer501WithoutAService(t *testing.T) {
 		}
 	}
 }
+
+// The saved token only ever goes back to the site and account it was saved for.
+func TestJiraBlankTokenIsNotSentToAnotherSite(t *testing.T) {
+	rig := newJiraRig(t)
+	if rec := rig.do(http.MethodPut, "/projects/yoobi-app/jira", rig.connectBody()); rec.Code != http.StatusOK {
+		t.Fatalf("connect: %d %s", rec.Code, rec.Body)
+	}
+	other := jiratest.New()
+	defer other.Close()
+
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPut, "/projects/yoobi-app/jira"},
+		{http.MethodPost, "/projects/yoobi-app/jira/test"},
+	} {
+		rec := rig.do(route.method, route.path, map[string]any{"siteUrl": other.URL, "email": rig.site.Email, "projectKey": "YIA"})
+		if rec.Code != http.StatusBadRequest || decodeCode(t, rec) != jirasvc.CodeInvalidInput {
+			t.Fatalf("%s %s: %d %s", route.method, route.path, rec.Code, rec.Body)
+		}
+	}
+	if reqs := other.Requests(); len(reqs) != 0 {
+		t.Fatalf("the saved token reached another host: %+v", reqs)
+	}
+}

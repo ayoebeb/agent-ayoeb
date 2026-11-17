@@ -4630,5 +4630,6 @@
 	"jira.tab.label": "Board-Ansicht",
 	"jira.truncated": "Die ersten {{shown}} Tickets werden angezeigt. Grenze die Abfrage in den Projekteinstellungen ein, um den Rest zu sehen.",
 	"jira.unassigned": "Nicht zugewiesen",
-	"jira.updatedAt": "Aktualisiert {{time}}"
+	"jira.updatedAt": "Aktualisiert {{time}}",
+	"jira.settings.apiTokenNew": "Gib den Token für diese Site und E-Mail ein"
 }

@@ -230,6 +230,7 @@ func TestNormalizeSiteURL(t *testing.T) {
 	}{
 		{"yoobi.atlassian.net", "https://yoobi.atlassian.net", false},
 		{"https://yoobi.atlassian.net/", "https://yoobi.atlassian.net", false},
+		{"https://YOOBI.Atlassian.NET", "https://yoobi.atlassian.net", false},
 		{" https://yoobi.atlassian.net/jira/software/projects/YIA/boards/1 ", "https://yoobi.atlassian.net", false},
 		{"http://127.0.0.1:5555", "http://127.0.0.1:5555", false},
 		{"http://localhost:8080/x", "http://localhost:8080", false},

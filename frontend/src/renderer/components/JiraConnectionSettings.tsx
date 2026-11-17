@@ -3,7 +3,7 @@ import { ProjectSettingsSection } from "@aoagents/product-ui";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useJiraConnection } from "../hooks/useJira";
-import { connectJira, disconnectJira, jiraQueryKeys, testJira, type JiraConnectInput, type JiraTestResult } from "../lib/jira";
+import { connectJira, disconnectJira, jiraQueryKeys, sameJiraSite, testJira, type JiraConnectInput, type JiraTestResult } from "../lib/jira";
 import { useUiStore } from "../stores/ui-store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SettingsRow } from "./settings/SettingsRow";
@@ -62,7 +62,10 @@ export function JiraConnectionSettings({ projectId, hostId }: { projectId: strin
 		...(/^\d+$/.test(draft.boardId.trim()) ? { boardId: Number(draft.boardId.trim()) } : {}),
 		...(draft.jql.trim() ? { jql: draft.jql.trim() } : {}),
 	});
-	const complete = draft.siteUrl.trim() !== "" && draft.email.trim() !== "" && (draft.apiToken.trim() !== "" || connected) && (draft.projectKey.trim() !== "" || draft.jql.trim() !== "");
+	// The saved token belongs to the site and account it was saved for: it is kept
+	// only while both are unchanged, so another site or email needs its own token.
+	const keepsSavedToken = connected && sameJiraSite(draft.siteUrl, saved?.siteUrl ?? "") && draft.email.trim().toLowerCase() === (saved?.email ?? "").trim().toLowerCase();
+	const complete = draft.siteUrl.trim() !== "" && draft.email.trim() !== "" && (draft.apiToken.trim() !== "" || keepsSavedToken) && (draft.projectKey.trim() !== "" || draft.jql.trim() !== "");
 	const refresh = () => {
 		void queryClient.invalidateQueries({ queryKey: jiraQueryKeys.connection(projectId, hostId) });
 		void queryClient.invalidateQueries({ queryKey: jiraQueryKeys.board(projectId, hostId) });
@@ -135,7 +138,7 @@ export function JiraConnectionSettings({ projectId, hostId }: { projectId: strin
 			{field("apiToken", t("jira.settings.apiToken"), {
 				type: "password",
 				autoComplete: "new-password",
-				placeholder: connected ? t("jira.settings.apiTokenKeep") : undefined,
+				placeholder: keepsSavedToken ? t("jira.settings.apiTokenKeep") : connected ? t("jira.settings.apiTokenNew") : undefined,
 				description: t("jira.settings.apiTokenHelp"),
 			})}
 			{field("projectKey", t("jira.settings.projectKey"), { placeholder: t("jira.settings.projectKeyPlaceholder"), mono: true })}

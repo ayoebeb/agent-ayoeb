@@ -15,7 +15,7 @@ A project can show its Jira Cloud tickets as a second board. Each ticket has a *
 
 Two optional fields narrow or shape the board. **JQL** replaces the default query, which shows the project's open tickets and what finished in the last week, for example `project = YIA AND assignee = currentUser()`. **Board ID** picks a specific Jira board; without it, the project's first board is used. When no board can be read, columns follow each ticket's status.
 
-The API token is write-only. It is stored in an owner-only file in the data directory of the machine that runs the project, it is used only to read your Jira site, and it is never shown again, logged or sent anywhere else. **Disconnect** removes it.
+The API token is write-only. It is stored in an owner-only file in the data directory of the machine that runs the project, it is used only to read your Jira site, and it is never shown again, logged or sent anywhere else. **Disconnect** removes it. To update other settings you can leave the token empty; if you change the site or the email, enter the token for that account again, because a saved token is only ever used for the site and email it was saved for.
 
 ## Use the Jira board
 

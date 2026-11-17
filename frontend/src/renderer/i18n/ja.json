@@ -4630,5 +4630,6 @@
 	"jira.tab.label": "ボード表示",
 	"jira.truncated": "最初の {{shown}} 件を表示しています。残りを見るにはプロジェクト設定でクエリを絞り込んでください。",
 	"jira.unassigned": "未割り当て",
-	"jira.updatedAt": "{{time}} に更新"
+	"jira.updatedAt": "{{time}} に更新",
+	"jira.settings.apiTokenNew": "このサイトとメールアドレスの API トークンを入力"
 }

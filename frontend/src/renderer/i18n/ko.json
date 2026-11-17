@@ -4630,5 +4630,6 @@
 	"jira.tab.label": "보드 보기",
 	"jira.truncated": "처음 {{shown}}개 티켓을 표시합니다. 나머지를 보려면 프로젝트 설정에서 쿼리를 좁히세요.",
 	"jira.unassigned": "미할당",
-	"jira.updatedAt": "{{time}}에 업데이트됨"
+	"jira.updatedAt": "{{time}}에 업데이트됨",
+	"jira.settings.apiTokenNew": "이 사이트와 이메일의 토큰을 입력하세요"
 }

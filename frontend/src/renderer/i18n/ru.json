@@ -4851,5 +4851,6 @@
 	"jira.tab.label": "Вид доски",
 	"jira.truncated": "Показаны первые задачи: {{shown}}. Сузьте запрос в настройках проекта, чтобы увидеть остальные.",
 	"jira.unassigned": "Не назначено",
-	"jira.updatedAt": "Обновлено {{time}}"
+	"jira.updatedAt": "Обновлено {{time}}",
+	"jira.settings.apiTokenNew": "Введите токен для этого сайта и почты"
 }

@@ -4744,5 +4744,6 @@
 	"jira.tab.label": "Vista del tablero",
 	"jira.truncated": "Se muestran los primeros {{shown}} tickets. Acota la consulta en los ajustes del proyecto para ver el resto.",
 	"jira.unassigned": "Sin asignar",
-	"jira.updatedAt": "Actualizado {{time}}"
+	"jira.updatedAt": "Actualizado {{time}}",
+	"jira.settings.apiTokenNew": "Introduce el token de este sitio y correo"
 }

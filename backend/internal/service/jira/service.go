@@ -88,6 +88,20 @@ type Service struct {
 
 	mu      sync.Mutex // guards the files and the caches below
 	clients map[string]*cachedClient
+	// starts holds one entry per ticket being sent, or sent a moment ago, so
+	// concurrent requests for the same ticket cannot each send the brief.
+	starts map[string]*startFlight
+}
+
+// startFlight is one ticket on its way to an orchestrator. A second request for
+// the same ticket waits for it instead of sending the brief again. Its fields
+// are read and written under Service.mu; done is closed once complete is set.
+type startFlight struct {
+	done           chan struct{}
+	complete       bool
+	ok             bool
+	orchestratorID string
+	finished       time.Time
 }
 
 type cachedClient struct {
@@ -106,7 +120,7 @@ func New(deps Deps) *Service {
 	}
 	return &Service{
 		dataDir: deps.DataDir, projects: deps.Projects, orchestrators: deps.Orchestrators,
-		now: now, clients: map[string]*cachedClient{},
+		now: now, clients: map[string]*cachedClient{}, starts: map[string]*startFlight{},
 	}
 }
 
@@ -380,18 +394,37 @@ func (s *Service) Start(ctx context.Context, projectID, issueKey string) (StartR
 	if err != nil {
 		return StartResult{}, err
 	}
+	// A project that shows its Jira project's own tickets only starts tickets
+	// from it. A custom JQL is the person's own scope, so it is not second-guessed.
+	if stored.JQL == "" && stored.ProjectKey != "" && !strings.HasPrefix(issueKey, stored.ProjectKey+"-") {
+		return StartResult{}, apierr.Invalid(CodeInvalidInput, fmt.Sprintf("%s is not a ticket of the Jira project %s this board shows.", issueKey, stored.ProjectKey), nil)
+	}
+
+	// Reserve the ticket before anything is sent. A concurrent request for the
+	// same ticket waits here and gets this one's answer instead of sending again.
+	flight, earlier, err := s.beginStart(ctx, projectID+"\x00"+issueKey)
+	if err != nil {
+		return StartResult{}, err
+	}
+	if earlier != nil {
+		earlier.IssueKey = issueKey
+		return *earlier, nil
+	}
+	result, err := s.deliver(ctx, projectID, issueKey, stored)
+	s.finishStart(projectID+"\x00"+issueKey, flight, result.OrchestratorID, err == nil)
+	return result, err
+}
+
+// deliver reads the ticket from Jira and hands it to the orchestrator.
+func (s *Service) deliver(ctx context.Context, projectID, issueKey string, stored storedConnection) (StartResult, error) {
 	client, _ := s.clientFor(ctx, projectID, stored)
 	issue, err := client.Issue(ctx, issueKey)
 	if err != nil {
 		return StartResult{}, translate(err)
 	}
-
 	orchestratorID, err := s.orchestrators.ActiveOrchestrator(ctx, projectID)
 	if err != nil {
 		return StartResult{}, err
-	}
-	if orchestratorID != "" && s.recentlyStarted(projectID, issueKey, orchestratorID) {
-		return StartResult{IssueKey: issueKey, OrchestratorID: orchestratorID, Duplicate: true}, nil
 	}
 	spawned := false
 	if orchestratorID == "" {
@@ -409,6 +442,55 @@ func (s *Service) Start(ctx context.Context, projectID, issueKey string) (StartR
 	return StartResult{IssueKey: issueKey, OrchestratorID: orchestratorID, Spawned: spawned}, nil
 }
 
+// beginStart reserves a ticket for the caller. It returns the reservation to
+// finish, or, when the ticket is already being sent or was sent moments ago, the
+// earlier result with Duplicate set. A caller that finds a send in flight waits
+// for it; if that send failed, the caller takes over and sends it itself.
+func (s *Service) beginStart(ctx context.Context, key string) (*startFlight, *StartResult, error) {
+	for {
+		s.mu.Lock()
+		now := s.now()
+		for k, f := range s.starts {
+			if f.complete && now.Sub(f.finished) >= duplicateStartTTL {
+				delete(s.starts, k)
+			}
+		}
+		f := s.starts[key]
+		if f == nil {
+			f = &startFlight{done: make(chan struct{})}
+			s.starts[key] = f
+			s.mu.Unlock()
+			return f, nil, nil
+		}
+		if f.complete {
+			// A failed send removes its entry, so a complete one here succeeded.
+			earlier := StartResult{OrchestratorID: f.orchestratorID, Duplicate: true}
+			s.mu.Unlock()
+			return nil, &earlier, nil
+		}
+		done := f.done
+		s.mu.Unlock()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
+	}
+}
+
+// finishStart settles a reservation. A send that failed is forgotten so the
+// next request tries again; one that succeeded blocks repeats for a few seconds.
+func (s *Service) finishStart(key string, f *startFlight, orchestratorID string, ok bool) {
+	s.mu.Lock()
+	f.complete, f.ok = true, ok
+	if ok {
+		f.orchestratorID, f.finished = orchestratorID, s.now()
+	} else if s.starts[key] == f {
+		delete(s.starts, key)
+	}
+	s.mu.Unlock()
+	close(f.done)
+}
 func (s *Service) requireProject(ctx context.Context, projectID string) error {
 	if strings.TrimSpace(projectID) == "" {
 		return apierr.Invalid(CodeInvalidInput, "A project is required.", nil)
@@ -441,8 +523,9 @@ func (s *Service) connection(projectID string) (storedConnection, error) {
 	return stored, nil
 }
 
-// candidate validates input and fills in what is missing (the stored token,
-// when the caller leaves it blank). Nothing is written.
+// candidate validates input and fills in what is missing: the stored token, when
+// the caller leaves it blank and the site and email are unchanged. Nothing is
+// written.
 func (s *Service) candidate(projectID string, in ConnectInput) (storedConnection, error) {
 	invalid := func(msg string) error { return apierr.Invalid(CodeInvalidInput, msg, nil) }
 	site, err := jiraclient.NormalizeSiteURL(in.SiteURL)
@@ -458,6 +541,12 @@ func (s *Service) candidate(projectID string, in ConnectInput) (storedConnection
 		stored, err := s.connection(projectID)
 		if err != nil {
 			return storedConnection{}, invalid("Enter your Jira API token.")
+		}
+		// A saved token belongs to the site and account it was saved for. It is
+		// reused only while both are unchanged, so a blank token can never send it
+		// to a host or account the person typed in afterwards.
+		if !strings.EqualFold(stored.SiteURL, site) || !strings.EqualFold(strings.TrimSpace(stored.Email), email) {
+			return storedConnection{}, invalid("The site or email changed, so enter the API token for that account.")
 		}
 		token = stored.APIToken
 	}
@@ -705,23 +794,6 @@ func (s *Service) linksFor(projectID string) (map[string][]TicketSession, error)
 		}
 	}
 	return out, nil
-}
-
-// recentlyStarted reports whether the same ticket was sent to the same
-// orchestrator moments ago, so a double click does not send it twice.
-func (s *Service) recentlyStarted(projectID, key, sessionID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	doc, err := s.loadLinksLocked()
-	if err != nil {
-		return false
-	}
-	for _, l := range doc.Links {
-		if l.ProjectID == projectID && l.IssueKey == key && l.SessionID == sessionID && s.now().Sub(l.StartedAt) < duplicateStartTTL {
-			return true
-		}
-	}
-	return false
 }
 
 const maxLinks = 500

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,22 +23,38 @@ type fakeProjects map[string]bool
 
 func (p fakeProjects) ProjectExists(_ context.Context, id string) (bool, error) { return p[id], nil }
 
-// fakeOrchestrators records what the service asks of the session layer.
+// fakeOrchestrators records what the service asks of the session layer. It is
+// safe for concurrent use, and a send can be held back with gate.
 type fakeOrchestrators struct {
+	mu       sync.Mutex
 	active   string
 	spawned  []string
 	sent     []sentTask
 	sendErr  error
 	spawnErr error
+	// gate, when set, holds every SendTask until it is closed; inSend counts the
+	// sends waiting on it.
+	gate   chan struct{}
+	inSend int
+}
+
+func (f *fakeOrchestrators) sentCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.sent)
 }
 
 type sentTask struct{ session, text string }
 
 func (f *fakeOrchestrators) ActiveOrchestrator(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.active, nil
 }
 
 func (f *fakeOrchestrators) SpawnOrchestrator(_ context.Context, project string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.spawnErr != nil {
 		return "", f.spawnErr
 	}
@@ -47,6 +64,16 @@ func (f *fakeOrchestrators) SpawnOrchestrator(_ context.Context, project string)
 }
 
 func (f *fakeOrchestrators) SendTask(_ context.Context, session, text string) error {
+	f.mu.Lock()
+	gate := f.gate
+	f.inSend++
+	f.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inSend--
 	if f.sendErr != nil {
 		return f.sendErr
 	}
@@ -485,5 +512,198 @@ func TestConnectionsAreScopedPerProject(t *testing.T) {
 	f.connect()
 	if st, _ := f.svc.Status(context.Background(), "other"); st.Connected {
 		t.Fatalf("another project inherited the connection: %+v", st)
+	}
+}
+
+// A saved token belongs to the site and account it was saved for. Leaving the
+// token blank must never send it anywhere else.
+func TestBlankTokenIsNeverSentToAnotherSiteOrAccount(t *testing.T) {
+	f := newFixture(t)
+	f.connect()
+	other := jiratest.New()
+	defer other.Close()
+
+	for name, mutate := range map[string]func(*jirasvc.ConnectInput){
+		"another site":                func(in *jirasvc.ConnectInput) { in.SiteURL = other.URL },
+		"another site and email":      func(in *jirasvc.ConnectInput) { in.SiteURL = other.URL; in.Email = other.Email },
+		"another account, same site":  func(in *jirasvc.ConnectInput) { in.Email = "someone.else@example.com" },
+		"another port on the same IP": func(in *jirasvc.ConnectInput) { in.SiteURL = strings.Replace(f.jira.URL, "127.0.0.1", "localhost", 1) },
+	} {
+		for _, action := range []string{"test", "connect"} {
+			in := f.input()
+			in.APIToken = ""
+			mutate(&in)
+			var err error
+			if action == "test" {
+				_, err = f.svc.Test(context.Background(), projectID, in)
+			} else {
+				_, err = f.svc.Connect(context.Background(), projectID, in)
+			}
+			var apiErr *apierr.Error
+			if !errors.As(err, &apiErr) || apiErr.Code != jirasvc.CodeInvalidInput {
+				t.Errorf("%s via %s: err = %v, want JIRA_INVALID_INPUT", name, action, err)
+			}
+		}
+	}
+	if reqs := other.Requests(); len(reqs) != 0 {
+		t.Fatalf("the saved token reached another host: %+v", reqs)
+	}
+	for _, r := range f.jira.Requests() {
+		if r.Path == "/rest/api/3/myself" && strings.Contains(r.Query, "localhost") {
+			t.Fatalf("unexpected request %+v", r)
+		}
+	}
+
+	// The stored connection is untouched by the refused attempts.
+	if st, _ := f.svc.Status(context.Background(), projectID); st.SiteURL != f.jira.URL || st.Email != f.jira.Email {
+		t.Fatalf("connection changed by a refused request: %+v", st)
+	}
+}
+
+func TestBlankTokenIsKeptForTheSameSiteAndAccountHoweverTheyAreWritten(t *testing.T) {
+	f := newFixture(t)
+	f.connect()
+	in := f.input()
+	in.APIToken = ""
+	in.SiteURL = f.jira.URL + "/"
+	in.Email = strings.ToUpper(f.jira.Email)
+	if _, err := f.svc.Connect(context.Background(), projectID, in); err != nil {
+		t.Fatalf("same site and account written differently: %v", err)
+	}
+	// A new token for another site is fine: it comes from the person.
+	other := jiratest.New()
+	defer other.Close()
+	in = jirasvc.ConnectInput{SiteURL: other.URL, Email: other.Email, APIToken: other.Token, ProjectKey: "YIA"}
+	if _, err := f.svc.Connect(context.Background(), projectID, in); err != nil {
+		t.Fatalf("new site with its own token: %v", err)
+	}
+	if st, _ := f.svc.Status(context.Background(), projectID); st.SiteURL != other.URL {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+// Two requests for one ticket (a double click, or the desktop and the phone)
+// must send its brief once.
+func TestConcurrentStartsSendTheBriefOnce(t *testing.T) {
+	f := newFixture(t)
+	f.connect()
+	f.orch.active = "orch-1"
+	f.orch.gate = make(chan struct{})
+
+	const callers = 8
+	results := make([]jirasvc.StartResult, callers)
+	errs := make([]error, callers)
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = f.svc.Start(context.Background(), projectID, "YIA-10")
+		}()
+	}
+	// Hold the first send until the others have had every chance to start theirs.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.orch.mu.Lock()
+		inSend := f.orch.inSend
+		f.orch.mu.Unlock()
+		if inSend >= 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(f.orch.gate)
+	wg.Wait()
+
+	if n := f.orch.sentCount(); n != 1 {
+		t.Fatalf("the brief was sent %d times, want once", n)
+	}
+	fresh := 0
+	for i, res := range results {
+		if errs[i] != nil {
+			t.Fatalf("caller %d: %v", i, errs[i])
+		}
+		if res.OrchestratorID != "orch-1" || res.IssueKey != "YIA-10" {
+			t.Fatalf("caller %d got %+v", i, res)
+		}
+		if !res.Duplicate {
+			fresh++
+		}
+	}
+	if fresh != 1 {
+		t.Fatalf("%d callers were told they sent it, want exactly one", fresh)
+	}
+	board, _ := f.svc.Board(context.Background(), projectID)
+	if got := len(board.Columns[0].Tickets[0].Sessions); got != 1 {
+		t.Fatalf("ticket has %d links, want 1", got)
+	}
+}
+
+func TestDifferentTicketsAreNotHeldBackByEachOther(t *testing.T) {
+	f := newFixture(t)
+	f.connect()
+	f.orch.active = "orch-1"
+	var wg sync.WaitGroup
+	for _, key := range []string{"YIA-10", "YIA-11"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := f.svc.Start(context.Background(), projectID, key); err != nil {
+				t.Errorf("%s: %v", key, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := f.orch.sentCount(); n != 2 {
+		t.Fatalf("sent %d briefs, want 2", n)
+	}
+}
+
+// A send that fails must not leave the ticket reserved.
+func TestFailedSendIsRetriedAtOnce(t *testing.T) {
+	f := newFixture(t)
+	f.connect()
+	f.orch.active = "orch-1"
+	f.orch.sendErr = errors.New("terminal closed")
+	if _, err := f.svc.Start(context.Background(), projectID, "YIA-10"); err == nil {
+		t.Fatal("expected the send failure")
+	}
+	f.orch.mu.Lock()
+	f.orch.sendErr = nil
+	f.orch.mu.Unlock()
+	res, err := f.svc.Start(context.Background(), projectID, "YIA-10")
+	if err != nil || res.Duplicate || f.orch.sentCount() != 1 {
+		t.Fatalf("retry = %+v, %v; sent %d", res, err, f.orch.sentCount())
+	}
+}
+
+func TestStartRefusesATicketOutsideTheProjectUnlessTheJQLIsTheirOwn(t *testing.T) {
+	f := newFixture(t)
+	f.jira.Issues = append(f.jira.Issues, jiratest.Issue{Key: "ABC-5", Summary: "Another project", StatusID: "1", StatusName: "To Do", StatusCategory: "new", Type: "Task", Updated: "2026-11-01T10:00:00.000+0000"})
+	f.connect()
+	f.orch.active = "orch-1"
+	_, err := f.svc.Start(context.Background(), projectID, "ABC-5")
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != jirasvc.CodeInvalidInput {
+		t.Fatalf("err = %v, want JIRA_INVALID_INPUT", err)
+	}
+	for _, r := range f.jira.Requests() {
+		if strings.Contains(r.Path, "/issue/ABC-5") {
+			t.Fatalf("the out-of-project ticket was read from Jira: %+v", r)
+		}
+	}
+	if f.orch.sentCount() != 0 {
+		t.Fatal("an out-of-project ticket was sent")
+	}
+
+	// With the person's own JQL the scope is theirs.
+	in := f.input()
+	in.JQL = "project in (YIA, ABC)"
+	if _, err := f.svc.Connect(context.Background(), projectID, in); err != nil {
+		t.Fatalf("Connect with JQL: %v", err)
+	}
+	if res, err := f.svc.Start(context.Background(), projectID, "ABC-5"); err != nil || res.Duplicate {
+		t.Fatalf("Start under a custom JQL = %+v, %v", res, err)
 	}
 }

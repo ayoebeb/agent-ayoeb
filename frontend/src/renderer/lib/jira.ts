@@ -99,6 +99,23 @@ export function latestSentSessionId(ticket: JiraTicket): string | undefined {
 	return sent.length > 0 ? sent[sent.length - 1].sessionId : undefined;
 }
 
+/**
+ * Whether two Jira site addresses name the same site, the way the daemon reads
+ * them: scheme and host, case-insensitive, any path ignored. The daemon only reuses
+ * a saved API token for the site and email it was saved for.
+ */
+export function sameJiraSite(a: string, b: string): boolean {
+	const origin = (raw: string): string => {
+		const text = raw.trim();
+		try {
+			return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`).origin.toLowerCase();
+		} catch {
+			return text.toLowerCase();
+		}
+	};
+	return origin(a) === origin(b);
+}
+
 /** The ids a session started for a ticket carries (`ao spawn --issue jira:KEY`). */
 export function jiraIssueRef(key: string): string {
 	return `jira:${key}`;
