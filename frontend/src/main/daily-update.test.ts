@@ -71,13 +71,14 @@ describe("daily update notice state", () => {
 
 	it("restarts only on apply, running the script from the pending file with -Yes", () => {
 		const script = path.join(dailyDir, "scripts", "update-daily-ao.ps1");
+		const cfg = path.join(dailyDir, "config.json");
 		const { controller, spawn, child } = setup({
-			[pendingPath]: pending({ scriptPath: script, pwsh: "C:\\pwsh\\pwsh.exe", configFile: "C:\\cfg.json" }),
+			[pendingPath]: pending({ scriptPath: script, pwsh: "C:\\pwsh\\pwsh.exe", configFile: cfg }),
 		});
 		expect(controller.apply()).toEqual({ state: "restarting", changes: 3, target: "abc123" });
 		expect(spawn).toHaveBeenCalledWith(
 			"C:\\pwsh\\pwsh.exe",
-			["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Yes", "-ConfigFile", "C:\\cfg.json"],
+			["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Yes", "-ConfigFile", cfg],
 			{ detached: true, stdio: "ignore", windowsHide: true },
 		);
 		expect(child.unref).toHaveBeenCalled();
@@ -112,6 +113,24 @@ describe("daily update notice state", () => {
 		controller.apply();
 		child.emit("error", new Error("spawn pwsh ENOENT"));
 		expect(controller.getState()).toMatchObject({ state: "failed", message: "spawn pwsh ENOENT" });
+	});
+
+	it("ignores a pwsh that is not PowerShell and a config outside the daily folder", () => {
+		const { controller, spawn } = setup({ [pendingPath]: pending({ pwsh: "C:\\evil\\calc.exe", configFile: "C:\\evil\\cfg.json" }) });
+		controller.apply();
+		const call = spawn.mock.calls[0] as unknown as [string, string[]];
+		expect(call[0]).toBe("pwsh");
+		expect(call[1]).not.toContain("-ConfigFile");
+	});
+
+	it("keeps a PowerShell path and a config inside the daily folder", () => {
+		const cfg = path.join(dailyDir, "config.json");
+		const pwsh = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+		const { controller, spawn } = setup({ [pendingPath]: pending({ pwsh, configFile: cfg }) });
+		controller.apply();
+		const call = spawn.mock.calls[0] as unknown as [string, string[]];
+		expect(call[0]).toBe(pwsh);
+		expect(call[1]).toContain(cfg);
 	});
 
 	it("refuses a script outside the daily folder", () => {

@@ -30,6 +30,13 @@ export const PENDING_FILE = "pending-restart.json";
 export const NOTICE_SHOWN_FILE = "update-notice-shown.json";
 const HEARTBEAT_EVERY_MS = 15_000;
 
+/** Only a PowerShell executable by name; anything else falls back to the one on PATH. */
+function trustedPwsh(value: unknown): string {
+	if (typeof value !== "string" || !value) return "pwsh";
+	const name = path.win32.basename(value).toLowerCase();
+	return name === "pwsh.exe" || name === "powershell.exe" ? value : "pwsh";
+}
+
 function parsePending(text: string, dailyDir: string): Pending | undefined {
 	let raw: PendingFile;
 	try {
@@ -44,8 +51,9 @@ function parsePending(text: string, dailyDir: string): Pending | undefined {
 		target: raw.target,
 		changes: Math.max(1, commits),
 		scriptPath: typeof raw.scriptPath === "string" && raw.scriptPath ? raw.scriptPath : fallbackScript,
-		pwsh: typeof raw.pwsh === "string" && raw.pwsh ? raw.pwsh : "pwsh",
-		...(typeof raw.configFile === "string" && raw.configFile ? { configFile: raw.configFile } : {}),
+		pwsh: trustedPwsh(raw.pwsh),
+		// A config outside the daily folder is ignored, not run with.
+		...(typeof raw.configFile === "string" && raw.configFile && insideDir(raw.configFile, dailyDir) ? { configFile: raw.configFile } : {}),
 	};
 }
 
