@@ -149,7 +149,3 @@ describe.skipIf(process.platform !== "win32")("with a runtime executing from the
 		}
 	}, 30_000);
 });
-
-function mkdirAndRename(from, to) {
-	return renameSync(from, to);
-}
