@@ -25,6 +25,8 @@ import {
 	formatMemory,
 	useAppMemory,
 	useFastMemorySampling,
+	useStatusMemorySampling,
+	resourceStatusParts,
 	usePressureState,
 	sampleHistoryLength,
 	cpuSampleOf,
@@ -98,13 +100,15 @@ function usePressureFacts(projectId?: string) {
 }
 
 /**
- * The board's memory light, beside the orchestrator button: a dot and AO's
- * size. Colour means something needs doing; grey means nothing does. The
- * tooltip holds the machine figures, the window behind it everything else.
+ * The status in the window's bottom-right corner: a dot, the machine's RAM
+ * and CPU, and Ayo's own size. Colour means something needs doing; grey means
+ * nothing does. The tooltip holds the pressure detail, the window behind it
+ * (click) everything else.
  */
 export function AppMemoryIndicator() {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
+	useStatusMemorySampling();
 	const memory = useAppMemory();
 	const { state } = usePressureFacts();
 	const app = memory.data?.app;
@@ -113,6 +117,7 @@ export function AppMemoryIndicator() {
 		return null;
 	}
 	const word = state ? t(`shell.memoryState.${state}`) : t("shell.memoryState.unknown");
+	const parts = resourceStatusParts(system, app);
 	const detail = system
 		? t("shell.memoryBarDetail", {
 			free: formatMemory(system.availableBytes),
@@ -127,17 +132,31 @@ export function AppMemoryIndicator() {
 				<TooltipTrigger asChild>
 					<Pressable
 						aria-label={`${word} · ${detail}`}
-						className="inline-flex items-center gap-2 px-2 font-mono text-2xs tabular-nums text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
+						className="inline-flex items-center gap-2 rounded-md bg-sidebar/90 px-2 py-0.5 font-mono text-2xs tabular-nums text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
 						data-memory-state={state ?? "unknown"}
 						data-testid="app-memory-indicator"
 						onClick={() => setOpen(true)}
 						type="button"
 					>
 						<span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", state ? stateDot[state] : "bg-passive")} />
-						<span className={state ? stateText[state] : undefined}>{formatMemory(app.rssBytes)}</span>
+						<span className={cn("inline-flex items-center gap-2", state ? stateText[state] : undefined)}>
+							{parts.ram ? (
+								<span data-testid="app-memory-ram">
+									{t("shell.resourceStatus.ram")} {parts.ram.used}/{parts.ram.total}
+								</span>
+							) : null}
+							{parts.cpu ? (
+								<span data-testid="app-memory-cpu">
+									{t("shell.resourceStatus.cpu")} {parts.cpu}
+								</span>
+							) : null}
+							<span data-testid="app-memory-ayo">
+								{t("shell.resourceStatus.ayo")} {parts.ayo}
+							</span>
+						</span>
 					</Pressable>
 				</TooltipTrigger>
-				<TooltipContent side="bottom">{detail}</TooltipContent>
+				<TooltipContent side="top">{detail}</TooltipContent>
 			</Tooltip>
 			{open ? <SessionMemoryPanel onOpenChange={setOpen} open /> : null}
 		</>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCPU, formatMemory } from "./useSessionMemory";
+import { formatCPU, formatMemory, resourceStatusParts, type AppMemoryReading, type SystemMemoryReading } from "./useSessionMemory";
 import { formatDuration, processKind } from "../components/SessionMemoryPanel";
 
 describe("formatMemory", () => {
@@ -30,5 +30,24 @@ describe("formatDuration", () => {
 		expect(formatDuration(38_400)).toBe("38s");
 		expect(formatDuration(250_000)).toBe("4m 10s");
 		expect(formatDuration(3_720_000)).toBe("1h 2m");
+	});
+});
+
+describe("resourceStatusParts", () => {
+	const GIB = 1024 ** 3;
+	const app = { rssBytes: 2 * GIB } as AppMemoryReading;
+	const host = (over: Partial<SystemMemoryReading> = {}) =>
+		({ totalBytes: 32 * GIB, availableBytes: 20 * GIB, cpuPercent: 14.4, cpuMeasured: true, ...over }) as SystemMemoryReading;
+
+	it("reads RAM used of total, host CPU and Ayo's own size", () => {
+		expect(resourceStatusParts(host(), app)).toEqual({ ram: { used: "12.0 GB", total: "32.0 GB" }, cpu: "14%", ayo: "2.0 GB" });
+	});
+
+	it("shows an unknown CPU as a dash, not an idle machine", () => {
+		expect(resourceStatusParts(host({ cpuMeasured: false, cpuPercent: 0 }), app).cpu).toBe("—");
+	});
+
+	it("keeps only Ayo's size where the host cannot be read", () => {
+		expect(resourceStatusParts(undefined, app)).toEqual({ ayo: "2.0 GB" });
 	});
 });

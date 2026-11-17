@@ -25,6 +25,9 @@ export const sessionMemoryQueryKey = (projectId?: string) =>
  */
 export const sessionMemoryRefetchIntervalMs = 60_000;
 export const sessionMemoryFastRefetchIntervalMs = 2_000;
+/** The bottom-right status shows live numbers, so while it is mounted the
+ * sample runs every few seconds: slower than the window, much faster than idle. */
+export const sessionMemoryStatusRefetchIntervalMs = 5_000;
 
 type SessionMemoryResponse = {
 	sessions: SessionMemoryReading[];
@@ -47,12 +50,18 @@ export async function fetchSessionMemory(projectId?: string): Promise<SessionMem
 
 /** How many mounted consumers want the fast cadence; the query reads it. */
 const fastWatchers = { count: 0 };
+const statusWatchers = { count: 0 };
 
 export function sessionMemoryQueryOptions(projectId?: string) {
 	return {
 		queryKey: sessionMemoryQueryKey(projectId),
 		queryFn: () => fetchSessionMemory(projectId),
-		refetchInterval: () => (fastWatchers.count > 0 ? sessionMemoryFastRefetchIntervalMs : sessionMemoryRefetchIntervalMs),
+		refetchInterval: () =>
+			fastWatchers.count > 0
+				? sessionMemoryFastRefetchIntervalMs
+				: statusWatchers.count > 0
+					? sessionMemoryStatusRefetchIntervalMs
+					: sessionMemoryRefetchIntervalMs,
 		// 501 on Windows is permanent for the run; do not hammer the daemon.
 		retry: false,
 	};
@@ -69,6 +78,17 @@ export function useFastMemorySampling() {
 			fastWatchers.count -= 1;
 		};
 	}, [queryClient]);
+}
+
+/** Mount while the status in the window's corner shows: samples arrive every
+ * five seconds instead of once a minute. */
+export function useStatusMemorySampling() {
+	useEffect(() => {
+		statusWatchers.count += 1;
+		return () => {
+			statusWatchers.count -= 1;
+		};
+	}, []);
 }
 
 /** Memory monitoring is a Developer mode tool behind its own Diagnostics
@@ -222,4 +242,29 @@ export const formatMemory = formatResourceBytes;
 /** Whole percent of one core. */
 export function formatCPU(percent: number): string {
 	return `${Math.round(percent)}%`;
+}
+
+/** The words of the corner status, as plain figures; the component adds labels. */
+export type ResourceStatusParts = {
+	/** Host RAM in use and total, absent where the host cannot be read. */
+	ram?: { used: string; total: string };
+	/** Host CPU, "—" until the daemon has an earlier sample to measure against. */
+	cpu?: string;
+	/** What Ayo itself (daemon, desktop shell, sessions) holds. */
+	ayo: string;
+};
+
+export function resourceStatusParts(system: SystemMemoryReading | undefined, app: AppMemoryReading): ResourceStatusParts {
+	return {
+		...(system
+			? {
+					ram: {
+						used: formatMemory(Math.max(0, system.totalBytes - system.availableBytes)),
+						total: formatMemory(system.totalBytes),
+					},
+					cpu: system.cpuMeasured ? formatCPU(system.cpuPercent) : "—",
+				}
+			: {}),
+		ayo: formatMemory(app.rssBytes),
+	};
 }

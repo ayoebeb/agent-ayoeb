@@ -1,3 +1,4 @@
+import { DailyUpdateNotice } from "./DailyUpdateNotice";
 import { useQueryClient } from "@tanstack/react-query";
 import { useProjectAvatars } from "../hooks/useProjectAvatars";
 import { paidPlanBadge, useCloudBilling } from "../hooks/useCloudBilling";
@@ -1648,6 +1649,7 @@ export function Sidebar({
 					hidden={isIconRail}
 					className="sidebar-expanded-chrome relative flex w-full min-w-46.5 flex-col gap-0.5"
 				>
+					<DailyUpdateNotice tabIndex={isCollapsed ? -1 : 0} />
 					<UpdateStatusRow
 						availableDismissed={updateDismissal.dismissed}
 						onDismissAvailable={updateDismissal.dismiss}

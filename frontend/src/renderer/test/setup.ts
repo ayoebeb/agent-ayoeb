@@ -484,6 +484,10 @@ if (typeof window !== "undefined") {
 			onStatus: () => () => undefined,
 		onTelemetry: () => () => undefined,
 		},
+		dailyUpdate: {
+			get: async () => ({ state: "hidden" as const }),
+			apply: async () => ({ state: "hidden" as const }),
+		},
 		featureBuilds: {
 			list: async () => [],
 			getActive: async () => null,

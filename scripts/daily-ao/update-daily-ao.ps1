@@ -157,6 +157,23 @@ function Invoke-RestartUpdate($plan) {
 	Write-Ok "AO daily draait op $($plan.Target.Substring(0, 12))."
 }
 
+# A pending-restart.json that no longer matches a waiting update must not keep
+# the app's notice up.
+function Remove-PendingFile {
+	if (Test-Path -LiteralPath $pendingFile) { Remove-Item -LiteralPath $pendingFile -Force -ErrorAction SilentlyContinue }
+}
+
+# True while the Ayo window shows its own "update ready" notice for this target
+# (the app refreshes update-notice-shown.json every few seconds while it does).
+function Test-AppShowsNotice([string]$Target) {
+	$file = Join-Path $cfg.DailyDir 'update-notice-shown.json'
+	if (-not (Test-Path -LiteralPath $file)) { return $false }
+	try {
+		$n = Get-Content -Raw -LiteralPath $file | ConvertFrom-Json
+		return ($n.target -eq $Target) -and (((Get-Date) - [datetime]$n.at).TotalSeconds -lt 60)
+	} catch { return $false }
+}
+
 function Show-Balloon([string]$Text) {
 	try {
 		Add-Type -AssemblyName System.Windows.Forms
@@ -179,15 +196,18 @@ function Invoke-UpdateOnce([switch]$NeverRestart) {
 
 function Invoke-UpdatePass([switch]$NeverRestart) {
 	$plan = Get-UpdatePlan
-	if (@($plan.Commits).Count -eq 0) { return 'current' }
+	if (@($plan.Commits).Count -eq 0) { Remove-PendingFile; return 'current' }
 	if ($plan.Auto) {
 		Invoke-Git $cfg @('merge', '--ff-only', '--quiet', $plan.Auto.Sha) | Out-Null
 		$n = [array]::IndexOf(@($plan.Commits.Sha), $plan.Auto.Sha) + 1
 		Write-Ok ("{0} UI-commit(s) toegepast tot {1}: zichtbaar via hot reload" -f $n, $plan.Auto.Sha.Substring(0, 9))
 	}
-	if (@($plan.Rest).Count -eq 0) { return 'applied' }
+	if (@($plan.Rest).Count -eq 0) { Remove-PendingFile; return 'applied' }
 	Show-RestartSummary $plan
-	@{ at = (Get-Date).ToString('o'); target = $plan.Target; kinds = $plan.RestKinds; commits = @($plan.Rest | ForEach-Object { "$($_.Sha.Substring(0, 9)) $($_.Subject)" }) } |
+	# scriptPath/pwsh/configFile let the app run this same update with -Yes when the
+	# user clicks Restart in its notice (also on a PC whose daily home differs).
+	@{ at = (Get-Date).ToString('o'); target = $plan.Target; kinds = $plan.RestKinds; commits = @($plan.Rest | ForEach-Object { "$($_.Sha.Substring(0, 9)) $($_.Subject)" })
+		scriptPath = (Join-Path $cfg.ScriptsDir 'update-daily-ao.ps1'); pwsh = (Get-PwshPath $cfg); configFile = $cfg.ConfigFile } |
 		ConvertTo-Json | Set-Content -LiteralPath $pendingFile -Encoding utf8
 	if ($NeverRestart -or $NonInteractive) { return 'restart-pending' }
 	if (-not $Yes) {
@@ -211,6 +231,7 @@ try {
 	if ($Watch) {
 		Write-Step "Watcher: elke $IntervalSeconds s origin/$($cfg.Branch) controleren"
 		$announced = ''
+		$firstSeen = $null
 		while ($true) {
 			try {
 				if (-not (Enter-UpdateLock 0)) { Start-Sleep -Seconds $IntervalSeconds; continue }
@@ -218,8 +239,17 @@ try {
 				if ($r -eq 'restart-pending') {
 					$p = Get-Content -Raw -LiteralPath $pendingFile | ConvertFrom-Json
 					if ($announced -ne $p.target) {
-						$announced = $p.target
+						if ($firstSeen -eq $null) { $firstSeen = Get-Date }
+						$appRunning = @((Get-DailyProcesses $cfg).ElectronMain).Count -gt 0
+						if (Test-AppShowsNotice $p.target) {
+							$announced = $p.target; $firstSeen = $null
+							Write-Note 'Update-melding staat in het Ayo-venster; geen Windows-melding.'
+						} elseif ($appRunning -and ((Get-Date) - $firstSeen).TotalSeconds -lt 120) {
+							# The window is up and will show its notice within a poll or two.
+						} else {
+						$announced = $p.target; $firstSeen = $null
 						if (-not $cfg.IsSimulation) { Show-Balloon 'Er staat een AO-update klaar die een herstart nodig heeft. Sessies blijven lopen. Vraag de orchestrator of run update-daily-ao.ps1.' }
+						}
 					}
 				}
 			} catch { Write-Warn2 "update-controle mislukt: $_" }

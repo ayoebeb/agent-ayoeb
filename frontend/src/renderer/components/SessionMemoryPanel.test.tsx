@@ -162,7 +162,10 @@ describe("AppMemoryIndicator", () => {
 	it("reads a dot and AO's size, plus the fix; grey means nothing to do", () => {
 		const { rerender } = renderButton();
 		const button = screen.getByTestId("app-memory-indicator");
-		expect(button).toHaveTextContent("2.0 GB");
+		// The corner status: machine RAM and CPU, then Ayo's own size.
+		expect(button).toHaveTextContent("RAM 12.0 GB/32.0 GB");
+		expect(button).toHaveTextContent("CPU 0%");
+		expect(button).toHaveTextContent("Ayo 2.0 GB");
 		expect(button).not.toHaveTextContent("Fine");
 		expect(button).toHaveAttribute("data-memory-state", "fine");
 		expect(button).toHaveAttribute("aria-label", "Fine · 20.0 GB free of 32.0 GB · Ayo holds 2.0 GB · pressure 0.0");
@@ -172,7 +175,6 @@ describe("AppMemoryIndicator", () => {
 		rerender();
 		expect(screen.getByTestId("app-memory-indicator")).toHaveAttribute("data-memory-state", "tight_soon");
 		expect(screen.getByTestId("app-memory-indicator")).toHaveTextContent("20.0 GB");
-		expect(screen.getByTestId("app-memory-indicator")).not.toHaveTextContent("·");
 
 		// Tight while AO is a sliver of what is in use: still only AO's own size, never a verdict on other apps.
 		appMemoryMock.mockReturnValue(appReading(1, 40, 2));
