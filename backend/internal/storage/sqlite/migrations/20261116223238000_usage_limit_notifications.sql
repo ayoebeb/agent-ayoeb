@@ -1,7 +1,8 @@
 -- +goose Up
 -- +goose StatementBegin
 -- SQLite cannot widen a CHECK constraint in place. Rebuild the table to add the
--- usage_limit kind: one notification per account and limit window.
+-- usage_limit kind: one notification per account and limit window. The rebuild
+-- keeps orchestrator_waiting and reminded_at from the earlier rebuild.
 CREATE TABLE notifications_next (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -9,7 +10,8 @@ CREATE TABLE notifications_next (
     pr_url TEXT NOT NULL DEFAULT '',
     type TEXT NOT NULL CHECK (type IN (
         'needs_input', 'ready_to_merge', 'pr_merged', 'pr_closed_unmerged',
-        'review_completed', 'review_changes_requested', 'usage_limit'
+        'review_completed', 'review_changes_requested', 'orchestrator_waiting',
+        'usage_limit'
     )),
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',
@@ -17,15 +19,16 @@ CREATE TABLE notifications_next (
     created_at TIMESTAMP NOT NULL,
     resolved_at TIMESTAMP,
     dismissed_at TIMESTAMP,
-    source_key TEXT NOT NULL DEFAULT ''
+    source_key TEXT NOT NULL DEFAULT '',
+    reminded_at TIMESTAMP
 );
 
 INSERT INTO notifications_next (
     id, session_id, project_id, pr_url, type, title, body, status,
-    created_at, resolved_at, dismissed_at, source_key
+    created_at, resolved_at, dismissed_at, source_key, reminded_at
 )
 SELECT id, session_id, project_id, pr_url, type, title, body, status,
-       created_at, resolved_at, dismissed_at, source_key
+       created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications;
 
 DROP TABLE notifications;
@@ -57,7 +60,7 @@ CREATE TABLE notifications_previous (
     pr_url TEXT NOT NULL DEFAULT '',
     type TEXT NOT NULL CHECK (type IN (
         'needs_input', 'ready_to_merge', 'pr_merged', 'pr_closed_unmerged',
-        'review_completed', 'review_changes_requested'
+        'review_completed', 'review_changes_requested', 'orchestrator_waiting'
     )),
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',
@@ -65,15 +68,16 @@ CREATE TABLE notifications_previous (
     created_at TIMESTAMP NOT NULL,
     resolved_at TIMESTAMP,
     dismissed_at TIMESTAMP,
-    source_key TEXT NOT NULL DEFAULT ''
+    source_key TEXT NOT NULL DEFAULT '',
+    reminded_at TIMESTAMP
 );
 
 INSERT INTO notifications_previous (
     id, session_id, project_id, pr_url, type, title, body, status,
-    created_at, resolved_at, dismissed_at, source_key
+    created_at, resolved_at, dismissed_at, source_key, reminded_at
 )
 SELECT id, session_id, project_id, pr_url, type, title, body, status,
-       created_at, resolved_at, dismissed_at, source_key
+       created_at, resolved_at, dismissed_at, source_key, reminded_at
 FROM notifications;
 
 DROP TABLE notifications;

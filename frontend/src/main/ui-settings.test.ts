@@ -61,7 +61,17 @@ describe("ui-settings", () => {
 		expect(await readUiSettings(dir)).toEqual({
 			locale: "ja",
 			soundNotificationsEnabled: false,
+			orchestratorWaitingSoundEnabled: true,
 			terminalShell: { kind: "git-bash" },
+		});
+	});
+
+	it("saves the orchestrator-waiting sound without touching the general sound", async () => {
+		await writeUiSettings(dir, { soundNotificationsEnabled: false });
+		await writeUiSettings(dir, { orchestratorWaitingSoundEnabled: false });
+		expect(await readUiSettings(dir)).toMatchObject({
+			soundNotificationsEnabled: false,
+			orchestratorWaitingSoundEnabled: false,
 		});
 	});
 

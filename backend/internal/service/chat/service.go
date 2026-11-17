@@ -68,11 +68,15 @@ type Service struct {
 	recheckAccount         func(domain.SessionID, domain.AgentHarness)
 	prChanged              func(domain.SessionID)
 	onCodexCapacityChanged func(domain.SessionID, string, ports.CodexCapacityObservation)
+	// permissionMemory remembers "Always allow" choices per project. Nil keeps a
+	// choice in its own workspace, as before.
+	permissionMemory PermissionMemory
 	// onModelChanged syncs ChatUI's model override (including clearing it) to
 	// session metadata before the next prompt routes or a later TUI rebuild.
 	onModelChanged   func(domain.SessionID, string)
 	stopProviderHost func(context.Context, domain.SessionID) error
 	reports          *reportsvc.Coordinator
+	replyObserver    HumanReplyObserver
 	renders          RenderFiles
 	dataDir          string
 	reconcileOutput  func(context.Context, domain.SessionID) error
@@ -137,6 +141,32 @@ func (s *Service) SetReportCoordinator(coordinator *reportsvc.Coordinator) {
 	s.reports = coordinator
 }
 
+// HumanReplyObserver hears that the human sent a message to a session. The
+// orchestrator-waiting tracker uses it to close the question the message
+// answers.
+type HumanReplyObserver interface {
+	UserReplied(ctx context.Context, id domain.SessionID)
+}
+
+// SetHumanReplyObserver registers who hears of every message the human sends.
+func (s *Service) SetHumanReplyObserver(observer HumanReplyObserver) {
+	s.replyObserver = observer
+}
+
+// notifyHumanReply tells the observer a message from the human was accepted.
+// Messages AO sent on its own behalf (an automation) and messages another
+// session authored are not replies: a worker steering its orchestrator arrives
+// with human origin too, and is told apart by the session that sent it.
+func (s *Service) notifyHumanReply(ctx context.Context, id domain.SessionID, msg ports.ChatUserMessage) {
+	if s.replyObserver == nil {
+		return
+	}
+	if (msg.Origin != "" && msg.Origin != domain.MessageOriginHuman) || strings.TrimSpace(msg.SenderSessionID) != "" {
+		return
+	}
+	s.replyObserver.UserReplied(ctx, id)
+}
+
 // controllerGate serializes start/stop for one session without making provider
 // I/O for that session block lookups or commands for every other Chat session.
 type controllerGate chan struct{}
@@ -187,6 +217,10 @@ type Options struct {
 	// globally active AO Codex account. The callback owns profile-independent
 	// account state; conversation rows are not the authority for Codex capacity.
 	OnCodexCapacityChanged func(domain.SessionID, string, ports.CodexCapacityObservation)
+	// PermissionMemory remembers the tool permission a user chose "Always allow"
+	// for, for every future session of the project. Nil leaves a choice in the
+	// workspace it was made in.
+	PermissionMemory PermissionMemory
 	// OnModelChanged syncs ChatUI's model override to session metadata before
 	// the next prompt routes. Nil leaves session metadata unchanged.
 	OnModelChanged func(domain.SessionID, string)
@@ -237,6 +271,7 @@ func New(opts Options) *Service {
 		recheckAccount:         opts.RecheckAccount,
 		prChanged:              opts.PRChanged,
 		onCodexCapacityChanged: opts.OnCodexCapacityChanged,
+		permissionMemory:       opts.PermissionMemory,
 		onModelChanged:         opts.OnModelChanged,
 		stopProviderHost:       opts.StopProviderHost,
 		renders:                opts.Renders,
@@ -1059,6 +1094,7 @@ func (s *Service) startLocked(ctx context.Context, cfg StartConfig) (*Controller
 	// replaced can be told apart from the current one's.
 	controller := newController(
 		cfg.SessionID, owner, conversation, generation, cfg.Harness, conv, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.recheckAccount, s.prChanged, s.onCodexCapacityChanged, s.reader)
+	controller.permissionMemory = s.permissionMemory
 	var commitProviderHistory func(context.Context) error
 	if liveReconnect {
 		if err := s.store.FailReservedQueuedBatch(ctx, conversation.ID, s.now()); err != nil {
@@ -1464,6 +1500,9 @@ func (s *Service) Send(
 		if err := s.reports.AcceptPiggyback(ctx, reports); err != nil {
 			return domain.ConversationTurn{}, fmt.Errorf("acknowledge worker reports: %w", err)
 		}
+	}
+	if turn.ID != "" {
+		s.notifyHumanReply(ctx, id, msg)
 	}
 	return turn, nil
 }

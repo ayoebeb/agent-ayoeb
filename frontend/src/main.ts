@@ -61,6 +61,7 @@ import { registerCliShadowIpc } from "./main/cli-shadow-ipc";
 import { createCliShadowShellPath } from "./main/cli-shadow-shell-path";
 import { cliShadowEnabled } from "./shared/cli-shadow";
 import { PRODUCT_NAME, productDisplayName } from "./shared/brand";
+import { ensureWindowsToastIdentity } from "./main/windows-toast-identity";
 import { registerDictationIpc } from "./main/dictation";
 import { launchCommand } from "./main/launch-command";
 import { readNativeAppIcon } from "./main/native-app-icon";
@@ -256,9 +257,11 @@ import { coercePrivacyGuideRequest, CUA_DRIVER_APP_PATH, PRIVACY_GUIDE_HEIGHT, P
 import { watchSettingsWindow } from "./main/settings-window-watch";
 import {
 	dockBounceType,
+	lookingAtNotification,
 	shouldReplaceBounce,
 	shouldSignalAttention,
 	shouldToast,
+	soundEnabledFor,
 	toastSilent,
 } from "./main/notification-signals";
 import { buildLinuxAppMenuTemplate, buildMacAppMenuTemplate, buildWindowsAppMenuTemplate, coerceAppMenuAvailability, type AppMenuCommands } from "./main/menu";
@@ -298,6 +301,10 @@ process.stderr.on("error", ignoreStdStreamError);
 // lock do not derive from it.
 const APP_DISPLAY_NAME = PRODUCT_NAME;
 
+// The Windows AppUserModelID: fixed on purpose (see shared/brand.ts), shared by the
+// packaged app and every unpackaged run.
+const WINDOWS_APP_USER_MODEL_ID = "dev.agent-orchestrator.desktop";
+
 // Must run before app ready so the About panel and default-menu role labels use it.
 // Unpackaged runs get a distinct name so the dev window, dock menu, and About
 // panel never impersonate the installed app (#3642).
@@ -314,7 +321,21 @@ if (!app.isPackaged && process.platform === "darwin") {
 // Notification.isSupported() still returns true but show() silently drops the
 // toast, so notifications never appear. No-op on macOS/Linux.
 if (process.platform === "win32") {
-	app.setAppUserModelId("dev.agent-orchestrator.desktop");
+	app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
+	// A dev or daily run has no installer shortcut to name its toasts, so Windows
+	// labels them "Electron". Register the product name and icon once (see
+	// windows-toast-identity.ts). Not awaited: a toast shown a moment before this
+	// finishes still works, it just carries the old label.
+	if (!app.isPackaged) {
+		void ensureWindowsToastIdentity({
+			aumid: WINDOWS_APP_USER_MODEL_ID,
+			displayName: PRODUCT_NAME,
+			iconPath: windowIconPath(),
+			packaged: app.isPackaged,
+		}).then((outcome) => {
+			if (outcome === "failed") console.warn("Could not register the Windows toast name; toasts may read \"Electron\".");
+		});
+	}
 }
 
 // Escape hatch for hosts whose GPU driver stack crashes Chromium on startup
@@ -529,6 +550,9 @@ let pendingBounce: { id: number; critical: boolean } | null = null;
 // Live mirror of the persisted `soundNotificationsEnabled` UI setting, kept in sync by the
 // uiSettings:set handler so a toggle flip takes effect without an app restart.
 let soundNotificationsEnabled = DEFAULT_UI_SETTINGS.soundNotificationsEnabled;
+// Same for `orchestratorWaitingSoundEnabled`: the sound of a project orchestrator
+// waiting for the user, which has its own switch.
+let orchestratorWaitingSoundEnabled = DEFAULT_UI_SETTINGS.orchestratorWaitingSoundEnabled;
 
 // Plays the bundled notification sound through the renderer (main has no
 // audio output). `shell.beep()` is only the fallback for when no shell is
@@ -3853,6 +3877,7 @@ ipcMain.handle("uiSettings:get", async (): Promise<UiSettings> => {
 	const result = !runFile ? coerceUiSettings(settings) : await writeUiSettings(path.dirname(runFile), settings);
 	trayController?.setLocale(result.locale);
 	soundNotificationsEnabled = result.soundNotificationsEnabled;
+	orchestratorWaitingSoundEnabled = result.orchestratorWaitingSoundEnabled;
 	terminalShellPreference = result.terminalShell;
 	shellEnvPromise = null;
 	cachedShellEnv = null;
@@ -3933,14 +3958,25 @@ ipcMain.handle(
 		if (!notification.id || !mainWindow) return;
 		// "Already looking" = the window has focus, or the renderer reports the
 		// prompt itself is on screen (`watched`). Visual signals are skipped then.
-		const looking = mainWindow.isFocused() || notification.watched === true;
+		// A project orchestrator waiting for the user only counts as seen when its
+		// own conversation is on screen: a focused window can be showing anything.
+		const looking = lookingAtNotification(notification.type, {
+			windowFocused: mainWindow.isFocused(),
+			watched: notification.watched,
+		});
+		// An orchestrator waiting has its own sound switch, so silencing the rest
+		// does not silence the user's main contact.
+		const soundOn = soundEnabledFor(notification.type, {
+			general: soundNotificationsEnabled,
+			orchestratorWaiting: orchestratorWaitingSoundEnabled,
+		});
 		// On Linux the sound ignores that guess: Wayland gives apps no reliable
 		// visibility, so a window parked on another workspace still reports
 		// focused/visible and would otherwise stay silent. macOS and Windows
 		// report focus accurately and keep the quieter behaviour.
 		const playsSound =
 			shouldSignalAttention(notification.type) &&
-			soundNotificationsEnabled &&
+			soundOn &&
 			(process.platform === "linux" || !looking);
 		if (playsSound) playNotificationSound();
 		if (looking) return;
@@ -3954,7 +3990,7 @@ ipcMain.handle(
 				// Mute the OS chime when our sound replaces it or the user turned
 				// sound notifications off. Honoured on macOS/Windows only; Linux
 				// notification daemons ignore it (see toastSilent).
-				silent: toastSilent(process.platform, soundNotificationsEnabled, playsSound),
+				silent: toastSilent(process.platform, soundOn, playsSound),
 				// AO logo as the notification icon on Windows/Linux. Omitted on macOS,
 				// where a custom icon renders only as a redundant right-side content image —
 				// macOS uses the app-bundle icon (the AO logo in a packaged build) as the
@@ -3993,7 +4029,11 @@ ipcMain.handle(
 				}
 			}
 		} else if ((process.platform === "win32" || process.platform === "linux") && shouldSignalAttention(notification.type)) {
-			if (!isFlashing) {
+			// A focused window never fires the focus event that stops the flash, so it
+			// would flash until the user clicked away and back. An orchestrator wait
+			// reaches here while focused (the user is on another view); the toast and
+			// sound already told them.
+			if (!isFlashing && !mainWindow.isFocused()) {
 				isFlashing = true;
 				mainWindow.flashFrame(true);
 				mainWindow.once("focus", () => {
@@ -4463,6 +4503,7 @@ app.whenReady().then(async () => {
 		? await readUiSettings(path.dirname(keybindingRunFile))
 		: { ...DEFAULT_UI_SETTINGS };
 	soundNotificationsEnabled = initialUiSettings.soundNotificationsEnabled;
+	orchestratorWaitingSoundEnabled = initialUiSettings.orchestratorWaitingSoundEnabled;
 	terminalShellPreference = initialUiSettings.terminalShell;
 	if (browserQuitRequested) return;
 	if (isTrayEnabled(process.platform)) {

@@ -22,6 +22,12 @@ export interface UiSettings {
 	locale: AppLocale;
 	/** Whether attention-worthy notifications (needs input, ready to merge) also play a sound. */
 	soundNotificationsEnabled: boolean;
+	/**
+	 * Whether a project orchestrator waiting for the user plays a sound. Its own
+	 * switch, on by default and independent of the one above: the orchestrator is
+	 * the user's main contact, so silencing every other chime must not silence it.
+	 */
+	orchestratorWaitingSoundEnabled: boolean;
 	/** Shell used for newly opened standalone terminal panes. */
 	terminalShell: TerminalShellPreference;
 }
@@ -31,6 +37,7 @@ export const DEFAULT_TERMINAL_SHELL: TerminalShellPreference = { kind: "auto" };
 export const DEFAULT_UI_SETTINGS: UiSettings = {
 	locale: DEFAULT_LOCALE,
 	soundNotificationsEnabled: true,
+	orchestratorWaitingSoundEnabled: true,
 	terminalShell: DEFAULT_TERMINAL_SHELL,
 };
 
@@ -62,9 +69,14 @@ export function coerceUiSettings(raw: unknown): UiSettings {
 		typeof record.soundNotificationsEnabled === "boolean"
 			? record.soundNotificationsEnabled
 			: DEFAULT_UI_SETTINGS.soundNotificationsEnabled;
+	const orchestratorWaitingSoundEnabled =
+		typeof record.orchestratorWaitingSoundEnabled === "boolean"
+			? record.orchestratorWaitingSoundEnabled
+			: DEFAULT_UI_SETTINGS.orchestratorWaitingSoundEnabled;
 	return {
 		locale: coerceLocale(record.locale),
 		soundNotificationsEnabled,
+		orchestratorWaitingSoundEnabled,
 		terminalShell: coerceTerminalShell(record.terminalShell),
 	};
 }

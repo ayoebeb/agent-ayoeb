@@ -21,7 +21,7 @@ func enrich(intent Intent) (domain.NotificationRecord, error) {
 	if !intent.Type.Valid() {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationType
 	}
-	if intent.Type != domain.NotificationNeedsInput && intent.Type != domain.NotificationUsageLimit && rec.PRURL == "" {
+	if intent.Type != domain.NotificationNeedsInput && intent.Type != domain.NotificationOrchestratorWaiting && intent.Type != domain.NotificationUsageLimit && rec.PRURL == "" {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationRecord
 	}
 	rec.Title = titleForIntent(intent)
@@ -54,9 +54,37 @@ func titleForIntent(intent Intent) string {
 		return fmt.Sprintf("Review found changes for %s", prLabel(intent))
 	case domain.NotificationUsageLimit:
 		return usageLimitTitle(intent)
+	case domain.NotificationOrchestratorWaiting:
+		return OrchestratorWaitingTitle(intent.ProjectName, string(intent.ProjectID))
 	default:
 		return "Notification"
 	}
+}
+
+// OrchestratorWaitingTitleSuffix follows the project name in the title of the
+// notification that says a project's orchestrator is waiting for the user. The
+// daemon has no UI language, so it writes English like every other notification
+// it stores (phone push, CLI, API). The desktop app shows these in the user's own
+// language instead, and finds the project name by this suffix. The renderer keeps
+// a copy (ORCHESTRATOR_WAITING_TITLE_SUFFIX) and a test fails if they drift.
+const OrchestratorWaitingTitleSuffix = ": orchestrator is waiting for you"
+
+// OrchestratorWaitingFallbackBody is the body when the wait is a pending approval
+// or input request, which has no declared one-line question. The desktop app
+// replaces it with the user's language the same way (see the suffix above).
+const OrchestratorWaitingFallbackBody = "The orchestrator is waiting for your answer or approval."
+
+// OrchestratorWaitingTitle is the title of that notification:
+// "<project>: orchestrator is waiting for you".
+func OrchestratorWaitingTitle(projectName, projectID string) string {
+	name := strings.TrimSpace(projectName)
+	if name == "" {
+		name = strings.TrimSpace(projectID)
+	}
+	if name == "" {
+		name = "project"
+	}
+	return name + OrchestratorWaitingTitleSuffix
 }
 
 func bodyForIntent(intent Intent) string {
@@ -88,6 +116,11 @@ func bodyForIntent(intent Intent) string {
 		return "Orchestrator finished reviewing this pull request and found changes to address."
 	case domain.NotificationUsageLimit:
 		return usageLimitBody(intent)
+	case domain.NotificationOrchestratorWaiting:
+		if detail := strings.TrimSpace(intent.Detail); detail != "" {
+			return detail
+		}
+		return OrchestratorWaitingFallbackBody
 	default:
 		return ""
 	}

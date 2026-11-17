@@ -446,6 +446,10 @@ func TestBuildSystemPrompt_OrchestratorIncludesCommunicationStyleByDefault(t *te
 		"a repeated heading gets -1, -2",
 		"Number any task of more than one step",
 		"End with one concrete next action",
+		// The signal that makes the human's main contact audible: nothing observes
+		// a plain-text question, so the orchestrator declares it.
+		"`ao notify-user --waiting \"<one-line question>\"`",
+		"`ao notify-user --clear` withdraws it",
 		"Restate state in every reply",
 		"[name](ao://sessions/{project-id}/{session-id})",
 		"never in code formatting",
@@ -534,10 +538,12 @@ func TestBuildSystemPrompt_WorkersNeverGetCommunicationStyle(t *testing.T) {
 // injected into every orchestrator, so growth should be a deliberate choice.
 func TestCommunicationStylePromptStaysShort(t *testing.T) {
 	style := orchestratorCommunicationStylePrompt()
-	// 520 until the usage-limit rule (check a worker's last turn error before
-	// calling it stalled) was added on purpose; 550 now.
-	if words := len(strings.Fields(style)); words > 550 {
-		t.Fatalf("communication style grew to %d words; keep it under 550", words)
+	// 560 holds the rule that makes the human's main contact audible
+	// (`ao notify-user`) and the usage-limit rule (check a worker's last turn
+	// error before calling it stalled) on top of the earlier additions; anything
+	// beyond that is a deliberate choice.
+	if words := len(strings.Fields(style)); words > 560 {
+		t.Fatalf("communication style grew to %d words; keep it under 560", words)
 	}
 	if strings.Contains(strings.ToLower(style), "adhd") {
 		t.Fatalf("the style must not name the reader's condition:\n%s", style)

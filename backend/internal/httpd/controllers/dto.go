@@ -2490,7 +2490,7 @@ type NotificationResponse struct {
 	SessionID string    `json:"sessionId"`
 	ProjectID string    `json:"projectId"`
 	PRURL     string    `json:"prUrl"`
-	Type      string    `json:"type" enum:"needs_input,ready_to_merge,pr_merged,pr_closed_unmerged,review_completed,review_changes_requested"`
+	Type      string    `json:"type" enum:"needs_input,ready_to_merge,pr_merged,pr_closed_unmerged,review_completed,review_changes_requested,orchestrator_waiting"`
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
 	Status    string    `json:"status" enum:"unread,read" description:"Seen state. unread means the user has not opened the notification panel since it arrived."`
@@ -3915,6 +3915,10 @@ type SettingsResponse struct {
 	UsageLimitAutoResume bool `json:"usageLimitAutoResume" description:"When a session stops on the provider's usage limit, AO continues it after the limit resets."`
 	// UsageLimitMaxResumes caps the continued turns running at once.
 	UsageLimitMaxResumes int `json:"usageLimitMaxResumes" description:"How many sessions AO continues at once after a usage limit resets, so they do not all spend the next window together."`
+	// OrchestratorWaitingEnabled gates the distinct "orchestrator is waiting for you" notification.
+	OrchestratorWaitingEnabled bool `json:"orchestratorWaitingEnabled" description:"When on, a project orchestrator waiting for the user raises a distinct notification (toast, sound, phone push, badge and a sidebar marker) until the user responds."`
+	// OrchestratorWaitingRenotifyMinutes is the delay before the single reminder.
+	OrchestratorWaitingRenotifyMinutes int `json:"orchestratorWaitingRenotifyMinutes" description:"Minutes a question stays unanswered before it is announced a second time; 0 turns the reminder off." minimum:"0" maximum:"1440"`
 	// CloudEnabled reports whether the cloud offering is available: on for
 	// everyone unless AO_CLOUD_OFFERING switches it off, given a configured
 	// control plane.
@@ -3958,6 +3962,47 @@ type UpdateSessionRetentionRequest struct {
 type UpdateUsageLimitResumeRequest struct {
 	Enabled       *bool `json:"enabled" description:"Continue sessions stopped on a usage limit once it resets."`
 	MaxConcurrent *int  `json:"maxConcurrent" description:"Most continued turns that run at once." minimum:"1" maximum:"10"`
+}
+
+// UpdateOrchestratorWaitingRequest sets the orchestrator-waiting notification
+// preferences. Both fields are required so a partial write cannot silently reset
+// the other.
+type UpdateOrchestratorWaitingRequest struct {
+	Enabled         *bool `json:"enabled"`
+	RenotifyMinutes *int  `json:"renotifyMinutes" description:"Minutes before a still-unanswered question is announced a second time; 0 turns the reminder off." minimum:"0" maximum:"1440"`
+}
+
+// DeclareOrchestratorWaitingRequest is the body of POST
+// /api/v1/sessions/{id}/waiting: the one-line question an orchestrator ended its
+// turn with.
+type DeclareOrchestratorWaitingRequest struct {
+	Question string `json:"question" description:"One line, at most 240 characters, saying what the user must decide or answer."`
+}
+
+// DeclareOrchestratorWaitingResponse reports what declaring a question did.
+type DeclareOrchestratorWaitingResponse struct {
+	Outcome string `json:"outcome" enum:"notified,unchanged,disabled" description:"notified: a new wait was recorded and the user was told. unchanged: the same question was already open. disabled: the user switched this notification off in Settings."`
+}
+
+// ClearOrchestratorWaitingResponse reports whether a wait was open to clear.
+type ClearOrchestratorWaitingResponse struct {
+	Cleared bool `json:"cleared"`
+}
+
+// OrchestratorWaitingResponse is one orchestrator that is waiting for the user.
+type OrchestratorWaitingResponse struct {
+	NotificationID string    `json:"notificationId"`
+	SessionID      string    `json:"sessionId"`
+	ProjectID      string    `json:"projectId"`
+	Title          string    `json:"title"`
+	Question       string    `json:"question"`
+	Since          time.Time `json:"since"`
+	Reminded       bool      `json:"reminded" description:"True once the single reminder has been sent."`
+}
+
+// ListOrchestratorWaitingResponse is the body of GET /api/v1/orchestrator-waiting.
+type ListOrchestratorWaitingResponse struct {
+	Waiting []OrchestratorWaitingResponse `json:"waiting"`
 }
 
 // UpdateComputerUseRequest flips whether new chat sessions get the computer-use tools.

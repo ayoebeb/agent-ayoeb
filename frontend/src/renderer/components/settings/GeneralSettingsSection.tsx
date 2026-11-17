@@ -17,6 +17,7 @@ import { ArrowRight } from "@/components/app-icons";
 import { useTerminalShellStore } from "../../stores/terminal-shell-store";
 import { checkTerminalShellPath, useTerminalShells } from "../../hooks/useTerminalShells";
 import { DefaultCloudSandboxSection } from "./DefaultCloudSandboxRow";
+import { OrchestratorWaitingSection } from "./OrchestratorWaitingSection";
 import { SettingsOptionMenu, type SettingsOption } from "./SettingsOptionMenu";
 import { SettingsInlineInput, SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
@@ -526,6 +527,8 @@ export function GeneralSettingsSection({
 					/>
 				</SettingsRow>
 			</SettingsSection>
+
+			<OrchestratorWaitingSection />
 
 			<DefaultCloudSandboxSection />
 

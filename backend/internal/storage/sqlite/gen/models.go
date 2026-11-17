@@ -178,17 +178,19 @@ type AgentSwitchFailureReceipt struct {
 }
 
 type AppSetting struct {
-	ID                   int64
-	DefaultSessionMode   domain.SessionMode
-	UpdatedAt            time.Time
-	CloudOffering        bool
-	HarnessDefaults      string
-	VersionRefresh       bool
-	ComputerUse          bool
-	SessionRetentionDays int64
-	LimitHistory         bool
-	UsageLimitAutoResume bool
-	UsageLimitMaxResumes int64
+	ID                                 int64
+	DefaultSessionMode                 domain.SessionMode
+	UpdatedAt                          time.Time
+	CloudOffering                      bool
+	HarnessDefaults                    string
+	VersionRefresh                     bool
+	ComputerUse                        bool
+	SessionRetentionDays               int64
+	LimitHistory                       bool
+	OrchestratorWaitingEnabled         int64
+	OrchestratorWaitingRenotifyMinutes int64
+	UsageLimitAutoResume               bool
+	UsageLimitMaxResumes               int64
 }
 
 type Automation struct {
@@ -509,6 +511,7 @@ type Notification struct {
 	ResolvedAt  sql.NullTime
 	DismissedAt sql.NullTime
 	SourceKey   string
+	RemindedAt  sql.NullTime
 }
 
 type PR struct {
@@ -624,6 +627,17 @@ type Project struct {
 	ArchivedAt    sql.NullTime
 	Config        sql.NullString
 	Kind          string
+}
+
+type ProjectPermissionRule struct {
+	ID              string
+	ProjectID       string
+	Tool            string
+	Content         string
+	Kind            string
+	Label           string
+	SourceSessionID string
+	CreatedAt       time.Time
 }
 
 type Report struct {

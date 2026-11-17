@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/sentryobs"
 	usagepipeline "github.com/aoagents/agent-orchestrator/backend/internal/observe/usage"
+	"github.com/aoagents/agent-orchestrator/backend/internal/orchestratorwait"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/presence"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
@@ -73,6 +75,7 @@ import (
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	linkpreviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/linkpreview"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/permissionmemory"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/report"
@@ -330,7 +333,31 @@ func Run(buildVersion string) error {
 	notifier := notificationsvc.New(notificationsvc.Deps{
 		Store: store, Publisher: notificationHub, Barrier: notificationBarrier, Logger: log,
 	})
-	notificationWriter := notify.New(notify.Deps{Store: store, Publisher: notificationHub, Barrier: notificationBarrier})
+	// The settings service is built further down, once the chat drivers exist;
+	// the notification writer needs two of its answers before that, so it reads
+	// them through this late-bound reference.
+	var settingsRef atomic.Pointer[settingssvc.Service]
+	notificationWriter := notify.New(notify.Deps{
+		Store: store, Publisher: notificationHub, Barrier: notificationBarrier,
+		ProjectName: func(ctx context.Context, id domain.ProjectID) string {
+			project, ok, err := store.GetProject(ctx, string(id))
+			if err != nil || !ok {
+				return ""
+			}
+			return project.DisplayName
+		},
+		// Until settings are wired (or when they cannot be read) the distinct
+		// notification stays on: an orchestrator waiting on the user must not go
+		// quiet because of a settings hiccup.
+		WaitingEnabled: func(ctx context.Context) bool {
+			svc := settingsRef.Load()
+			if svc == nil {
+				return true
+			}
+			enabled, _, err := svc.OrchestratorWaiting(ctx)
+			return err != nil || enabled
+		},
+	})
 	// Resolution transitions that happened while the daemon was down never
 	// reached lifecycle, so re-check open notifications against the durable
 	// session/PR facts before serving. Best-effort: a failure here only leaves
@@ -391,6 +418,17 @@ func Run(buildVersion string) error {
 		settingssvc.OfferingFromConfig(cfg),
 		func() time.Time { return time.Now().UTC() },
 	)
+	settingsRef.Store(settingsSvc)
+
+	// Tells the user when a project's orchestrator is waiting for them, and once
+	// more if it still is after the configured delay.
+	orchestratorWaiting := orchestratorwait.New(orchestratorwait.Deps{
+		Store: store, Notifier: notificationWriter, Settings: settingsSvc,
+	})
+	go func() {
+		defer sentryobs.RecoverBackground()
+		orchestratorWaiting.RunReminders(ctx)
+	}()
 
 	// Chat service. The driver registry is the capability gate: a harness with no
 	// registered driver cannot start in chat mode, so an unsupported request fails
@@ -409,7 +447,17 @@ func Run(buildVersion string) error {
 	// The review and chat services and the hook route start before the SCM
 	// observer they ask for early refreshes, so they hold a late-bound handle.
 	reviewRefresher := &scmReviewRefresher{}
+	// "Always allow" choices a user made, remembered per project: kept in the
+	// daemon's own store, written into each new Claude Code session workspace.
+	permissionMemory := permissionmemory.New(permissionmemory.Options{
+		Store:       store,
+		Sessions:    store,
+		AddRules:    claudecodeagent.AddPermissionRules,
+		RemoveRules: claudecodeagent.RemovePermissionRules,
+		Log:         log,
+	})
 	chatSvc := chatsvc.New(chatsvc.Options{
+		PermissionMemory:    permissionMemory,
 		PRChanged:           reviewRefresher.RequestSessionRefresh,
 		Store:               store,
 		Sessions:            store,
@@ -617,6 +665,9 @@ func Run(buildVersion string) error {
 		}
 		return fmt.Errorf("wire session service: %w", err)
 	}
+	if binder, ok := wiredSessMgr.(projectPermissionBinder); ok {
+		binder.SetProjectPermissionApplier(permissionMemory)
+	}
 	if usage != nil {
 		sessionSvc.SetUsageArchiveFlush(func(context.Context) { usage.requestArchiveFlush() })
 	}
@@ -785,6 +836,7 @@ func Run(buildVersion string) error {
 			log.Warn("record usage-limit resume choice", "turn", turnID, "err", err)
 		}
 	})
+	chatSvc.SetHumanReplyObserver(orchestratorWaiting)
 	reportDeliveryDone := reportCoordinator.Start(ctx)
 	defer func() {
 		stop()
@@ -1177,57 +1229,60 @@ func Run(buildVersion string) error {
 	// the session's own must not replace its activity or transcript.
 	hookActivity := hookprocess.New(lcStack.LCM, store, runtimeAdapter, nil, log)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
-		Awake:              awakeSvc,
-		Projects:           projectSvc,
-		ArtifactVersions:   lcStack.ArtifactVersions,
-		HostID:             hostIdentity.HostID,
-		Endpoints:          bs,
-		Agents:             agentSvc,
-		CodexAccounts:      agentSvc,
-		AgentAccounts:      freshAccountUsage{agentAccountSvc, usagePipeline},
-		SystemChecks:       systemChecks,
-		Installer:          systemInstall,
-		ComputerUse:        computerUse,
-		Sessions:           sessionSvc,
-		Automations:        automationSvc,
-		DesktopWorkspaces:  sessionSvc,
-		PRs:                prActions,
-		Reviews:            reviewSvc,
-		Notifications:      notifier,
-		Reports:            reportSvc,
-		NotificationStream: notificationHub,
-		Push:               pushRegistry,
-		Presence:           presenceTracker,
-		DeviceRoster:       deviceRoster,
-		DeviceLive:         presenceTracker,
-		Import:             importsvc.New(importsvc.Deps{Store: store}),
-		SessionImport:      sessionImportSvc,
-		Directories:        fsbrowsersvc.New(),
-		ShellTerminals:     shellTermSvc,
-		CommandRuns:        shellTermSvc,
-		CommandRunKey:      httpd.DeriveCommandRunKey(browserRuntimeToken),
-		Cues:               cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
-		AgentAuth:          agentAuthSvc,
-		GitHub:             newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),
-		Conversations:      chatSvc,
-		ConversationSearch: store,
-		Settings:           settingsSvc,
-		CDC:                store,
-		Events:             cdcPipe.Broadcaster,
-		Activity:           hookActivity,
-		PRRefresh:          reviewRefresher,
-		NativeSessions:     nativeSessions,
-		UsageHooks:         usageCollector,
-		UsageSummary:       freshUsageSummary{usagesvc.NewSummaryReader(store), usagePipeline},
-		UsageReport:        freshUsageReport{usageReportReader(store, usagePricing), usagePipeline},
-		UsageLimitHistory:  usagesvc.NewLimitHistoryReader(store),
-		UsageLimitSetting:  store,
-		UsagePrices:        usagePrices(usagePricing),
-		SessionMemory:      memoryReader,
-		SessionSteps:       lcStack.LCM,
-		Telemetry:          telemetrySink,
-		TelemetryIdentity:  telemetryIdentity,
-		LifetimeSessions:   store.LifetimeSessions,
+		Awake:                  awakeSvc,
+		Projects:               projectSvc,
+		ProjectPermissionRules: permissionMemory,
+		ArtifactVersions:       lcStack.ArtifactVersions,
+		HostID:                 hostIdentity.HostID,
+		Endpoints:              bs,
+		Agents:                 agentSvc,
+		CodexAccounts:          agentSvc,
+		AgentAccounts:          freshAccountUsage{agentAccountSvc, usagePipeline},
+		SystemChecks:           systemChecks,
+		Installer:              systemInstall,
+		ComputerUse:            computerUse,
+		Sessions:               sessionSvc,
+		Automations:            automationSvc,
+		DesktopWorkspaces:      sessionSvc,
+		PRs:                    prActions,
+		Reviews:                reviewSvc,
+		Notifications:          notifier,
+		OrchestratorWaiting:    orchestratorWaiting,
+		Reports:                reportSvc,
+		NotificationStream:     notificationHub,
+		Push:                   pushRegistry,
+		Presence:               presenceTracker,
+		DeviceRoster:           deviceRoster,
+		DeviceLive:             presenceTracker,
+		Import:                 importsvc.New(importsvc.Deps{Store: store}),
+		SessionImport:          sessionImportSvc,
+		Directories:            fsbrowsersvc.New(),
+		ShellTerminals:         shellTermSvc,
+		CommandRuns:            shellTermSvc,
+		CommandRunKey:          httpd.DeriveCommandRunKey(browserRuntimeToken),
+		Cues:                   cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
+		AgentAuth:              agentAuthSvc,
+		GitHub:                 newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),
+		Jira:                   newJiraService(cfg.DataDir, store, sessionSvc),
+		Conversations:          chatSvc,
+		ConversationSearch:     store,
+		Settings:               settingsSvc,
+		CDC:                    store,
+		Events:                 cdcPipe.Broadcaster,
+		Activity:               hookActivity,
+		PRRefresh:              reviewRefresher,
+		NativeSessions:         nativeSessions,
+		UsageHooks:             usageCollector,
+		UsageSummary:           freshUsageSummary{usagesvc.NewSummaryReader(store), usagePipeline},
+		UsageReport:            freshUsageReport{usageReportReader(store, usagePricing), usagePipeline},
+		UsageLimitHistory:      usagesvc.NewLimitHistoryReader(store),
+		UsageLimitSetting:      store,
+		UsagePrices:            usagePrices(usagePricing),
+		SessionMemory:          memoryReader,
+		SessionSteps:           lcStack.LCM,
+		Telemetry:              telemetrySink,
+		TelemetryIdentity:      telemetryIdentity,
+		LifetimeSessions:       store.LifetimeSessions,
 		UsageFlush: func(ctx context.Context) {
 			if usage != nil {
 				usage.flush(ctx, false)

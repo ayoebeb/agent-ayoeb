@@ -190,6 +190,11 @@ vi.mock("../hooks/useSettings", () => ({
 	useSettings: () => ({ settings: { trackerIntakeEnabled: true }, isLoading: false, error: undefined }),
 }));
 
+// Which orchestrators are waiting for the user comes from the daemon; these tests
+// decide it per project instead.
+const { orchestratorWaitingMock } = vi.hoisted(() => ({ orchestratorWaitingMock: vi.fn() }));
+vi.mock("../hooks/useOrchestratorWaiting", () => ({ useProjectOrchestratorWaiting: orchestratorWaitingMock }));
+
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock, POST: postMock },
 	hasTrustedApiBaseUrl: () => trustedApi.current,
@@ -584,6 +589,7 @@ beforeEach(() => {
 	renameSessionMock.mockReset().mockResolvedValue(undefined);
 	spawnMock.mockReset();
 	resumeOrchestratorMock.mockReset().mockResolvedValue(undefined);
+	orchestratorWaitingMock.mockReset().mockReturnValue(undefined);
 	updateStatusMock.mockReset().mockResolvedValue({ state: "idle" });
 	downloadUpdateMock.mockReset().mockResolvedValue(undefined);
 	checkUpdateMock.mockReset().mockResolvedValue(undefined);
@@ -828,6 +834,48 @@ describe("Sidebar", () => {
 		expect(content).toHaveClass("overflow-y-auto", "scrollbar-none");
 		expect(content).not.toHaveClass("project-sidebar-scrollbar");
 		expect(content).not.toContainElement(screen.getByText("Projects"));
+	});
+
+	describe("orchestrator waiting for the user", () => {
+		const waitingFor = (projectId: string) => ({
+			notificationId: "ntf_wait",
+			sessionId: `${projectId}-orch`,
+			projectId,
+			title: "Project One: orchestrator is waiting for you",
+			question: "Merge PR 42 now, or wait?",
+			since: "2026-11-16T12:00:00Z",
+			reminded: false,
+			hostId: "local",
+		});
+
+		it("marks the project row and the orchestrator button until the user responds", () => {
+			orchestratorWaitingMock.mockImplementation((_host: string, projectId: string) =>
+				projectId === "proj-1" ? waitingFor("proj-1") : undefined,
+			);
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
+
+			const marker = document.querySelector('[data-project-marker="orchestrator-waiting"]');
+			expect(marker).toHaveAttribute("aria-label", "Waiting for you");
+			expect(marker).toHaveAttribute("role", "img");
+			// The orchestrator button says so in words too, so the red dot is never the only signal.
+			const button = screen.getByRole("button", { name: "Open Project One orchestrator · Waiting for you" });
+			expect(button.querySelector("[data-orchestrator-waiting]")).not.toBeNull();
+			// A collapsed rail keeps the project's red badge.
+			expect(document.querySelector('[data-project-marker="attention"]')).not.toBeNull();
+		});
+
+		it("shows nothing for a project whose orchestrator is not waiting", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
+
+			expect(document.querySelector('[data-project-marker="orchestrator-waiting"]')).toBeNull();
+			const button = screen.getByRole("button", { name: "Open Project One orchestrator" });
+			expect(button.querySelector("[data-orchestrator-waiting]")).toBeNull();
+		});
+
+		it("looks the wait up by this project on this computer", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
+			expect(orchestratorWaitingMock).toHaveBeenCalledWith("local", "proj-1");
+		});
 	});
 
 	it("opens project settings instead of spawning when no orchestrator agent is configured", async () => {

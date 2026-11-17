@@ -23,6 +23,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentauth"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/githubpat"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
+	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systeminstall"
 )
@@ -104,6 +105,8 @@ func Build() ([]byte, error) {
 			"Server-side unfurl of external links for the CSP-locked renderer"),
 		*(&openapi31.Tag{Name: "github"}).WithDescription(
 			"Local GitHub personal access token storage and repository listing"),
+		*(&openapi31.Tag{Name: "jira"}).WithDescription(
+			"Per-project Jira Cloud connection, ticket board and start-from-ticket"),
 	}
 
 	for _, op := range operations() {
@@ -215,6 +218,12 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersUpdateSessionRetentionRequest":             "UpdateSessionRetentionRequest",
 	"ControllersUpdateUsageLimitResumeRequest":             "UpdateUsageLimitResumeRequest",
 	"DomainSessionUsageLimit":                              "SessionUsageLimit",
+	"ControllersUpdateOrchestratorWaitingRequest":          "UpdateOrchestratorWaitingRequest",
+	"ControllersDeclareOrchestratorWaitingRequest":         "DeclareOrchestratorWaitingRequest",
+	"ControllersDeclareOrchestratorWaitingResponse":        "DeclareOrchestratorWaitingResponse",
+	"ControllersClearOrchestratorWaitingResponse":          "ClearOrchestratorWaitingResponse",
+	"ControllersOrchestratorWaitingResponse":               "OrchestratorWaitingResponse",
+	"ControllersListOrchestratorWaitingResponse":           "ListOrchestratorWaitingResponse",
 	"ControllersConversationSnapshotResponse":              "ConversationSnapshotResponse",
 	"ControllersConversationTurnResponse":                  "ConversationTurnResponse",
 	"ControllersConversationUsageLimitResponse":            "ConversationUsageLimitResponse",
@@ -701,6 +710,18 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	// httpd/controllers: GitHub PAT wire envelopes
 	"ControllersPutGitHubPATRequest": "PutGitHubPATRequest",
 	"GithubpatRepo":                  "GitHubRepo",
+	// httpd/controllers + service/jira: per-project Jira board wire envelopes
+	"ControllersJiraConnectRequest": "JiraConnectRequest",
+	"ControllersJiraIssueKeyParam":  "JiraIssueKeyParam",
+	"JiraConnection":                "JiraConnection",
+	"JiraTestResult":                "JiraTestResult",
+	"JiraBoard":                     "JiraBoard",
+	"JiraBoardColumn":               "JiraBoardColumn",
+	"JiraTicket":                    "JiraTicket",
+	"JiraTicketUser":                "JiraTicketUser",
+	"JiraTicketStatus":              "JiraTicketStatus",
+	"JiraTicketSession":             "JiraTicketSession",
+	"JiraStartResult":               "JiraStartResult",
 }
 
 // markRequestBodyRequired sets requestBody.required: true on the operation's
@@ -819,6 +840,7 @@ func operations() []operation {
 	ops = append(ops, telemetryIdentityOperations()...)
 	ops = append(ops, linkPreviewOperations()...)
 	ops = append(ops, sharedBrowserProfileOperations()...)
+	ops = append(ops, jiraOperations()...)
 	return ops
 }
 
@@ -1342,6 +1364,17 @@ func shellTerminalOperations() []operation {
 			method: http.MethodPatch, path: "/api/v1/settings/usage-limit-resume", id: "updateUsageLimitResume", tag: "settings",
 			summary: "Choose whether AO continues sessions after a usage limit resets, and how many at once",
 			reqBody: controllers.UpdateUsageLimitResumeRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPatch, path: "/api/v1/settings/orchestrator-waiting", id: "updateOrchestratorWaiting", tag: "settings",
+			summary: "Choose whether and how persistently AO tells you a project orchestrator is waiting for you",
+			reqBody: controllers.UpdateOrchestratorWaitingRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
@@ -2820,6 +2853,42 @@ func notificationOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
+		{
+			method: http.MethodGet, path: "/api/v1/orchestrator-waiting", id: "listOrchestratorWaiting", tag: "notifications",
+			summary: "List the orchestrators that are waiting for the user",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListOrchestratorWaitingResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/waiting", id: "declareOrchestratorWaiting", tag: "notifications",
+			summary:    "Tell the user this orchestrator ended its turn waiting for them",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.DeclareOrchestratorWaitingRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.DeclareOrchestratorWaitingResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/waiting", id: "clearOrchestratorWaiting", tag: "notifications",
+			summary:    "Withdraw this orchestrator's waiting-for-the-user notice",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ClearOrchestratorWaitingResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 	}
 }
 
@@ -3144,6 +3213,27 @@ func projectOperations() []operation {
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/permission-rules", id: "listProjectPermissionRules", tag: "projects",
+			summary:    "List the tool permissions users chose \"Always allow\" for in this project",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListProjectPermissionRulesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/projects/{id}/permission-rules/{ruleId}", id: "revokeProjectPermissionRule", tag: "projects",
+			summary:    "Revoke a remembered permission rule for future sessions and live Claude Code sessions of the project",
+			pathParams: []any{controllers.ProjectPermissionRuleIDParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
 		{
@@ -4175,5 +4265,62 @@ func awakeOperations() []operation {
 		common(http.MethodPost, "/api/v1/awake/recover", "recoverAwake", nil, nil),
 		common(http.MethodDelete, "/api/v1/awake/history", "clearAwakeHistory", nil, nil),
 		common(http.MethodPost, "/api/v1/awake/downloads", "awakeDownloads", controllers.AwakeDownloadsRequest{}, nil),
+	}
+}
+
+// jiraOperations registers the per-project Jira connection, board and
+// start-from-ticket routes. Upstream Jira failures are 4xx/5xx envelopes with
+// stable JIRA_* codes; a rejected Jira login is 422, never 401.
+func jiraOperations() []operation {
+	idParam := []any{controllers.ProjectIDParam{}}
+	jiraErrors := []respUnit{
+		{http.StatusBadRequest, envelope.APIError{}},
+		{http.StatusNotFound, envelope.APIError{}},
+		{http.StatusConflict, envelope.APIError{}},
+		{http.StatusUnprocessableEntity, envelope.APIError{}},
+		{http.StatusInternalServerError, envelope.APIError{}},
+		{http.StatusBadGateway, envelope.APIError{}},
+		{http.StatusServiceUnavailable, envelope.APIError{}},
+	}
+	with := func(ok respUnit) []respUnit { return append([]respUnit{ok}, jiraErrors...) }
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/jira", id: "getProjectJira", tag: "jira",
+			summary:    "Report whether a project is connected to Jira (never returns the token)",
+			pathParams: idParam,
+			resps:      with(respUnit{http.StatusOK, jirasvc.Connection{}}),
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/projects/{id}/jira", id: "connectProjectJira", tag: "jira",
+			summary:    "Verify and store a project's Jira connection",
+			pathParams: idParam,
+			reqBody:    controllers.JiraConnectRequest{},
+			resps:      with(respUnit{http.StatusOK, jirasvc.Connection{}}),
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/projects/{id}/jira", id: "disconnectProjectJira", tag: "jira",
+			summary:    "Remove a project's Jira connection, token and ticket links",
+			pathParams: idParam,
+			resps:      with(respUnit{http.StatusOK, map[string]string{"status": "ok"}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{id}/jira/test", id: "testProjectJira", tag: "jira",
+			summary:    "Check Jira credentials, project and query without saving them",
+			pathParams: idParam,
+			reqBody:    controllers.JiraConnectRequest{},
+			resps:      with(respUnit{http.StatusOK, jirasvc.TestResult{}}),
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/jira/board", id: "getProjectJiraBoard", tag: "jira",
+			summary:    "List the project's Jira tickets grouped into its board columns",
+			pathParams: idParam,
+			resps:      with(respUnit{http.StatusOK, jirasvc.Board{}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{id}/jira/tickets/{issueKey}/start", id: "startProjectJiraTicket", tag: "jira",
+			summary:    "Send a Jira ticket to the project's orchestrator as a new task",
+			pathParams: []any{controllers.ProjectIDParam{}, controllers.JiraIssueKeyParam{}},
+			resps:      with(respUnit{http.StatusAccepted, jirasvc.StartResult{}}),
+		},
 	}
 }

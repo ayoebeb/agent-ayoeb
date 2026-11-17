@@ -16,16 +16,30 @@ const SURFACE = {
  * The orchestrator mark with the same corner dot as the Browser button's
  * unseen badge: solid accent for a reply the user has not seen, a quiet
  * breathing dot while the orchestrator works.
+ *
+ * `waiting` is the orchestrator asking the user for something. It outranks the
+ * other two: a larger red dot (the "needs you now" colour, which no reply or
+ * working state uses) that stays until the user responds.
  */
-export function OrchestratorReplyIcon({ reply, surface, ...props }: SVGProps<SVGSVGElement> & {
+export function OrchestratorReplyIcon({ reply, surface, waiting = false, ...props }: SVGProps<SVGSVGElement> & {
 	reply: OrchestratorReplyState;
 	surface: keyof typeof SURFACE;
+	waiting?: boolean;
 }) {
 	const tone = SURFACE[surface];
 	return (
 		<span className="relative inline-flex">
 			<OrchestratorIcon aria-hidden="true" {...props} />
-			{reply ? (
+			{waiting ? (
+				<span
+					aria-hidden="true"
+					className={cn(
+						"pointer-events-none absolute -right-1 -top-1 size-2 rounded-full bg-destructive ring-2",
+						tone.ring,
+					)}
+					data-orchestrator-waiting=""
+				/>
+			) : reply ? (
 				<span
 					aria-hidden="true"
 					className={cn(
@@ -41,7 +55,13 @@ export function OrchestratorReplyIcon({ reply, surface, ...props }: SVGProps<SVG
 }
 
 /** Appended to the button's label so the dot is never the only signal. */
-export function orchestratorReplyLabel(label: string, reply: OrchestratorReplyState, t: TFunction): string {
+export function orchestratorReplyLabel(
+	label: string,
+	reply: OrchestratorReplyState,
+	t: TFunction,
+	waiting = false,
+): string {
+	if (waiting) return `${label} · ${t("shell.orchestratorWaitingForYou")}`;
 	if (reply === "unread") return `${label} · ${t("shell.orchestratorNewReply")}`;
 	if (reply === "working") return `${label} · ${t("shell.orchestratorWorking")}`;
 	return label;

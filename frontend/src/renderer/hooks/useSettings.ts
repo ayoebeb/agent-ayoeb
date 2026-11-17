@@ -43,6 +43,10 @@ export interface Settings {
 	usageLimitAutoResume?: boolean;
 	/** The most continued turns that run at once. */
 	usageLimitMaxResumes?: number;
+	/** A project orchestrator waiting for the user raises a distinct, hard-to-miss notification. Absent on a daemon that predates it. */
+	orchestratorWaitingEnabled?: boolean;
+	/** Minutes a question stays unanswered before it is announced a second time; 0 turns the reminder off. */
+	orchestratorWaitingRenotifyMinutes?: number;
 }
 
 const settingsReadTimeoutMs = 10_000;
@@ -87,6 +91,9 @@ export function useSettings(hostId?: string, enabled = true) {
 				sessionRetentionDays: data?.sessionRetentionDays,
 				usageLimitAutoResume: data?.usageLimitAutoResume,
 				usageLimitMaxResumes: data?.usageLimitMaxResumes,
+				// Absent on a daemon that predates the notification, where its controls would do nothing.
+				orchestratorWaitingEnabled: data?.orchestratorWaitingEnabled,
+				orchestratorWaitingRenotifyMinutes: data?.orchestratorWaitingRenotifyMinutes,
 			};
 		},
 	});
@@ -195,6 +202,30 @@ export function useUpdateUsageLimitResume() {
 
 	return {
 		update: (input: { enabled: boolean; maxConcurrent: number }) => mutation.mutate(input),
+		saving: mutation.isPending,
+		error: mutation.error ? apiErrorMessage(mutation.error) : undefined,
+	};
+}
+
+/**
+ * Saves the orchestrator-waiting notification preferences. Both values are
+ * written together, because the daemon rejects a partial write rather than
+ * silently resetting the other one.
+ */
+export function useUpdateOrchestratorWaiting() {
+	const queryClient = useQueryClient();
+	const mutation = useMutation({
+		mutationFn: async (next: { enabled: boolean; renotifyMinutes: number }) => {
+			const { data, error } = await apiClient.PATCH("/api/v1/settings/orchestrator-waiting", { body: next });
+			if (error) throw error;
+			return data;
+		},
+		// The daemon is the source of truth: refetch instead of assuming the write.
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsQueryKey }),
+	});
+
+	return {
+		update: (next: { enabled: boolean; renotifyMinutes: number }) => mutation.mutate(next),
 		saving: mutation.isPending,
 		error: mutation.error ? apiErrorMessage(mutation.error) : undefined,
 	};

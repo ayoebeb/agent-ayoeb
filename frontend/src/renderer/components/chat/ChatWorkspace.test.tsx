@@ -2459,6 +2459,45 @@ describe("ChatWorkspace timeline", () => {
 		expect(onDecide).toHaveBeenCalledWith("question-request", "3");
 	});
 
+	it("names each always-choice and sends the id of the one picked", async () => {
+		const user = userEvent.setup();
+		const onDecide = vi.fn();
+		const snapshot = structuredClone(chatFixture);
+		snapshot.items.push({
+			kind: "activity",
+			id: "approval-always",
+			sequence: 103,
+			revision: 1,
+			turnId: "turn-2",
+			activityKind: "approval",
+			status: "pending",
+			summary: 'node -e "console.log(1)"',
+			requestId: "always-request",
+			decisions: [
+				{ id: "reject", label: "Deny", kind: "reject_once" },
+				{ id: "allow", label: "Allow Once", kind: "allow_once" },
+				{ id: "allow_always", label: "Always allow only this exact command", kind: "allow_always" },
+				{ id: "allow_always_class", label: 'Always allow "node -e ..." in this workspace', kind: "allow_always" },
+			],
+			detail: { command: 'node -e "console.log(1)"' },
+			createdAt: "2026-08-08T00:00:00Z",
+		});
+
+		render(<ChatWorkspace snapshot={snapshot} onDecide={onDecide} onInterrupt={vi.fn()} />);
+
+		const approval = screen.getByRole("group", { name: "Approval request always-request" });
+		await user.click(within(approval).getByRole("button", { name: "More approval options" }));
+		// Two always-choices of one kind keep the provider's wording, so the user
+		// can tell what each one remembers instead of two identical generic lines.
+		expect(screen.queryByRole("menuitem", { name: "Always allow this command" })).not.toBeInTheDocument();
+		await user.click(screen.getByRole("menuitem", { name: "Always allow only this exact command" }));
+		expect(onDecide).toHaveBeenLastCalledWith("always-request", "allow_always");
+
+		await user.click(within(approval).getByRole("button", { name: "More approval options" }));
+		await user.click(screen.getByRole("menuitem", { name: 'Always allow "node -e ..." in this workspace' }));
+		expect(onDecide).toHaveBeenLastCalledWith("always-request", "allow_always_class");
+	});
+
 	it("requires an explicit click for decisions without a semantic kind", () => {
 		const onDecide = vi.fn();
 		const snapshot = structuredClone(chatFixture);

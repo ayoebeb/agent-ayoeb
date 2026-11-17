@@ -13,6 +13,10 @@ permissions:
 jobs:
   leaderboard:
     name: Post trailing 7-day review stats
+    # Ranks upstream's contributors and reviewers, so it only means something
+    # there. Elsewhere it spends a billed minute on every PR for a comment nobody
+    # reads.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     steps:
       - name: Check out trusted leaderboard code

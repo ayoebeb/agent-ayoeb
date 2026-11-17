@@ -228,6 +228,14 @@ type Controller struct {
 	prChanged              func(domain.SessionID)
 	onCodexCapacityChanged func(domain.SessionID, string, ports.CodexCapacityObservation)
 
+	// permissionMemory remembers a user's "Always allow" choice for the whole
+	// project; nil keeps it in the workspace it was made in. rememberable holds,
+	// per pending approval, the raw encoding of each "always" option, so the
+	// choice that is later made can be read for the rule it applies.
+	permissionMemory PermissionMemory
+	rememberableMu   sync.Mutex
+	rememberable     map[string]map[string][]byte
+
 	// sendMu serializes command dispatch so only one operation mutates the
 	// provider conversation at a time.
 	sendMu sync.Mutex
@@ -2521,9 +2529,11 @@ func (c *Controller) waitForBranchHandoff() {
 // Resolve answers a pending approval. The provider is told first: if it rejects
 // the decision, AO must not have already recorded the approval as answered.
 func (c *Controller) Resolve(ctx context.Context, requestID string, decision ports.ChatDecision) error {
+	chosenRaw := c.chosenDecisionRaw(requestID, decision.ID)
 	if err := c.conv.ResolveRequest(ctx, requestID, decision); err != nil {
 		return fmt.Errorf("resolve request %s: %w", requestID, err)
 	}
+	c.rememberChosenDecision(ctx, chosenRaw)
 	detail, _ := json.Marshal(map[string]string{"decision": decision.ID})
 	if err := c.store.ResolveApproval(
 		ctx, c.conversation.ID, requestID, string(detail), c.now()); err != nil {
@@ -3597,6 +3607,7 @@ func (c *Controller) apply(ctx context.Context, event ports.ChatEvent) error {
 		return c.store.MarkCompacted(ctx, c.conversation.ID, now)
 
 	case ports.ChatEventApprovalRequested:
+		c.noteRememberableDecisions(event)
 		detail := mergeApprovalDetail(event)
 		return c.store.UpsertActivity(ctx, c.conversation.ID, event.ProviderTurnID,
 			domain.ConversationActivity{
@@ -3615,6 +3626,7 @@ func (c *Controller) apply(ctx context.Context, event ports.ChatEvent) error {
 	case ports.ChatEventApprovalResolved:
 		// The provider resolved it, possibly through another client. Mark it so a
 		// card still on screen elsewhere stops being actionable.
+		c.forgetRememberableDecisions(event.RequestID)
 		detail := event.Detail
 		if len(detail) == 0 {
 			detail, _ = json.Marshal(map[string]string{"resolvedBy": "provider"})
