@@ -90,6 +90,15 @@ func utcOrZero(t *time.Time) time.Time {
 	return t.UTC()
 }
 
+func usageLimitStopFromRow(row gen.UsageLimitStop) domain.UsageLimitStop {
+	return domain.UsageLimitStop{
+		TurnID: row.TurnID, SessionID: domain.SessionID(row.SessionID), ProjectID: domain.ProjectID(row.ProjectID),
+		AccountKey: row.AccountKey, WindowKey: row.WindowKey, WindowLabel: row.WindowLabel,
+		ResetsAt: timePtr(row.ResetsAt), DetectedAt: row.DetectedAt, ReportedAt: timePtr(row.ReportedAt),
+		ResumeState: row.ResumeState, SkipReason: row.SkipReason, Attempts: int(row.Attempts), RetryAt: timePtr(row.RetryAt),
+	}
+}
+
 // ListPendingUsageLimitStops returns the stops still waiting to be resumed.
 func (s *Store) ListPendingUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error) {
 	rows, err := s.qr.ListPendingUsageLimitStops(ctx)
@@ -98,12 +107,7 @@ func (s *Store) ListPendingUsageLimitStops(ctx context.Context) ([]domain.UsageL
 	}
 	out := make([]domain.UsageLimitStop, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, domain.UsageLimitStop{
-			TurnID: row.TurnID, SessionID: domain.SessionID(row.SessionID), ProjectID: domain.ProjectID(row.ProjectID),
-			AccountKey: row.AccountKey, WindowKey: row.WindowKey, WindowLabel: row.WindowLabel,
-			ResetsAt: timePtr(row.ResetsAt), DetectedAt: row.DetectedAt, ReportedAt: timePtr(row.ReportedAt),
-			ResumeState: row.ResumeState, SkipReason: row.SkipReason, Attempts: int(row.Attempts), RetryAt: timePtr(row.RetryAt),
-		})
+		out = append(out, usageLimitStopFromRow(row))
 	}
 	return out, nil
 }
@@ -117,12 +121,7 @@ func (s *Store) ListUnreportedUsageLimitStops(ctx context.Context) ([]domain.Usa
 	}
 	out := make([]domain.UsageLimitStop, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, domain.UsageLimitStop{
-			TurnID: row.TurnID, SessionID: domain.SessionID(row.SessionID), ProjectID: domain.ProjectID(row.ProjectID),
-			AccountKey: row.AccountKey, WindowKey: row.WindowKey, WindowLabel: row.WindowLabel,
-			ResetsAt: timePtr(row.ResetsAt), DetectedAt: row.DetectedAt, ReportedAt: timePtr(row.ReportedAt),
-			ResumeState: row.ResumeState, SkipReason: row.SkipReason, Attempts: int(row.Attempts), RetryAt: timePtr(row.RetryAt),
-		})
+		out = append(out, usageLimitStopFromRow(row))
 	}
 	return out, nil
 }
