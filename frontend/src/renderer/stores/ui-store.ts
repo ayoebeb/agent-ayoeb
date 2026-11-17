@@ -83,7 +83,7 @@ export type WorkbenchTab = "changes" | "files" | "terminal";
 export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts" | "crew";
 
 /** The tabs of an orchestrator's control room. "session" is the orchestrator's own chat. */
-export type ControlRoomTab = "session" | "changes" | "commits" | "files" | "terminal";
+export type ControlRoomTab = "session" | "changes" | "commits" | "files";
 
 export type ControlRoomState = {
 	tab: ControlRoomTab;
@@ -124,8 +124,6 @@ export type InspectorSessionState = {
 	fileDisplayModes?: Record<string, RememberedFileDisplayMode>;
 	/** The session-entry defaulting (Summary tab, baseline browser reveal) has already run once for this session's lifetime. */
 	initialized?: boolean;
-	/** Whether Files was left open is kept across restarts (orchestrators opt in at initialization). */
-	remembersFilesSidebar?: boolean;
 };
 
 export type FileDisplayMode = "diff" | "file" | "rendered";
@@ -314,10 +312,9 @@ export type UiState = {
 	 * reveal — exactly once per session's lifetime. Backed by persisted store
 	 * state (not a component-local ref) so it stays a no-op across unmount and
 	 * remount of the session view, not just across re-renders of one mounted
-	 * instance. With `remembersFilesSidebar`, a Files sidebar the user left open
-	 * (in an earlier run too) reopens instead of Summary.
+	 * instance.
 	 */
-	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean, remembersFilesSidebar?: boolean, opensOnCrew?: boolean) => void;
+	initializeInspectorSession: (sessionId: string, hasBrowserContent: boolean, hasInspector: boolean, opensOnCrew?: boolean) => void;
 	/** `scope: null` returns to all agents; leaving `scope` out keeps the current one. */
 	setControlRoom: (sessionId: string, update: { tab?: ControlRoomTab; scope?: string | null }) => void;
 	setBrowserContentRevealed: (sessionId: string, revealed: boolean) => void;
@@ -376,10 +373,6 @@ const navigationGesturesStorageKey = "ao.navigationGestures";
 const renderMathStorageKey = "ao.renderMath";
 const projectAvatarsStorageKey = "ao.projectAvatars";
 const newSidebarDesignStorageKey = "ao.newSidebarDesign";
-/** "open" while a session that remembers its Files sidebar last left it open; absent otherwise. */
-export function filesSidebarStorageKey(sessionId: string): string {
-	return `ao.inspector.filesOpen:${sessionId}`;
-}
 function getLocalStorage() {
 	if (typeof window === "undefined" || !window.localStorage) return null;
 	return window.localStorage;
@@ -694,7 +687,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 			if (tab === current.tab && scope === current.scope) return state;
 			return { controlRooms: { ...state.controlRooms, [sessionId]: { tab, scope } } };
 		}),
-	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, remembersFilesSidebar = false, opensOnCrew = false) =>
+	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, opensOnCrew = false) =>
 		set((state) => {
 			// Sessions without an inspector must not gain a store entry at all —
 			// leave inspectorSessions[sessionId] undefined so callers that key off
@@ -702,7 +695,6 @@ export const useUiStore = create<UiState>((set, get) => ({
 			if (!hasInspector) return state;
 			const current = inspectorState(state.inspectorSessions, sessionId);
 			if (current.initialized) return state;
-			const reopenFiles = remembersFilesSidebar && getLocalStorage()?.getItem(filesSidebarStorageKey(sessionId)) === "open";
 			return {
 				inspectorSessions: {
 					...state.inspectorSessions,
@@ -710,9 +702,8 @@ export const useUiStore = create<UiState>((set, get) => ({
 						...current,
 						initialized: true,
 						// An orchestrator opens on its crew: who is doing what is the first thing to see.
-						view: reopenFiles ? "files" : opensOnCrew ? "crew" : "summary",
-						...(reopenFiles ? { isOpen: true, filesChangedOnly: false } : opensOnCrew ? { isOpen: true } : {}),
-						...(remembersFilesSidebar ? { remembersFilesSidebar: true } : {}),
+						view: opensOnCrew ? "crew" : "summary",
+						...(opensOnCrew ? { isOpen: true } : {}),
 						browserContentRevealed: current.browserContentRevealed ?? hasBrowserContent,
 					},
 				},
@@ -983,25 +974,6 @@ function syncLegacyStatusColors(state: UiState) {
 }
 syncLegacyStatusColors(useUiStore.getState());
 useUiStore.subscribe(syncLegacyStatusColors);
-
-// Sessions that remember their Files sidebar keep "open" stored only while
-// the inspector is open on Files; closing it or picking another tab clears it.
-function rememberFilesSidebars(state: UiState, previous: UiState) {
-	if (state.inspectorSessions === previous.inspectorSessions) return;
-	const storage = getLocalStorage();
-	if (!storage) return;
-	for (const [sessionId, session] of Object.entries(state.inspectorSessions)) {
-		const before = previous.inspectorSessions[sessionId];
-		if (!session.remembersFilesSidebar || (before?.remembersFilesSidebar && before.isOpen === session.isOpen && before.view === session.view)) continue;
-		try {
-			if (session.isOpen && session.view === "files") storage.setItem(filesSidebarStorageKey(sessionId), "open");
-			else storage.removeItem(filesSidebarStorageKey(sessionId));
-		} catch {
-			// Storage can be full or blocked; the sidebar then simply starts closed.
-		}
-	}
-}
-useUiStore.subscribe(rememberFilesSidebars);
 
 // Hydration synchronizes legacy renderer-only Developer Mode state into the
 // main-process updater mirror. Until this completes, the updater is fail-closed.

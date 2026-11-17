@@ -5,11 +5,11 @@ import { useConversation, useConversationCommands } from "../../hooks/useConvers
 import { useControlRoom } from "../../hooks/useControlRoom";
 import { useCrew } from "../../hooks/useCrew";
 import { usePinSession, useUnpinSession } from "../../hooks/usePinSession";
-import { currentPlan, planProgress, type CrewModel, type PlanProgress } from "../../lib/crew";
+import type { CrewModel } from "../../lib/crew";
 import { labelForHost } from "../../lib/host-clients";
 import { formatTokens } from "../../lib/usage-format";
 import { cn } from "../../lib/utils";
-import type { ConversationPlan, ConversationUsage } from "../../types/conversation";
+import type { ConversationUsage } from "../../types/conversation";
 import { activeTurn } from "../../types/conversation";
 import type { ControlRoomTab } from "../../stores/ui-store";
 import type { WorkspaceSession } from "../../types/workspace";
@@ -17,14 +17,13 @@ import { Button } from "../ui/button";
 import { Pressable } from "../ui/pressable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
-export const CONTROL_ROOM_TABS: readonly ControlRoomTab[] = ["session", "changes", "commits", "files", "terminal"];
+export const CONTROL_ROOM_TABS: readonly ControlRoomTab[] = ["session", "changes", "commits", "files"];
 
 const TAB_LABEL_KEYS = {
 	session: "controlRoom.tab.session",
 	changes: "controlRoom.tab.changes",
 	commits: "controlRoom.tab.commits",
 	files: "controlRoom.tab.files",
-	terminal: "controlRoom.tab.terminal",
 } as const satisfies Record<ControlRoomTab, string>;
 
 /** What each tab counts, where it has a number worth showing. */
@@ -38,8 +37,8 @@ export function controlRoomTabCounts(model: CrewModel): Partial<Record<ControlRo
 /**
  * The orchestrator's control room, above its session: the tabs that scope to one
  * agent or all of them, the actions that belong to the orchestrator itself, the
- * numbers that describe the whole project, and how far its plan has got.
- * The tab strip keeps the app's 36px; the info row and plan bar can fold away.
+ * numbers that describe the whole project.
+ * The tab strip keeps the app's 36px; the info row can fold away.
  */
 export function OrchestratorControlBar({ orchestrator }: { orchestrator: WorkspaceSession }) {
 	const { t } = useTranslation();
@@ -49,8 +48,6 @@ export function OrchestratorControlBar({ orchestrator }: { orchestrator: Workspa
 	const { snapshot } = useConversation(orchestrator.mode === "chat" ? orchestrator.id : undefined, orchestrator.hostId);
 	const [detailsOpen, setDetailsOpen] = useState(true);
 	const counts = controlRoomTabCounts(model);
-	const plan = currentPlan(snapshot);
-	const progress = planProgress(plan);
 
 	const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
 		const last = CONTROL_ROOM_TABS.length - 1;
@@ -114,10 +111,7 @@ export function OrchestratorControlBar({ orchestrator }: { orchestrator: Workspa
 				</div>
 			</div>
 			{detailsOpen ? (
-				<>
-					<InfoRow model={model} orchestrator={orchestrator} usage={snapshot?.usage} fallbackModel={snapshot?.settings.model} />
-					{progress && plan ? <PlanBar needsYou={model.needsYouCount} plan={plan} progress={progress} /> : null}
-				</>
+				<InfoRow model={model} orchestrator={orchestrator} usage={snapshot?.usage} fallbackModel={snapshot?.settings.model} />
 			) : null}
 		</div>
 	);
@@ -239,36 +233,5 @@ function UsageChunk({ locale, usage }: { locale: string; usage?: ConversationUsa
 			</TooltipTrigger>
 			<TooltipContent side="bottom">{t("controlRoom.info.usageHint")}</TooltipContent>
 		</Tooltip>
-	);
-}
-
-/** One segment per step of the orchestrator's plan, in the board's status colors. */
-function PlanBar({ needsYou, plan, progress }: { needsYou: number; plan: ConversationPlan; progress: PlanProgress }) {
-	const { t } = useTranslation();
-	const current = progress.allDone ? undefined : plan.steps[progress.activeIndex]?.text;
-	return (
-		<div className="flex items-center gap-3 px-3 pb-2" data-testid="control-plan-bar">
-			<span className="shrink-0 text-control font-medium text-foreground">{t("controlRoom.plan.title")}</span>
-			<ol aria-label={t("controlRoom.plan.aria")} className="flex min-w-0 flex-1 items-center gap-1">
-				{plan.steps.map((step, index) => (
-					<li
-						aria-label={`${step.text} — ${t(`controlRoom.plan.status.${step.status}`)}`}
-						className={cn(
-							"h-1 min-w-2 flex-1 rounded-full",
-							step.status === "completed" && "bg-status-ready",
-							step.status === "in_progress" && "bg-status-working",
-							step.status === "pending" && "bg-border-strong",
-						)}
-						data-step-status={step.status}
-						key={`${index}-${step.text}`}
-					/>
-				))}
-			</ol>
-			<span className="shrink-0 text-caption tabular-nums text-muted-foreground" data-testid="control-plan-count">
-				{t("controlRoom.plan.done", { done: progress.done, total: progress.total })}
-				{needsYou > 0 ? ` · ${t("crew.counts.needsYou", { count: needsYou })}` : ""}
-			</span>
-			{current ? <span className="hidden min-w-0 max-w-[30%] truncate text-caption text-passive @3xl:inline" title={current}>{current}</span> : null}
-		</div>
 	);
 }

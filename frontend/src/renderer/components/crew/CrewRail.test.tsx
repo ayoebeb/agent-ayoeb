@@ -351,13 +351,12 @@ describe("CrewRail", () => {
 		expect(screen.queryByTestId("crew-overlap")).toBeNull();
 	});
 
-	it("jumps to a worker's changes, commits, terminal or chat from its row", async () => {
+	it("jumps to a worker's changes, commits or chat from its row", async () => {
 		setCrew([worker({ id: "w", title: "Jira toggle" })]);
 		renderRail();
 		await userEvent.click(screen.getByRole("button", { name: "Changes of Jira toggle" }));
 		await userEvent.click(screen.getByRole("button", { name: "Commits of Jira toggle" }));
-		await userEvent.click(screen.getByRole("button", { name: "Terminal of Jira toggle" }));
-		expect(room.show.mock.calls).toEqual([["changes", "w"], ["commits", "w"], ["terminal", "w"]]);
+		expect(room.show.mock.calls).toEqual([["changes", "w"], ["commits", "w"]]);
 
 		await userEvent.click(screen.getByRole("button", { name: "Open Jira toggle" }));
 		expect(navigate).toHaveBeenCalledTimes(1);

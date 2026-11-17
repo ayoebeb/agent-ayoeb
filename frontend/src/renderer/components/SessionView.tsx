@@ -585,13 +585,13 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const sessionOffering = useCloudOffering(Boolean(session?.cloud), session?.cloud?.orgId);
 	const theme = useResolvedTheme();
 	const browserOnly = Boolean(session && isOrchestratorSession(session));
-	// Files is the one inspector view an orchestrator gains: an explorer of its
-	// own checkout of the project, with its own remembered width and open state.
+	// A local orchestrator has a control room and a rail of its own, with its own
+	// remembered width; its checkout is browsed in the control room's Files tab.
 	// A Cloud orchestrator keeps the Browser-only rail.
-	const orchestratorFiles = browserOnly && !session?.cloud;
+	const localOrchestrator = browserOnly && !session?.cloud;
 	// The control room (tabs, crew rail, project numbers) is the orchestrator's own
 	// view of its project, so a pane of sessions side by side does not carry it.
-	const controlRoom = orchestratorFiles && !pane;
+	const controlRoom = localOrchestrator && !pane;
 	const controlRoomTab = useUiStore((state) => state.controlRooms[uiSessionId]?.tab ?? "session");
 	const controlRoomCovers = controlRoom && controlRoomTab !== "session";
 	const setControlRoom = useUiStore((state) => state.setControlRoom);
@@ -1515,7 +1515,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	}, [cloudReviewIsRunning, cloudReviewerHandleId, cloudReviewerHarness, cloudReviewerTrigger, session?.cloud, sessionId]);
 	const isOrchestrator = session ? isOrchestratorSession(session) : false;
 	const hasInspector = Boolean(session) && !pane;
-	const inspectorWidthScope = orchestratorFiles ? uiSessionId : undefined;
+	const inspectorWidthScope = localOrchestrator ? uiSessionId : undefined;
 	const sizing = useMemo(() => inspectorSizing(inspectorView, inspectorWidthScope), [inspectorView, inspectorWidthScope]);
 	const browserEntryWidthFloorRef = useRef<number | null>(null);
 
@@ -1730,8 +1730,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	// only preview work arriving afterward may reveal Browser automatically.
 	useLayoutEffect(() => {
 		if (!session) return;
-		initializeInspectorSession(uiSessionId, hasBrowserContent, hasInspector, orchestratorFiles, orchestratorFiles);
-	}, [hasBrowserContent, hasInspector, orchestratorFiles, session, uiSessionId, initializeInspectorSession]);
+		initializeInspectorSession(uiSessionId, hasBrowserContent, hasInspector, localOrchestrator);
+	}, [hasBrowserContent, hasInspector, localOrchestrator, session, uiSessionId, initializeInspectorSession]);
 
 	// Keep rejecting another session's shell/reviewer handle here as well, so it
 	// can never be cached under the destination session.
@@ -2167,14 +2167,14 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	}, [clearVisibleTerminalKind, reviewerChatId, routedTerminalTarget.kind, uiSessionId, setVisibleTerminalKind]);
 
 	const prepareFilesInspector = useCallback(() => {
-		if (browserOnly && !orchestratorFiles) return;
+		if (browserOnly) return;
 		setBrowserPopOutState({ sessionId, phase: "docked" });
 		setFilesPoppedOut(false);
-		// A worker opens on its changes; an orchestrator on its whole tree.
-		setFilesChangedOnly(uiSessionId, !orchestratorFiles);
+		// A worker opens on its changes.
+		setFilesChangedOnly(uiSessionId, true);
 		transitionInspectorView("files");
 		setInspectorOpenForSession(uiSessionId, true);
-	}, [browserOnly, orchestratorFiles, sessionId, uiSessionId, setFilesChangedOnly, setInspectorOpenForSession, transitionInspectorView]);
+	}, [browserOnly, sessionId, uiSessionId, setFilesChangedOnly, setInspectorOpenForSession, transitionInspectorView]);
 
 	const fetchWorkspaceFiles = useCallback(async () => {
 		return queryClient.fetchQuery(
@@ -2940,7 +2940,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 							artifactRequest={artifactRequestsBySession[uiSessionId] ?? null}
 							onArtifactRequestConsumed={handleArtifactRequestConsumed}
 							onOpenArtifact={handleOpenArtifact}
-							onOpenFiles={browserOnly && !orchestratorFiles ? undefined : handleOpenFiles}
+							onOpenFiles={browserOnly ? undefined : handleOpenFiles}
 							onOpenReviewFile={handleOpenReviewFile}
 							onOpenReviewerTerminal={selectReviewerTerminal}
 							onOpenReviewerChat={selectReviewerChat}

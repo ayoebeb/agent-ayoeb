@@ -12,14 +12,12 @@ const NOW = Date.parse("2026-11-16T12:00:00Z");
 const MIN = 60_000;
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
-const { navigate, room, crewState, history } = vi.hoisted(() => ({
-	navigate: vi.fn(),
+const { room, crewState, history } = vi.hoisted(() => ({
 	room: { tab: "changes" as string, scope: undefined as string | undefined, setTab: vi.fn(), setScope: vi.fn(), show: vi.fn() },
 	crewState: { current: undefined as unknown },
 	history: { commits: {} as Record<string, { sha: string; subject: string; author: string; timestamp: string; files: never[] }[]> },
 }));
 
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }));
 vi.mock("../../hooks/useControlRoom", () => ({ useControlRoom: () => room }));
 vi.mock("../../hooks/useCrew", () => ({ useCrew: () => crewState.current }));
 vi.mock("../../hooks/useSessionWorkspaceFiles", () => ({
@@ -28,14 +26,8 @@ vi.mock("../../hooks/useSessionWorkspaceFiles", () => ({
 		queryFn: async () => ({ commits: history.commits[sessionId] ?? [] }),
 	}),
 }));
-vi.mock("../../lib/shell-context", () => ({ useShell: () => ({ daemonStatus: { state: "ready" } }) }));
 vi.mock("../SessionFileExplorer", () => ({
 	SessionFileExplorer: (props: { sessionId: string; isMaximized?: boolean }) => <div data-maximized={String(props.isMaximized)} data-session={props.sessionId} data-testid="explorer" />,
-}));
-vi.mock("../TerminalPane", () => ({
-	TerminalPane: (props: { session?: { id: string }; inputDisabled?: boolean }) => (
-		<div data-input-disabled={String(props.inputDisabled)} data-session={props.session?.id} data-testid="terminal-pane" />
-	),
 }));
 
 import { ControlRoomBody } from "./ControlRoomBody";
@@ -149,6 +141,37 @@ describe("ControlRoomBody changes", () => {
 		expect(useUiStore.getState().inspectorSessions[sessionUiKey("a")]?.filesChangedOnly).toBe(false);
 	});
 
+	it("offers the orchestrator's own checkout as Project on the Files tab, in the same explorer, whole tree", async () => {
+		setCrew([worker({ id: "a", title: "Jira toggle" })]);
+		room.tab = "files";
+		renderBody();
+		const bar = screen.getByTestId("control-scope-bar");
+		expect(within(bar).getAllByRole("button").map((button) => button.textContent?.trim().replace(/\s+/g, " "))).toEqual(["All agents", "Project", "Jira toggle"]);
+		await userEvent.click(within(bar).getByRole("button", { name: "Project" }));
+		expect(room.setScope).toHaveBeenCalledWith("p-orchestrator");
+	});
+
+	it("shows the orchestrator's own checkout when Project is picked", () => {
+		setCrew([worker({ id: "a" })], { a: { paths: ["x.ts"] } });
+		room.tab = "files";
+		room.scope = "p-orchestrator";
+		renderBody();
+		expect(screen.getByTestId("explorer")).toHaveAttribute("data-session", "p-orchestrator");
+		expect(within(screen.getByTestId("control-scope-bar")).getByRole("button", { name: "Project" })).toHaveAttribute("aria-pressed", "true");
+		expect(within(screen.getByTestId("control-scope-bar")).getByRole("button", { name: /All agents/ })).toHaveAttribute("aria-pressed", "false");
+		expect(useUiStore.getState().inspectorSessions[sessionUiKey("p-orchestrator")]?.filesChangedOnly).toBe(false);
+	});
+
+	it("keeps Project to the Files tab: Changes and Commits scope to workers only", () => {
+		setCrew([worker({ id: "a" })], { a: { paths: ["x.ts"] } });
+		room.tab = "changes";
+		room.scope = "p-orchestrator";
+		renderBody();
+		expect(screen.queryByRole("button", { name: "Project" })).toBeNull();
+		expect(screen.queryByTestId("explorer")).toBeNull();
+		expect(screen.getByTestId("worktree-overview")).toBeInTheDocument();
+	});
+
 	it("explains a worker that has no worktree yet instead of an empty explorer", () => {
 		setCrew([worker({ id: "a", title: "Starting", workspacePublished: false })], { a: { paths: [] } });
 		room.scope = "a";
@@ -192,45 +215,5 @@ describe("ControlRoomBody commits", () => {
 		setCrew([worker({ id: "a" })]);
 		renderBody();
 		expect(await screen.findByText("No commits yet.")).toBeInTheDocument();
-	});
-});
-
-describe("ControlRoomBody terminal", () => {
-	it("asks whose terminal to watch when no agent is picked", async () => {
-		room.tab = "terminal";
-		setCrew([worker({ id: "a", title: "Jira toggle" }), worker({ id: "b", title: "Anchors", mode: "chat" })]);
-		renderBody();
-		const list = screen.getByTestId("choose-agent");
-		expect(within(list).getAllByRole("button").map((button) => button.textContent)).toEqual(["Jira toggleTerminal", "AnchorsChat"]);
-		await userEvent.click(within(list).getByRole("button", { name: /Anchors/ }));
-		expect(room.setScope).toHaveBeenCalledWith("b");
-	});
-
-	it("watches a terminal agent with typing off until the person takes over", async () => {
-		room.tab = "terminal";
-		room.scope = "a";
-		setCrew([worker({ id: "a", title: "Jira toggle" })]);
-		renderBody();
-		expect(screen.getByTestId("terminal-pane")).toHaveAttribute("data-session", "a");
-		expect(screen.getByTestId("terminal-pane")).toHaveAttribute("data-input-disabled", "true");
-		expect(screen.getByTestId("terminal-mode")).toHaveTextContent("Watching");
-
-		await userEvent.click(screen.getByRole("button", { name: "Take over" }));
-		expect(screen.getByTestId("terminal-pane")).toHaveAttribute("data-input-disabled", "false");
-		expect(screen.getByTestId("terminal-mode")).toHaveTextContent("You are typing");
-
-		await userEvent.click(screen.getByRole("button", { name: "Stop typing" }));
-		expect(screen.getByTestId("terminal-pane")).toHaveAttribute("data-input-disabled", "true");
-	});
-
-	it("says a chat agent has no terminal and offers its session, instead of hiding the tab", async () => {
-		room.tab = "terminal";
-		room.scope = "b";
-		setCrew([worker({ id: "b", title: "Anchors", mode: "chat" })]);
-		renderBody();
-		expect(screen.queryByTestId("terminal-pane")).toBeNull();
-		expect(screen.getByTestId("control-room-empty")).toHaveTextContent("Anchors works in chat, so it has no terminal of its own.");
-		await userEvent.click(screen.getByRole("button", { name: "Open session" }));
-		expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ projectId: "p", sessionId: "b" }) }));
 	});
 });

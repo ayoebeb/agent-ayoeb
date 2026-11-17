@@ -391,16 +391,16 @@ afterEach(() => {
 });
 
 describe("SessionInspector tabs", () => {
-  it("gives an orchestrator Crew, Summary, Files and Browser, with its account but no branch", () => {
+  it("gives an orchestrator Crew, Summary and Browser, with its account but no branch", () => {
     renderWithQuery(<SessionInspector orchestrator session={session([], { kind: "orchestrator" })} />);
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Files", "Browser"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser"]);
     expect(screen.getByTestId("session-account-summary")).toBeInTheDocument();
     expect(screen.queryByTestId("inspector-branch")).not.toBeInTheDocument();
   });
 
   it("gives a remote orchestrator the same tabs without a local account", () => {
     renderWithQuery(<SessionInspector orchestrator hostId="box-a" session={session([], { kind: "orchestrator", hostId: "box-a" })} />);
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Files", "Browser"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser"]);
     expect(screen.queryByTestId("session-account-summary")).not.toBeInTheDocument();
   });
 
@@ -430,16 +430,13 @@ describe("SessionInspector tabs", () => {
     expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens an orchestrator's Files tab through the host", async () => {
-    const onOpenFiles = vi.fn();
-    const onViewChange = vi.fn();
-    renderWithQuery(<SessionInspector orchestrator onOpenFiles={onOpenFiles} onViewChange={onViewChange} session={session([], { kind: "orchestrator" })} />);
-    await userEvent.click(screen.getByRole("tab", { name: "Files" }));
-    expect(onViewChange).toHaveBeenCalledWith("files");
-    expect(onOpenFiles).toHaveBeenCalledTimes(1);
+  it("has no Files tab for an orchestrator, and falls back from a stored Files view", () => {
+    renderWithQuery(<SessionInspector orchestrator session={session([], { kind: "orchestrator" })} view="files" />);
+    expect(screen.queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("shows an orchestrator's direct and rendered HTML artifacts beside Summary, Files and Browser", async () => {
+  it("shows an orchestrator's direct and rendered HTML artifacts beside Summary and Browser", async () => {
     vi.stubGlobal("IntersectionObserver", class {
       observe() {}
       unobserve() {}
@@ -453,7 +450,7 @@ describe("SessionInspector tabs", () => {
       ],
     })} />);
 
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Crew", "Summary", "Files", "Browser", "Artifacts"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Crew", "Summary", "Browser", "Artifacts"]);
     expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByRole("tab", { name: "Artifacts" }));
     expect(screen.getByText("direct.html")).toBeInTheDocument();

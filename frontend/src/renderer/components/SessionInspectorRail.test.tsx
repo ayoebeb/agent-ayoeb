@@ -6,9 +6,8 @@ import { INSPECTOR_SPRING_MS, SessionInspectorRail, inspectorSizing } from "./Se
 vi.mock("motion/react", () => ({ useReducedMotion: () => false }));
 
 describe("inspectorSizing width scope", () => {
-	it("gives a scoped session a narrow Files explorer and its own utility width, and keeps Browser shared", () => {
+	it("gives a scoped session its own utility width, and keeps Browser shared", () => {
 		expect(inspectorSizing("files")).toMatchObject({ defaultWidth: 500, minWidth: 460, storageKey: "ao.inspector.widthPx" });
-		expect(inspectorSizing("files", "orch")).toMatchObject({ defaultWidth: 300, minWidth: 240, mode: "files", storageKey: "ao.inspector.filesWidthPx:orch" });
 		expect(inspectorSizing("summary", "orch")).toMatchObject({ defaultWidth: 500, storageKey: "ao.inspector.widthPx:orch" });
 		expect(inspectorSizing("browser", "orch")).toEqual(inspectorSizing("browser"));
 	});

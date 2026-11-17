@@ -1,25 +1,18 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useQueries } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { GitBranch, Users } from "@/components/app-icons";
+import { Folder, GitBranch, Users } from "@/components/app-icons";
 import { useControlRoom, type ControlRoom } from "../../hooks/useControlRoom";
 import { useCrew } from "../../hooks/useCrew";
 import { sessionWorkspaceHistoryQueryOptions } from "../../hooks/useSessionWorkspaceFiles";
 import { sessionUiKey } from "../../lib/hosts";
-import { useShell } from "../../lib/shell-context";
-import { initialTerminalFontSize } from "../../lib/terminal-font-size";
 import { scopedRow, type CrewModel, type CrewRow } from "../../lib/crew";
-import { sessionNavigateTarget } from "../../lib/navigate-to-session";
 import { getSessionStatusDotView } from "../../lib/session-presentation";
 import { formatRelativeTime } from "../../lib/usage-format";
 import { cn } from "../../lib/utils";
-import { useResolvedTheme, useUiStore } from "../../stores/ui-store";
+import { useUiStore } from "../../stores/ui-store";
 import type { ProjectKind, WorkspaceSession } from "../../types/workspace";
-import { AgentAvatar } from "../AgentAvatar";
 import { SessionFileExplorer } from "../SessionFileExplorer";
-import { TerminalPane } from "../TerminalPane";
-import { Button } from "../ui/button";
 import { Pressable } from "../ui/pressable";
 import { shortBranch } from "./CrewRail";
 
@@ -29,39 +22,36 @@ import { shortBranch } from "./CrewRail";
  * rail, so a number here is the number there.
  */
 export function ControlRoomBody({ orchestrator, projectKind }: { orchestrator: WorkspaceSession; projectKind?: ProjectKind }) {
-	const { t } = useTranslation();
 	const room = useControlRoom(orchestrator);
 	const { model, now } = useCrew(orchestrator, true);
 	const live = model.rows.filter((row) => row.group !== "done");
 	const scoped = scopedRow(model, room.scope);
+	// The orchestrator's own checkout is one more place in the Files tab, beside the worktrees.
+	const project = room.tab === "files" && room.scope === orchestrator.id;
 	return (
 		<div className="absolute inset-0 z-10 flex min-h-0 flex-col bg-background" data-testid="control-room-body" role="tabpanel">
-			<ScopeBar model={model} room={room} rows={live} />
+			<ScopeBar model={model} orchestrator={orchestrator} project={project} room={room} rows={live} />
 			<div className="min-h-0 flex-1" data-testid={`control-room-${room.tab}`}>
 				{room.tab === "changes" || room.tab === "files" ? (
-					scoped ? (
-						<ScopedExplorer key={`${room.tab}:${scoped.session.id}`} mode={room.tab} orchestrator={orchestrator} projectKind={projectKind} row={scoped} />
+					project ? (
+						<ScopedExplorer key={`files:${orchestrator.id}`} mode="files" orchestrator={orchestrator} projectKind={projectKind} session={orchestrator} />
+					) : scoped ? (
+						<ScopedExplorer key={`${room.tab}:${scoped.session.id}`} mode={room.tab} orchestrator={orchestrator} projectKind={projectKind} session={scoped.session} />
 					) : (
 						<WorktreeOverview model={model} onScope={(id) => room.setScope(id)} rows={live} />
 					)
 				) : room.tab === "commits" ? (
 					<CommitsTab now={now.getTime()} orchestrator={orchestrator} rows={scoped ? [scoped] : live} />
-				) : room.tab === "terminal" ? (
-					scoped ? (
-						<ScopedTerminal key={scoped.session.id} orchestrator={orchestrator} row={scoped} />
-					) : (
-						<ChooseAgent onScope={(id) => room.setScope(id)} rows={live} title={t("controlRoom.terminal.choose")} />
-					)
 				) : null}
 			</div>
 		</div>
 	);
 }
 
-/** All agents, or one. The choice stays when the tab changes. */
-function ScopeBar({ model, room, rows }: { model: CrewModel; room: ControlRoom; rows: CrewRow[] }) {
+/** All agents, or one; on Files also the orchestrator's own checkout. The choice stays when the tab changes. */
+function ScopeBar({ model, orchestrator, project, room, rows }: { model: CrewModel; orchestrator: WorkspaceSession; project: boolean; room: ControlRoom; rows: CrewRow[] }) {
 	const { t } = useTranslation();
-	const all = room.scope === undefined || !rows.some((row) => row.session.id === room.scope);
+	const all = !project && (room.scope === undefined || !rows.some((row) => row.session.id === room.scope));
 	return (
 		// Wraps instead of scrolling: a chip cut off at the edge hides who is in scope,
 		// and a project rarely has more than two rows of workers.
@@ -71,6 +61,12 @@ function ScopeBar({ model, room, rows }: { model: CrewModel; room: ControlRoom; 
 				<span>{t("controlRoom.scope.all")}</span>
 				{model.totals.worktrees > 0 ? <Diff additions={model.totals.additions} deletions={model.totals.deletions} /> : null}
 			</ScopeChip>
+			{room.tab === "files" ? (
+				<ScopeChip active={project} onClick={() => room.setScope(orchestrator.id)}>
+					<Folder aria-hidden="true" className="size-icon-sm shrink-0" />
+					<span>{t("controlRoom.scope.project")}</span>
+				</ScopeChip>
+			) : null}
 			{rows.map((row) => {
 				const dot = getSessionStatusDotView(row.session);
 				return (
@@ -160,29 +156,29 @@ function WorktreeOverview({ model, onScope, rows }: { model: CrewModel; onScope:
 }
 
 /**
- * One agent's changes or files, in the explorer the Files view already is. The
+ * One agent's (or the orchestrator's own) changes or files, in the explorer the Files view already is. The
  * explorer remembers "changes only" per session, so this tab sets it for its own
  * purpose and leaves the choice to the explorer's own toggle afterwards.
  */
-function ScopedExplorer({ mode, orchestrator, projectKind, row }: { mode: "changes" | "files"; orchestrator: WorkspaceSession; projectKind?: ProjectKind; row: CrewRow }) {
+function ScopedExplorer({ mode, orchestrator, projectKind, session }: { mode: "changes" | "files"; orchestrator: WorkspaceSession; projectKind?: ProjectKind; session: WorkspaceSession }) {
 	const { t } = useTranslation();
 	const setFilesChangedOnly = useUiStore((state) => state.setFilesChangedOnly);
 	const hostId = orchestrator.hostId;
-	const uiKey = sessionUiKey(row.session.id, hostId);
+	const uiKey = sessionUiKey(session.id, hostId);
 	useEffect(() => {
 		setFilesChangedOnly(uiKey, mode === "changes");
 	}, [mode, setFilesChangedOnly, uiKey]);
-	if (!row.session.workspacePublished && row.session.workspacePublished !== undefined) {
-		return <EmptyState>{t("controlRoom.workspacePending", { name: row.session.title })}</EmptyState>;
+	if (!session.workspacePublished && session.workspacePublished !== undefined) {
+		return <EmptyState>{t("controlRoom.workspacePending", { name: session.title })}</EmptyState>;
 	}
 	return (
 		<div className="h-full min-h-0" data-testid="scoped-explorer">
 			<SessionFileExplorer
-				checkedOutBranch={row.session.branch}
+				checkedOutBranch={session.branch}
 				hostId={hostId}
 				isMaximized
 				projectKind={projectKind}
-				sessionId={row.session.id}
+				sessionId={session.id}
 			/>
 		</div>
 	);
@@ -239,89 +235,6 @@ function CommitsTab({ now, orchestrator, rows }: { now: number; orchestrator: Wo
 					</section>
 				);
 			})}
-		</div>
-	);
-}
-
-/**
- * The agent's own terminal, watched. Typing is off until the person takes over, so
- * a glance at a worker can never type into it by accident. A chat agent has no
- * terminal of its own; it says so and offers its chat. A shell in the worker's
- * worktree is not wired up yet.
- */
-function ScopedTerminal({ orchestrator, row }: { orchestrator: WorkspaceSession; row: CrewRow }) {
-	const { t } = useTranslation();
-	const navigate = useNavigate();
-	const { daemonStatus } = useShell();
-	const theme = useResolvedTheme();
-	const [takenOver, setTakenOver] = useState(false);
-	const { session } = row;
-	const openSession = () => void navigate(sessionNavigateTarget(session.workspaceId, session.id, orchestrator.hostId));
-	if (session.mode === "chat" || orchestrator.hostId) {
-		return (
-			<EmptyState>
-				<p>{t(session.mode === "chat" ? "controlRoom.terminal.chatAgent" : "controlRoom.terminal.remote", { name: session.title })}</p>
-				<Button onClick={openSession} size="sm" variant="secondary">{t("controlRoom.terminal.openSession")}</Button>
-			</EmptyState>
-		);
-	}
-	return (
-		<div className="flex h-full min-h-0 flex-col" data-testid="scoped-terminal">
-			<div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
-				<AgentAvatar className="size-4 shrink-0" decorative provider={session.provider} />
-				<span className="min-w-0 truncate text-control font-medium text-foreground">{session.title}</span>
-				<span className="text-caption text-passive" data-testid="terminal-mode">
-					{takenOver ? t("controlRoom.terminal.typing") : t("controlRoom.terminal.watching")}
-				</span>
-				<Button
-					aria-pressed={takenOver}
-					className="ml-auto"
-					onClick={() => setTakenOver((current) => !current)}
-					size="xs"
-					variant={takenOver ? "secondary" : "primary"}
-				>
-					{takenOver ? t("controlRoom.terminal.stopTakeOver") : t("controlRoom.terminal.takeOver")}
-				</Button>
-			</div>
-			<div className="min-h-0 flex-1">
-				<TerminalPane
-					daemonReady={daemonStatus.state === "ready"}
-					focusRequested={takenOver}
-					fontSize={initialTerminalFontSize()}
-					inputDisabled={!takenOver}
-					session={session}
-					terminalGeneration={session.terminalGeneration}
-					terminalTarget={{ kind: "worker" }}
-					theme={theme}
-				/>
-			</div>
-		</div>
-	);
-}
-
-/** The terminal tab with no agent picked: choose whose to watch. */
-function ChooseAgent({ onScope, rows, title }: { onScope: (sessionId: string) => void; rows: CrewRow[]; title: string }) {
-	const { t } = useTranslation();
-	if (rows.length === 0) return <EmptyState>{t("crew.empty")}</EmptyState>;
-	return (
-		<div className="board-scrollbar h-full overflow-y-auto pb-4" data-testid="choose-agent">
-			<h2 className="px-3 pb-1 pt-3 text-caption text-muted-foreground">{title}</h2>
-			<ul className="flex flex-col divide-y divide-border">
-				{rows.map((row) => (
-					<li key={row.session.id}>
-						<Pressable
-							className="flex w-full items-center gap-2 px-3 py-2 text-control text-foreground hover:bg-interactive-hover focus-visible:outline-2 focus-visible:outline-ring"
-							onClick={() => onScope(row.session.id)}
-						>
-							<AgentAvatar className="size-4 shrink-0" decorative provider={row.session.provider} />
-							<span className="min-w-0 flex-1 truncate">{row.session.title}</span>
-							<span className="shrink-0 text-caption text-passive">
-								{row.session.mode === "chat" ? t("controlRoom.terminal.kindChat") : t("controlRoom.terminal.kindTerminal")}
-							</span>
-						</Pressable>
-					</li>
-				))}
-			</ul>
 		</div>
 	);
 }

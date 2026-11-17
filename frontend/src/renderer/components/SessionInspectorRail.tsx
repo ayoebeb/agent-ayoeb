@@ -23,9 +23,8 @@ export type InspectorSizing = {
 
 /**
  * `widthScope` gives one session its own rail widths instead of the width
- * shared by every other session: Files becomes a narrow explorer, like an
- * editor's side bar, and Summary and Artifacts keep a width of their own. The
- * Browser canvas width stays shared either way.
+ * shared by every other session: Summary and Artifacts keep a width of their
+ * own. The Browser canvas width stays shared either way.
  */
 export function inspectorSizing(view: InspectorView, widthScope?: string): InspectorSizing {
 	if (view === "browser") return {
@@ -35,14 +34,6 @@ export function inspectorSizing(view: InspectorView, widthScope?: string): Inspe
 		maxPercent: 68,
 		mode: "browser",
 		storageKey: "ao.workspace.browser.canvasWidthPx",
-	};
-	if (view === "files" && widthScope) return {
-		chatMinWidth: 560,
-		defaultWidth: 300,
-		minWidth: 240,
-		maxPercent: 55,
-		mode: "files",
-		storageKey: `ao.inspector.filesWidthPx:${widthScope}`,
 	};
 	return {
 		chatMinWidth: 560,
