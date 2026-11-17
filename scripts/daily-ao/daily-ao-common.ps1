@@ -534,7 +534,7 @@ function Update-Builds($cfg, [hashtable]$State, [switch]$ForceDaemon) {
 	}
 	# Both are idempotent and return quickly when their output is current.
 	Invoke-Checked -Exe 'node' -Arguments @('scripts/ensure-browser-runtime.mjs') -WorkingDirectory $cfg.Frontend -LogFile $log
-	Invoke-Checked -Exe 'node' -Arguments @('scripts/build-acp-runtime.mjs') -WorkingDirectory $cfg.Frontend -LogFile $log
+	Invoke-Checked -Exe 'node' -Arguments @('scripts/build-acp-runtime.mjs', '--dev') -WorkingDirectory $cfg.Frontend -LogFile $log
 	Write-Ok 'builds actueel'
 }
 
