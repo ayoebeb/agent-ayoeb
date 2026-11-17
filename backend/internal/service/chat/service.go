@@ -108,6 +108,9 @@ type Service struct {
 	autoResumeInFlight    map[string]bool
 	autoResumeScanning    bool
 	usageLimitAccounts    usageLimitAccountReader
+	// usageLimitIntent tells the usage-limit watcher what the person chose for a
+	// stopped turn, so AO's automatic resume never doubles their own choice.
+	usageLimitIntent func(ctx context.Context, turnID string, retryArmed bool)
 	// updateStops are sessions stopped so an update could replace their
 	// executable; the update starts them again, so their queue is kept.
 	updateStops map[domain.SessionID]bool

@@ -13935,6 +13935,44 @@ paths:
       summary: Choose how long archived sessions are kept before they are deleted
       tags:
       - settings
+  /api/v1/settings/usage-limit-resume:
+    patch:
+      operationId: updateUsageLimitResume
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUsageLimitResumeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Choose whether AO continues sessions after a usage limit resets, and
+        how many at once
+      tags:
+      - settings
   /api/v1/settings/version-refresh:
     patch:
       operationId: updateVersionRefresh
@@ -17876,6 +17914,7 @@ components:
           - Exited
           - No signal
           - Interrupted
+          - Usage limit
           - Awaiting PR
           - Fixing CI failures
           - Addressing comments
@@ -18039,6 +18078,7 @@ components:
           - idle
           - terminated
           - no_signal
+          - usage_limit
           type: string
         statusReadiness:
           enum:
@@ -18057,6 +18097,8 @@ components:
         updatedAt:
           format: date-time
           type: string
+        usageLimit:
+          $ref: '#/components/schemas/SessionUsageLimit'
         workspaceCleanup:
           enum:
           - pending
@@ -22226,7 +22268,14 @@ components:
         at:
           format: date-time
           type: string
+        error:
+          description: Why a failed turn failed, such as a usage-limit message.
+          type: string
         harness:
+          type: string
+        state:
+          description: 'The turn''s state when it did not complete: failed, interrupted
+            or running.'
           type: string
         userRequest:
           type: string
@@ -22881,6 +22930,52 @@ components:
       - startedAt
       - failed
       type: object
+    SessionUsageLimit:
+      properties:
+        message:
+          description: The provider's message for the stop.
+          type: string
+        resetsAt:
+          description: When the limit window resets; absent when unknown.
+          format: date-time
+          type:
+          - "null"
+          - string
+        resume:
+          description: 'What AO will do: continue after the reset (scheduled), wait
+            for a free resume slot (waiting), or leave it alone (off).'
+          enum:
+          - scheduled
+          - waiting
+          - "off"
+          type: string
+        resumeOffReason:
+          description: Why AO will not continue the session by itself.
+          enum:
+          - disabled
+          - unknown_reset
+          - cancelled
+          - retry_scheduled
+          - repeated
+          - unavailable
+          type: string
+        stoppedAt:
+          description: When the turn stopped.
+          format: date-time
+          type: string
+        turnId:
+          description: The turn that stopped on the limit.
+          type: string
+        window:
+          description: The limit that was hit, in the provider's words, such as 5-hour
+            or weekly.
+          type: string
+      required:
+      - turnId
+      - message
+      - stoppedAt
+      - resume
+      type: object
     SessionWait:
       properties:
         reason:
@@ -23273,6 +23368,14 @@ components:
           type: integer
         trackerIntakeEnabled:
           type: boolean
+        usageLimitAutoResume:
+          description: When a session stops on the provider's usage limit, AO continues
+            it after the limit resets.
+          type: boolean
+        usageLimitMaxResumes:
+          description: How many sessions AO continues at once after a usage limit
+            resets, so they do not all spend the next window together.
+          type: integer
         versionRefresh:
           description: After a harness update, idle open sessions restart on the new
             release instead of running the old one until they happen to restart.
@@ -23286,6 +23389,8 @@ components:
       - versionRefresh
       - computerUse
       - sessionRetentionDays
+      - usageLimitAutoResume
+      - usageLimitMaxResumes
       - orchestratorWaitingEnabled
       - orchestratorWaitingRenotifyMinutes
       - cloudEnabled
@@ -24692,6 +24797,24 @@ components:
           type: string
       required:
       - title
+      type: object
+    UpdateUsageLimitResumeRequest:
+      properties:
+        enabled:
+          description: Continue sessions stopped on a usage limit once it resets.
+          type:
+          - "null"
+          - boolean
+        maxConcurrent:
+          description: Most continued turns that run at once.
+          maximum: 10
+          minimum: 1
+          type:
+          - "null"
+          - integer
+      required:
+      - enabled
+      - maxConcurrent
       type: object
     UpdateVersionRefreshRequest:
       properties:

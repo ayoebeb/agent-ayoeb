@@ -38,6 +38,10 @@ const (
 	StatusIdle       SessionStatus = "idle"
 	StatusTerminated SessionStatus = "terminated"
 	StatusNoSignal   SessionStatus = "no_signal"
+	// StatusUsageLimit marks an idle session whose latest turn stopped on the
+	// provider's usage limit. It is not idle: the agent cannot continue until
+	// the limit window resets, and AO may resume it then.
+	StatusUsageLimit SessionStatus = "usage_limit"
 )
 
 // SessionFacts are the durable-agnostic facts used to derive session status.
@@ -47,6 +51,9 @@ type SessionFacts struct {
 	HasSignal      bool
 	SignalExpected bool
 	IsTerminated   bool
+	// UsageLimited reports that the latest turn settled on a provider usage
+	// limit. It only speaks while the agent is idle: a new turn supersedes it.
+	UsageLimited bool
 }
 
 // CIState is the aggregate CI state of a pull request.
@@ -124,6 +131,12 @@ func DeriveStatus(
 		return StatusExited
 	case ActivityWaitingInput, ActivityBlocked:
 		return StatusNeedsInput
+	}
+
+	// A limit-stopped worker cannot act on CI or review feedback, so the limit
+	// explains the session better than the pull request status does.
+	if session.UsageLimited {
+		return StatusUsageLimit
 	}
 
 	if scmStatus := DeriveSCMStatus(prs); scmStatus != "" {

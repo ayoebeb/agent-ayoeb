@@ -39,7 +39,11 @@ type AppSettings struct {
 	// OrchestratorWaitingRenotifyMinutes is how long a question stays unanswered
 	// before it is announced a second time; 0 turns the reminder off.
 	OrchestratorWaitingRenotifyMinutes int
-	UpdatedAt                          time.Time
+	// UsageLimitAutoResume continues sessions stopped on a usage limit once the
+	// window resets; UsageLimitMaxResumes caps how many continued turns run at once.
+	UsageLimitAutoResume bool
+	UsageLimitMaxResumes int
+	UpdatedAt            time.Time
 }
 
 // GetAppSettings reads the preference row.
@@ -56,13 +60,14 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 		HarnessDefaults: defaults,
 		// Normalized on read: a value written by a build that knows a mode this
 		// one does not must still resolve to something dispatchable.
-		DefaultSessionMode:   domain.NormalizeSessionMode(row.DefaultSessionMode),
-		VersionRefresh:       row.VersionRefresh,
-		ComputerUse:          row.ComputerUse,
-		SessionRetentionDays: int(row.SessionRetentionDays),
-
+		DefaultSessionMode:                 domain.NormalizeSessionMode(row.DefaultSessionMode),
+		VersionRefresh:                     row.VersionRefresh,
+		ComputerUse:                        row.ComputerUse,
+		SessionRetentionDays:               int(row.SessionRetentionDays),
 		OrchestratorWaitingEnabled:         row.OrchestratorWaitingEnabled != 0,
 		OrchestratorWaitingRenotifyMinutes: int(row.OrchestratorWaitingRenotifyMinutes),
+		UsageLimitAutoResume:               row.UsageLimitAutoResume,
+		UsageLimitMaxResumes:               int(row.UsageLimitMaxResumes),
 		UpdatedAt:                          row.UpdatedAt,
 	}, nil
 }

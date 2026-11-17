@@ -74,6 +74,7 @@ import {
 	hasConfiguredOrchestratorAgent,
 	newestActiveOrchestrator,
 	openPRs,
+	type SessionUsageLimit,
 	type WorkspaceSession,
 	type WorkspaceSummary,
 	sortedWorkerSessions,
@@ -90,6 +91,7 @@ import {
 	sessionNeedsInput,
 	type SessionRowMarker,
 } from "../lib/session-presentation";
+import { formatUsageLimitReset } from "../lib/usage-limit";
 import { useCopyToClipboard, useSessionMenuEntries } from "./SessionContextMenuItems";
 import { dropdownMenuKit, MenuEntries, MenuKitContext, type MenuEntry } from "./menu-model";
 import { isArchivedSession } from "../lib/standalone-archive";
@@ -811,7 +813,20 @@ const SESSION_MARKER_ICONS = {
 	review: { Icon: CircleAlert, tone: "text-status-in-review" },
 	// Done, so it sits a step below the colours that ask something of you.
 	merged: { Icon: GitMerge, tone: "text-status-merged opacity-70" },
+	// Paused, not failed: the caution tone DESIGN.md gives review/caution states.
+	limit: { Icon: Gauge, tone: "text-status-in-review" },
 } as const satisfies Record<SessionRowMarker, { Icon: unknown; tone: string }>;
+
+// A limit-stopped session says when it can run again, next to its title.
+function UsageLimitRowLabel({ usageLimit }: { usageLimit: SessionUsageLimit }) {
+	const { t } = useTranslation();
+	const time = formatUsageLimitReset(usageLimit.resetsAt);
+	return (
+		<span className="shrink-0 text-2xs text-status-in-review" data-session-usage-limit="">
+			{time ? t("sidebar.usageLimit.resets", { time }) : t("sidebar.usageLimit.resetUnknown")}
+		</span>
+	);
+}
 
 function SessionMarkerIcon({ marker, popped, onPopEnd, ...rest }: {
 	marker: SessionRowMarker;
@@ -3223,6 +3238,7 @@ const SessionRow = memo(function SessionRow({
 								>
 									{session.title}
 								</span>
+								{session.usageLimit ? <UsageLimitRowLabel usageLimit={session.usageLimit} /> : null}
 								{hostLabel ? <Badge variant="outline" className="h-4 min-w-0 max-w-1/2 shrink justify-start px-1.5 text-2xs"><span className="truncate">{hostLabel}</span></Badge> : null}
 							</span>
 						</Pressable>

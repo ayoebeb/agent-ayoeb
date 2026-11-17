@@ -538,11 +538,12 @@ func TestBuildSystemPrompt_WorkersNeverGetCommunicationStyle(t *testing.T) {
 // injected into every orchestrator, so growth should be a deliberate choice.
 func TestCommunicationStylePromptStaysShort(t *testing.T) {
 	style := orchestratorCommunicationStylePrompt()
-	// 560 holds the rule that makes the human's main contact audible
-	// (`ao notify-user`) on top of the earlier additions; anything beyond that is a
-	// deliberate choice.
-	if words := len(strings.Fields(style)); words > 560 {
-		t.Fatalf("communication style grew to %d words; keep it under 560", words)
+	// 590 holds the rule that makes the human's main contact audible
+	// (`ao notify-user`) and the usage-limit rule (check a worker's last turn
+	// error before calling it stalled) on top of the earlier additions; anything
+	// beyond that is a deliberate choice.
+	if words := len(strings.Fields(style)); words > 590 {
+		t.Fatalf("communication style grew to %d words; keep it under 590", words)
 	}
 	if strings.Contains(strings.ToLower(style), "adhd") {
 		t.Fatalf("the style must not name the reader's condition:\n%s", style)

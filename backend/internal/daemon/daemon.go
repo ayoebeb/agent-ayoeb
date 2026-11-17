@@ -86,6 +86,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systeminstall"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/terminaltitle"
 	usagesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/usage"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/usagelimit"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -98,6 +99,10 @@ import (
 const usageReconcileTick = 3 * time.Minute
 
 const chatHibernateSweepTick = 30 * time.Second
+
+// usageLimitSweepEvery is how often the usage-limit watcher looks for new stops
+// and a due resume. Resumes are further spaced by the watcher's own stagger.
+const usageLimitSweepEvery = 5 * time.Second
 
 // workspaceCleanupSweepTick paces the terminated-session cleanup reconcile.
 // Its work is retry and bookkeeping, not anything a user waits on.
@@ -810,6 +815,27 @@ func Run(buildVersion string) error {
 		Delivery: reportSemanticDelivery{chat: chatSvc, sessions: reportSessions, store: store},
 	})
 	chatSvc.SetReportCoordinator(reportCoordinator)
+	// A turn that stops on the provider's usage limit is followed up exactly once:
+	// the orchestrator is told, the person gets one notification per account and
+	// window, and the session is continued after the reset (staggered and capped).
+	usageLimitSvc := usagelimit.New(usagelimit.Deps{
+		Store:    store,
+		Settings: settingsSvc,
+		Accounts: usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID},
+		Notifier: notificationWriter,
+		Reporter: usageLimitReporter{reports: reportSvc},
+		Sender:   usageLimitSender{sessions: reportSessions},
+		Logger:   log,
+	})
+	chatSvc.SetUsageLimitResumeIntent(func(intentCtx context.Context, turnID string, retryArmed bool) {
+		reason := domain.UsageLimitOffCancelled
+		if retryArmed {
+			reason = domain.UsageLimitOffRetryArmed
+		}
+		if _, err := store.SkipUsageLimitStop(intentCtx, turnID, reason); err != nil {
+			log.Warn("record usage-limit resume choice", "turn", turnID, "err", err)
+		}
+	})
 	chatSvc.SetHumanReplyObserver(orchestratorWaiting)
 	reportDeliveryDone := reportCoordinator.Start(ctx)
 	defer func() {
@@ -1493,6 +1519,17 @@ func Run(buildVersion string) error {
 				case <-ticker.C:
 				}
 			}
+		}()
+		go func() {
+			defer sentryobs.RecoverBackground()
+			// Recovery first, like the scheduled retries above: a stop is only
+			// continued once the session's provider work has been reattached.
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return
+			}
+			usageLimitSvc.Run(ctx, usageLimitSweepEvery)
 		}()
 		go func() {
 			defer sentryobs.RecoverBackground()

@@ -75,6 +75,9 @@ type sessionDTO struct {
 	// WorkspaceCleanup is the recorded teardown outcome of a terminated
 	// session's workspace, empty when none has been recorded.
 	WorkspaceCleanup string `json:"workspaceCleanup,omitempty"`
+	// UsageLimit is present while the latest turn is stopped on the provider's
+	// quota, so a limit stop does not read as a plain idle session.
+	UsageLimit *sessionUsageLimitDTO `json:"usageLimit,omitempty"`
 }
 
 type sessionArtifactDTO struct {
@@ -213,6 +216,8 @@ type sessionListEntry struct {
 	LastActivityAt *time.Time      `json:"lastActivityAt,omitempty"`
 	CreatedAt      time.Time       `json:"createdAt"`
 	UpdatedAt      time.Time       `json:"updatedAt"`
+	// UsageLimit is present for a session stopped on the provider's usage limit.
+	UsageLimit *sessionUsageLimitDTO `json:"usageLimit,omitempty"`
 }
 
 type sessionListPR struct {
@@ -1022,6 +1027,7 @@ func sessionListEntries(sessions []sessionDTO, summaries map[string][]sessionPRS
 			LastActivityAt: last,
 			CreatedAt:      sess.CreatedAt,
 			UpdatedAt:      sess.UpdatedAt,
+			UsageLimit:     sess.UsageLimit,
 		})
 	}
 	return entries
@@ -1096,7 +1102,7 @@ func writeSessionList(cmd *cobra.Command, sessions []sessionDTO, summaries map[s
 				}
 			}
 			pr, ci, review, threads := sessionPRColumns(sess, summaries[sess.ID])
-			if _, err := fmt.Fprintf(table, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sess.ID, sessionRole(sess), emptyDash(sess.Branch), pr, ci, review, threads, emptyDash(sess.Activity.State), sessionAge(now, sess.Activity.LastActivityAt)); err != nil {
+			if _, err := fmt.Fprintf(table, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sess.ID, sessionRole(sess), emptyDash(sess.Branch), pr, ci, review, threads, sessionActivityColumn(sess), sessionAge(now, sess.Activity.LastActivityAt)); err != nil {
 				return err
 			}
 		}
@@ -1176,6 +1182,11 @@ func writeSessionDetails(cmd *cobra.Command, sess sessionDTO) error {
 			continue
 		}
 		if _, err := fmt.Fprintf(out, "%s: %s\n", field[0], field[1]); err != nil {
+			return err
+		}
+	}
+	if sess.UsageLimit != nil {
+		if _, err := fmt.Fprintf(out, "usage limit: %s\n", sess.UsageLimit.detailLine()); err != nil {
 			return err
 		}
 	}

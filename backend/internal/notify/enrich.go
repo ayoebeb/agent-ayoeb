@@ -3,6 +3,7 @@ package notify
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
@@ -20,7 +21,7 @@ func enrich(intent Intent) (domain.NotificationRecord, error) {
 	if !intent.Type.Valid() {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationType
 	}
-	if intent.Type != domain.NotificationNeedsInput && intent.Type != domain.NotificationOrchestratorWaiting && rec.PRURL == "" {
+	if intent.Type != domain.NotificationNeedsInput && intent.Type != domain.NotificationOrchestratorWaiting && intent.Type != domain.NotificationUsageLimit && rec.PRURL == "" {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationRecord
 	}
 	rec.Title = titleForIntent(intent)
@@ -51,6 +52,8 @@ func titleForIntent(intent Intent) string {
 		return fmt.Sprintf("Review complete for %s", prLabel(intent))
 	case domain.NotificationReviewChangesRequested:
 		return fmt.Sprintf("Review found changes for %s", prLabel(intent))
+	case domain.NotificationUsageLimit:
+		return usageLimitTitle(intent)
 	case domain.NotificationOrchestratorWaiting:
 		return OrchestratorWaitingTitle(intent.ProjectName, string(intent.ProjectID))
 	default:
@@ -111,6 +114,8 @@ func bodyForIntent(intent Intent) string {
 		return "Orchestrator finished reviewing this pull request and approved it."
 	case domain.NotificationReviewChangesRequested:
 		return "Orchestrator finished reviewing this pull request and found changes to address."
+	case domain.NotificationUsageLimit:
+		return usageLimitBody(intent)
 	case domain.NotificationOrchestratorWaiting:
 		if detail := strings.TrimSpace(intent.Detail); detail != "" {
 			return detail
@@ -119,6 +124,42 @@ func bodyForIntent(intent Intent) string {
 	default:
 		return ""
 	}
+}
+
+func usageLimitTitle(intent Intent) string {
+	provider := strings.TrimSpace(intent.UsageLimitProvider)
+	if provider == "" {
+		provider = "Agent"
+	}
+	if window := strings.TrimSpace(intent.UsageLimitWindow); window != "" {
+		return fmt.Sprintf("%s %s limit reached", provider, window)
+	}
+	return fmt.Sprintf("%s usage limit reached", provider)
+}
+
+func usageLimitBody(intent Intent) string {
+	var out strings.Builder
+	out.WriteString("Sessions on this account stopped. ")
+	switch {
+	case intent.UsageLimitResetsAt.IsZero():
+		out.WriteString("The provider gave no reset time. ")
+		out.WriteString("Continue them yourself once the limit is lifted.")
+	case intent.UsageLimitAutoResume:
+		fmt.Fprintf(&out, "It resets at %s; AO continues them then, a few at a time.", FormatUsageLimitReset(intent.UsageLimitResetsAt, intent.CreatedAt))
+	default:
+		fmt.Fprintf(&out, "It resets at %s. Automatic resume is off, so continue them yourself.", FormatUsageLimitReset(intent.UsageLimitResetsAt, intent.CreatedAt))
+	}
+	return out.String()
+}
+
+// FormatUsageLimitReset renders a reset time in the machine's zone: a clock
+// time when it is within a day of now, otherwise with the weekday.
+func FormatUsageLimitReset(reset, now time.Time) string {
+	local := reset.Local()
+	if now.IsZero() || reset.Sub(now) < 20*time.Hour {
+		return local.Format("15:04")
+	}
+	return local.Format("Mon 15:04")
 }
 
 func sessionLabel(intent Intent) string {

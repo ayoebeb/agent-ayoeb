@@ -27,4 +27,7 @@ const (
 	// agent is working or stuck (broken hook pipeline, blocked interactive
 	// prompt). Rendered instead of a confident idle.
 	StatusNoSignal SessionStatus = "no_signal"
+	// StatusUsageLimit marks an idle session whose latest turn stopped on the
+	// provider's usage limit; see SessionUsageLimit.
+	StatusUsageLimit SessionStatus = "usage_limit"
 )

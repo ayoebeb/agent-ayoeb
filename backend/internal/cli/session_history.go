@@ -69,8 +69,17 @@ func (c *commandContext) printSessionHistory(ctx context.Context, cmd *cobra.Com
 		if turn.Harness != "" {
 			header += "  " + string(turn.Harness)
 		}
+		// A turn that did not complete still happened: say how it ended, so a
+		// session whose first turn died on a usage limit is not read as having
+		// never received its task.
+		if turn.State != "" {
+			header += "  [" + turn.State + "]"
+		}
 		if strings.TrimSpace(turn.AgentResponse) == "" {
 			turn.AgentResponse = "(no final response recorded)"
+		}
+		if turn.Error != "" {
+			turn.AgentResponse += "\nError: " + turn.Error
 		}
 		if _, err := fmt.Fprintf(out, "%s\nUser:\n%s\n\nAssistant:\n%s\n\n", header, turn.UserRequest, turn.AgentResponse); err != nil {
 			return err

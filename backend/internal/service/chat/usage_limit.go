@@ -41,6 +41,24 @@ func (s *Service) SetUsageLimitAccounts(accounts usageLimitAccountReader) {
 	s.usageLimitAccounts = accounts
 }
 
+// SetUsageLimitResumeIntent registers the callback that learns when a person
+// arms a retry of a limit-stopped turn (retryArmed) or cancels the automatic
+// resume of it. It lets the usage-limit watcher stand down in both cases.
+func (s *Service) SetUsageLimitResumeIntent(intent func(ctx context.Context, turnID string, retryArmed bool)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usageLimitIntent = intent
+}
+
+func (s *Service) noteUsageLimitIntent(ctx context.Context, turnID string, retryArmed bool) {
+	s.mu.RLock()
+	intent := s.usageLimitIntent
+	s.mu.RUnlock()
+	if intent != nil {
+		intent(ctx, turnID, retryArmed)
+	}
+}
+
 // SetTurnAutoResume arms one failed human prompt, rather than a session-wide
 // policy. Cancellation needs no live controller and remains available while busy.
 func (s *Service) SetTurnAutoResume(ctx context.Context, id domain.SessionID, turnID string, enabled bool) error {
@@ -74,6 +92,7 @@ func (s *Service) SetTurnAutoResume(ctx context.Context, id domain.SessionID, tu
 			s.autoResumeMu.Lock()
 			delete(s.autoResumeRetryAt, turnID)
 			s.autoResumeMu.Unlock()
+			s.noteUsageLimitIntent(ctx, turnID, false)
 		}
 		return err
 	}
@@ -88,6 +107,7 @@ func (s *Service) SetTurnAutoResume(ctx context.Context, id domain.SessionID, tu
 		s.autoResumeMu.Lock()
 		delete(s.autoResumeRetryAt, turnID)
 		s.autoResumeMu.Unlock()
+		s.noteUsageLimitIntent(ctx, turnID, true)
 	}
 	return err
 }

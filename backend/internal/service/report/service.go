@@ -25,6 +25,10 @@ type CreateInput struct {
 	Note      string
 	Message   string
 	Outputs   []domain.ReportOutput
+	// Immediate delivers the report at once instead of batching it. Only the
+	// daemon sets it, for facts the orchestrator cannot otherwise see: the
+	// HTTP controller never does.
+	Immediate bool
 }
 
 // ArtifactRecorder shows a reported artifact in the worker's chat thread. It
@@ -117,11 +121,13 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.ReportR
 	now := s.now().UTC()
 	var availableAt time.Time
 	var settlementDeadline time.Time
-	switch input.State {
-	case domain.ReportDone:
+	switch {
+	case input.Immediate:
+		availableAt = now
+	case input.State == domain.ReportDone:
 		settlementDeadline = now.Add(domain.ReportSettlementWindow)
 		availableAt = settlementDeadline
-	case domain.ReportNeedsInput, domain.ReportStuck:
+	case input.State == domain.ReportNeedsInput || input.State == domain.ReportStuck:
 		availableAt = now
 	default:
 		availableAt = now.Add(domain.ReportBatchFallback)

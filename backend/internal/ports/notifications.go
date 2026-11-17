@@ -32,6 +32,14 @@ type NotificationIntent struct {
 	PRTargetBranch string
 	Provider       string
 	Repo           string
+
+	// Usage-limit hints: the provider's name for the limit (5-hour, weekly), when
+	// it resets (zero when the provider did not say), the account's provider
+	// label such as Claude, and whether AO will continue the stopped sessions.
+	UsageLimitWindow     string
+	UsageLimitResetsAt   time.Time
+	UsageLimitProvider   string
+	UsageLimitAutoResume bool
 }
 
 // NotificationResolution is the lifecycle-to-notification-producer contract for

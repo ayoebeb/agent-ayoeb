@@ -3911,6 +3911,10 @@ type SettingsResponse struct {
 	ComputerUse bool `json:"computerUse" description:"New chat sessions get tools to drive desktop apps through Cua Driver (Settings, Computer use agents)."`
 	// SessionRetentionDays is how long an archived session is kept.
 	SessionRetentionDays int `json:"sessionRetentionDays" description:"Days an archived session whose worktree is released is kept before the daemon deletes it permanently; 0 keeps it."`
+	// UsageLimitAutoResume continues sessions stopped on a usage limit.
+	UsageLimitAutoResume bool `json:"usageLimitAutoResume" description:"When a session stops on the provider's usage limit, AO continues it after the limit resets."`
+	// UsageLimitMaxResumes caps the continued turns running at once.
+	UsageLimitMaxResumes int `json:"usageLimitMaxResumes" description:"How many sessions AO continues at once after a usage limit resets, so they do not all spend the next window together."`
 	// OrchestratorWaitingEnabled gates the distinct "orchestrator is waiting for you" notification.
 	OrchestratorWaitingEnabled bool `json:"orchestratorWaitingEnabled" description:"When on, a project orchestrator waiting for the user raises a distinct notification (toast, sound, phone push, badge and a sidebar marker) until the user responds."`
 	// OrchestratorWaitingRenotifyMinutes is the delay before the single reminder.
@@ -3952,6 +3956,12 @@ type UpdateVersionRefreshRequest struct {
 // UpdateSessionRetentionRequest sets how long archived sessions are kept.
 type UpdateSessionRetentionRequest struct {
 	Days *int `json:"days" description:"Days to keep an archived session whose worktree is released; 0 keeps it." minimum:"0" maximum:"3650"`
+}
+
+// UpdateUsageLimitResumeRequest sets whether and how AO continues sessions after a usage limit resets.
+type UpdateUsageLimitResumeRequest struct {
+	Enabled       *bool `json:"enabled" description:"Continue sessions stopped on a usage limit once it resets."`
+	MaxConcurrent *int  `json:"maxConcurrent" description:"Most continued turns that run at once." minimum:"1" maximum:"10"`
 }
 
 // UpdateOrchestratorWaitingRequest sets the orchestrator-waiting notification
