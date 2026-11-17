@@ -558,9 +558,6 @@ func (s *Service) candidate(projectID string, in ConnectInput) (storedConnection
 		return storedConnection{}, invalid("A project key is letters and digits, for example YIA.")
 	}
 	jql := strings.TrimSpace(in.JQL)
-	if key == "" && jql == "" {
-		return storedConnection{}, invalid("Enter a Jira project key or a JQL query to choose which tickets to show.")
-	}
 	if in.BoardID < 0 {
 		return storedConnection{}, invalid("The board id is a number.")
 	}
@@ -641,10 +638,15 @@ func discoverBoard(ctx context.Context, client *jiraclient.Client, c storedConne
 }
 
 // EffectiveJQL is the query the board runs: the person's own JQL when they
-// gave one, otherwise the project's open tickets plus what finished this week.
+// gave one; otherwise, with a project key, that project's open tickets plus what
+// finished this week; without a key, every ticket assigned to the connected
+// account in any Jira project, open ones plus those updated in the last 14 days.
 func EffectiveJQL(projectKey, custom string) string {
 	if strings.TrimSpace(custom) != "" {
 		return strings.TrimSpace(custom)
+	}
+	if strings.TrimSpace(projectKey) == "" {
+		return "assignee = currentUser() AND (statusCategory != Done OR updated >= -14d) ORDER BY updated DESC"
 	}
 	return fmt.Sprintf(`project = %q AND (statusCategory != Done OR resolutiondate >= -7d) ORDER BY updated DESC`, projectKey)
 }

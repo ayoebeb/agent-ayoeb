@@ -6926,7 +6926,7 @@ export interface components {
             email: string;
             /** @description Optional JQL that chooses the tickets. Overrides the project key's default query. */
             jql?: string;
-            /** @description Jira project key, for example YIA. Required unless jql is set. */
+            /** @description Jira project key, for example YIA. Optional, empty shows every ticket assigned to you in any Jira project. */
             projectKey?: string;
             /** @description Jira Cloud site, for example yourcompany.atlassian.net. */
             siteUrl: string;

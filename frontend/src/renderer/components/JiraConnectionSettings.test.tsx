@@ -48,7 +48,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("JiraConnectionSettings", () => {
-	it("keeps Test and Connect off until the site, email, token and a project key or JQL are entered", async () => {
+	it("keeps Test and Connect off until the site, email and token are entered; the project key is optional", async () => {
 		renderSettings();
 		await screen.findByText("Not connected");
 		const connect = screen.getByRole("button", { name: "Connect" });
@@ -58,11 +58,26 @@ describe("JiraConnectionSettings", () => {
 		await fill("Jira site", "yoobi.atlassian.net");
 		await fill("Atlassian email", "ada@example.com");
 		await fill("API token", "secret-token");
-		expect(connect).toBeDisabled();
-		await fill("Project key", "YIA");
 		expect(connect).toBeEnabled();
+		expect(screen.getByLabelText("Project key")).toHaveValue("");
+		expect(screen.getByText(/Leave empty to show every ticket assigned to you/)).toBeInTheDocument();
 	});
 
+	it("tests a connection with an empty project key and sends none", async () => {
+		daemon.replies["POST /api/v1/projects/{id}/jira/test"] = () => ok({ accountName: "Ada Example", jql: "assignee = currentUser()", ticketCount: 9 });
+		renderSettings();
+		await screen.findByText("Not connected");
+		await fill("Jira site", "yoobi.atlassian.net");
+		await fill("Atlassian email", "ada@example.com");
+		await fill("API token", "secret-token");
+
+		await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+		expect(await screen.findByTestId("jira-test-result")).toHaveTextContent("Connected as Ada Example. Tickets assigned to you: 9.");
+		expect(daemon.calls.find((call) => call.method === "POST")?.init?.body).toEqual({
+			siteUrl: "yoobi.atlassian.net", email: "ada@example.com", apiToken: "secret-token",
+		});
+	});
 	it("tests the connection without saving it and shows what Jira found", async () => {
 		daemon.replies["POST /api/v1/projects/{id}/jira/test"] = () => ok({ accountName: "Ada Example", projectName: "Yoobi", jql: "project = YIA", ticketCount: 14 });
 		renderSettings();

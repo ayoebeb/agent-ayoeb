@@ -221,7 +221,6 @@ func TestConnectValidatesInput(t *testing.T) {
 		"plain http":      func(in *jirasvc.ConnectInput) { in.SiteURL = "http://yoobi.atlassian.net" },
 		"no email":        func(in *jirasvc.ConnectInput) { in.Email = "" },
 		"no token":        func(in *jirasvc.ConnectInput) { in.APIToken = "" },
-		"no key or jql":   func(in *jirasvc.ConnectInput) { in.ProjectKey = "" },
 		"bad project key": func(in *jirasvc.ConnectInput) { in.ProjectKey = "no spaces!" },
 	}
 	for name, mutate := range cases {
@@ -726,5 +725,105 @@ func TestStartKeepsTheDuplicateGuardWhenTheLinkCannotBeSaved(t *testing.T) {
 	res, err = f.svc.Start(context.Background(), projectID, "YIA-10")
 	if err != nil || !res.Duplicate || len(f.orch.sent) != 1 {
 		t.Fatalf("retry = %+v, %v; sent %d", res, err, len(f.orch.sent))
+	}
+}
+
+const defaultAssignedJQL = "assignee = currentUser() AND (statusCategory != Done OR updated >= -14d) ORDER BY updated DESC"
+
+func TestEffectiveJQL(t *testing.T) {
+	cases := []struct{ name, key, custom, want string }{
+		{"no key and no jql is everything assigned to me", "", "", defaultAssignedJQL},
+		{"blank key is the same", "  ", " ", defaultAssignedJQL},
+		{"a key scopes to that project", "YIA", "", `project = "YIA" AND (statusCategory != Done OR resolutiondate >= -7d) ORDER BY updated DESC`},
+		{"custom jql wins without a key", "", " project = ABC ORDER BY rank ", "project = ABC ORDER BY rank"},
+		{"custom jql wins over a key", "YIA", "assignee = EMPTY", "assignee = EMPTY"},
+	}
+	for _, c := range cases {
+		if got := jirasvc.EffectiveJQL(c.key, c.custom); got != c.want {
+			t.Errorf("%s: EffectiveJQL(%q, %q) = %q, want %q", c.name, c.key, c.custom, got, c.want)
+		}
+	}
+}
+
+func lastSearchJQL(t *testing.T, f *fixture) string {
+	t.Helper()
+	reqs := f.jira.Requests()
+	for i := len(reqs) - 1; i >= 0; i-- {
+		if strings.HasSuffix(reqs[i].Path, "/search/jql") {
+			var body struct {
+				JQL string `json:"jql"`
+			}
+			if err := json.Unmarshal([]byte(reqs[i].Body), &body); err != nil {
+				t.Fatalf("search body: %v", err)
+			}
+			return body.JQL
+		}
+	}
+	t.Fatal("no search request reached Jira")
+	return ""
+}
+
+func TestBoardWithoutAProjectKeyShowsEverythingAssignedToMeGroupedByStatus(t *testing.T) {
+	f := newFixture(t)
+	f.jira.Columns = nil // no Jira board is looked up without a project key
+	f.jira.Issues = []jiratest.Issue{
+		{Key: "WEB-3", Summary: "Shipped", StatusID: "5", StatusName: "Done", StatusCategory: "done", AssigneeID: "acc-1", AssigneeName: "Ada Example"},
+		{Key: "API-7", Summary: "Review", StatusID: "3", StatusName: "In Review", StatusCategory: "indeterminate", AssigneeID: "acc-1", AssigneeName: "Ada Example"},
+		{Key: "YIA-1", Summary: "Start", StatusID: "1", StatusName: "To Do", StatusCategory: "new", AssigneeID: "acc-1", AssigneeName: "Ada Example"},
+		{Key: "API-8", Summary: "Plan", StatusID: "2", StatusName: "Backlog", StatusCategory: "new", AssigneeID: "acc-1", AssigneeName: "Ada Example"},
+		{Key: "WEB-4", Summary: "Build", StatusID: "3", StatusName: "In Progress", StatusCategory: "indeterminate", AssigneeID: "acc-1", AssigneeName: "Ada Example"},
+	}
+	in := f.input()
+	in.ProjectKey = ""
+	if _, err := f.svc.Connect(context.Background(), projectID, in); err != nil {
+		t.Fatalf("Connect without a project key: %v", err)
+	}
+	board, err := f.svc.Board(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	if got := lastSearchJQL(t, f); got != defaultAssignedJQL || board.JQL != defaultAssignedJQL {
+		t.Fatalf("jql sent = %q, board = %q", got, board.JQL)
+	}
+	names := make([]string, len(board.Columns))
+	for i, c := range board.Columns {
+		names[i] = c.Name
+	}
+	// To Do category first, then In Progress, then Done; by name inside a category.
+	if got := strings.Join(names, "|"); got != "Backlog|To Do|In Progress|In Review|Done" {
+		t.Fatalf("columns = %s", got)
+	}
+	if board.Total != 5 || board.BoardName != "" {
+		t.Fatalf("board = %+v", board)
+	}
+}
+
+func TestBoardKeepsACustomJQLWithoutAProjectKey(t *testing.T) {
+	f := newFixture(t)
+	in := f.input()
+	in.ProjectKey = ""
+	in.JQL = "project = ABC ORDER BY rank"
+	if _, err := f.svc.Connect(context.Background(), projectID, in); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if _, err := f.svc.Board(context.Background(), projectID); err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	if got := lastSearchJQL(t, f); got != "project = ABC ORDER BY rank" {
+		t.Fatalf("custom jql was replaced: %q", got)
+	}
+}
+
+func TestStartWithoutAProjectKeyAcceptsATicketOfAnyJiraProject(t *testing.T) {
+	f := newFixture(t)
+	f.jira.Issues = append(f.jira.Issues, jiratest.Issue{Key: "WEB-3", Summary: "Other project", StatusID: "1", StatusName: "To Do", StatusCategory: "new"})
+	in := f.input()
+	in.ProjectKey = ""
+	if _, err := f.svc.Connect(context.Background(), projectID, in); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	res, err := f.svc.Start(context.Background(), projectID, "WEB-3")
+	if err != nil || res.IssueKey != "WEB-3" {
+		t.Fatalf("Start = %+v, %v", res, err)
 	}
 }

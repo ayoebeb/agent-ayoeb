@@ -65,7 +65,7 @@ export function JiraConnectionSettings({ projectId, hostId }: { projectId: strin
 	// The saved token belongs to the site and account it was saved for: it is kept
 	// only while both are unchanged, so another site or email needs its own token.
 	const keepsSavedToken = connected && sameJiraSite(draft.siteUrl, saved?.siteUrl ?? "") && draft.email.trim().toLowerCase() === (saved?.email ?? "").trim().toLowerCase();
-	const complete = draft.siteUrl.trim() !== "" && draft.email.trim() !== "" && (draft.apiToken.trim() !== "" || keepsSavedToken) && (draft.projectKey.trim() !== "" || draft.jql.trim() !== "");
+	const complete = draft.siteUrl.trim() !== "" && draft.email.trim() !== "" && (draft.apiToken.trim() !== "" || keepsSavedToken);
 	const refresh = () => {
 		void queryClient.invalidateQueries({ queryKey: jiraQueryKeys.connection(projectId, hostId) });
 		void queryClient.invalidateQueries({ queryKey: jiraQueryKeys.board(projectId, hostId) });
@@ -101,6 +101,7 @@ export function JiraConnectionSettings({ projectId, hostId }: { projectId: strin
 			setError(cause instanceof Error ? cause.message : t("jira.settings.failed"));
 		},
 	});
+	const testedProject = tested?.projectName ?? draft.projectKey.trim().toUpperCase();
 	const busy = test.isPending || save.isPending || disconnect.isPending;
 	// Enter in a field must not submit the surrounding project form.
 	const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -141,7 +142,7 @@ export function JiraConnectionSettings({ projectId, hostId }: { projectId: strin
 				placeholder: keepsSavedToken ? t("jira.settings.apiTokenKeep") : connected ? t("jira.settings.apiTokenNew") : undefined,
 				description: t("jira.settings.apiTokenHelp"),
 			})}
-			{field("projectKey", t("jira.settings.projectKey"), { placeholder: t("jira.settings.projectKeyPlaceholder"), mono: true })}
+			{field("projectKey", t("jira.settings.projectKey"), { placeholder: t("jira.settings.projectKeyPlaceholder"), mono: true, description: t("jira.settings.projectKeyHelp") })}
 			{field("boardId", t("jira.settings.boardId"), { placeholder: t("jira.settings.boardIdPlaceholder"), mono: true })}
 			{field("jql", t("jira.settings.jql"), { placeholder: t("jira.settings.jqlPlaceholder"), mono: true, description: t("jira.settings.jqlHelp") })}
 			<div className="settings-row-bar flex-wrap justify-end gap-2">
@@ -149,7 +150,9 @@ export function JiraConnectionSettings({ projectId, hostId }: { projectId: strin
 					{error ? <p role="alert" className="text-error" data-testid="jira-settings-error">{error}</p> : null}
 					{tested ? (
 						<p role="status" className="text-settings-muted" data-testid="jira-test-result">
-							{t("jira.settings.testOk", { name: tested.accountName, project: (tested.projectName ?? draft.projectKey.trim().toUpperCase()) || "–", tickets: tested.ticketCount })}
+							{testedProject
+								? t("jira.settings.testOk", { name: tested.accountName, project: testedProject, tickets: tested.ticketCount })
+								: t("jira.settings.testOkAll", { name: tested.accountName, tickets: tested.ticketCount })}
 						</p>
 					) : null}
 				</div>
