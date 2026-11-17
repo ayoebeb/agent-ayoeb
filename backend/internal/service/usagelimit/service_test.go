@@ -209,20 +209,20 @@ func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.S
 
 type fakeSettings struct {
 	mu      sync.Mutex
-	enabled bool
-	max     int
+	enabled       bool
+	maxConcurrent int
 }
 
 func (s *fakeSettings) UsageLimitResume(context.Context) (bool, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.enabled, s.max, nil
+	return s.enabled, s.maxConcurrent, nil
 }
 
-func (s *fakeSettings) set(enabled bool, max int) {
+func (s *fakeSettings) set(enabled bool, maxConcurrent int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.enabled, s.max = enabled, max
+	s.enabled, s.maxConcurrent = enabled, maxConcurrent
 }
 
 type fakeAccounts struct{ account string }
@@ -312,7 +312,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		t: t, store: newFakeStore(), settings: &fakeSettings{enabled: true, max: 3},
+		t: t, store: newFakeStore(), settings: &fakeSettings{enabled: true, maxConcurrent: 3},
 		notifier: &fakeNotifier{}, reporter: &fakeReporter{}, sender: &fakeSender{},
 		now: failedAt.Add(time.Minute),
 	}
