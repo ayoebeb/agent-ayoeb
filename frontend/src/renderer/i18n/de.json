@@ -4534,6 +4534,7 @@
 	"controlRoom.info.usageHint": "Tokens und Kosten des eigenen Chats des Orchestrators. Worker sind noch nicht eingerechnet.",
 	"controlRoom.scope.aria": "Bereich",
 	"controlRoom.scope.all": "Alle Agenten",
+	"controlRoom.scope.project": "Projekt",
 	"controlRoom.changes.none": "Noch kein Agent hat Dateien geändert.",
 	"controlRoom.changes.also": "auch {{names}}",
 	"controlRoom.workspacePending": "{{name}} hat noch keinen Worktree.",

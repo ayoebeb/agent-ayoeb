@@ -4516,6 +4516,7 @@
 	"controlRoom.info.usageHint": "编排器自身对话的令牌与费用，尚未汇总 worker。",
 	"controlRoom.scope.aria": "范围",
 	"controlRoom.scope.all": "所有智能体",
+	"controlRoom.scope.project": "项目",
 	"controlRoom.changes.none": "还没有智能体更改文件。",
 	"controlRoom.changes.also": "另有 {{names}}",
 	"controlRoom.workspacePending": "{{name}} 还没有工作树。",

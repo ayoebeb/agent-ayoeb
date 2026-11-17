@@ -4644,6 +4644,7 @@
 	"controlRoom.info.usageHint": "Tokens e custo do chat do próprio orquestrador. Os workers ainda não são somados.",
 	"controlRoom.scope.aria": "Escopo",
 	"controlRoom.scope.all": "Todos os agentes",
+	"controlRoom.scope.project": "Projeto",
 	"controlRoom.changes.none": "Nenhum agente alterou arquivos ainda.",
 	"controlRoom.changes.also": "também {{names}}",
 	"controlRoom.workspacePending": "{{name}} ainda não tem worktree.",

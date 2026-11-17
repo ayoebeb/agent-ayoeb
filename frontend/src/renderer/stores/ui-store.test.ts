@@ -1,43 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { filesSidebarStorageKey, rememberedFileDisplayMode, sidebarIsVisible, sidebarOccupiesLayout, useUiStore } from "./ui-store";
+import { rememberedFileDisplayMode, sidebarIsVisible, sidebarOccupiesLayout, useUiStore } from "./ui-store";
 import { sessionUiKey } from "../lib/hosts";
 import { previewDocumentThemeStyle } from "../lib/theme";
-
-describe("remembered Files sidebar", () => {
-	beforeEach(() => {
-		window.localStorage.clear();
-		useUiStore.setState({ inspectorSessions: {} });
-	});
-
-	it("reopens Files only for a session that opts in", () => {
-		window.localStorage.setItem(filesSidebarStorageKey("orch"), "open");
-		window.localStorage.setItem(filesSidebarStorageKey("worker"), "open");
-		useUiStore.getState().initializeInspectorSession("orch", false, true, true);
-		useUiStore.getState().initializeInspectorSession("worker", false, true);
-
-		const { inspectorSessions } = useUiStore.getState();
-		expect(inspectorSessions.orch).toMatchObject({ isOpen: true, view: "files", filesChangedOnly: false, remembersFilesSidebar: true });
-		expect(inspectorSessions.worker).toMatchObject({ isOpen: false, view: "summary" });
-		expect(inspectorSessions.worker?.remembersFilesSidebar).toBeUndefined();
-	});
-
-	it("stores the open Files sidebar and forgets it once closed or switched away", () => {
-		const store = useUiStore.getState();
-		store.initializeInspectorSession("orch", false, true, true);
-		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBeNull();
-
-		store.setInspectorView("orch", "files");
-		store.setInspectorOpen("orch", true);
-		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBe("open");
-
-		store.setInspectorView("orch", "summary");
-		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBeNull();
-
-		store.setInspectorView("orch", "files");
-		store.toggleInspector("orch");
-		expect(window.localStorage.getItem(filesSidebarStorageKey("orch"))).toBeNull();
-	});
-});
 
 describe("sidebar visibility", () => {
 	beforeEach(() => {
@@ -459,23 +423,17 @@ describe("orchestrator control room", () => {
 
 	it("opens an orchestrator on its crew, open, and does not reopen it after the person closed it", () => {
 		const store = useUiStore.getState();
-		store.initializeInspectorSession("orch", false, true, true, true);
+		store.initializeInspectorSession("orch", false, true, true);
 		expect(useUiStore.getState().inspectorSessions.orch).toMatchObject({ isOpen: true, view: "crew", initialized: true });
 
 		store.setInspectorOpen("orch", false);
-		store.initializeInspectorSession("orch", false, true, true, true);
+		store.initializeInspectorSession("orch", false, true, true);
 		expect(useUiStore.getState().inspectorSessions.orch?.isOpen).toBe(false);
 	});
 
 	it("leaves a worker on Summary, closed", () => {
 		useUiStore.getState().initializeInspectorSession("worker", false, true);
 		expect(useUiStore.getState().inspectorSessions.worker).toMatchObject({ isOpen: false, view: "summary" });
-	});
-
-	it("keeps a remembered Files sidebar ahead of the crew", () => {
-		window.localStorage.setItem(filesSidebarStorageKey("orch"), "open");
-		useUiStore.getState().initializeInspectorSession("orch", false, true, true, true);
-		expect(useUiStore.getState().inspectorSessions.orch).toMatchObject({ isOpen: true, view: "files" });
 	});
 
 	it("starts on the Session tab with all agents", () => {

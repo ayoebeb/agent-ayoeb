@@ -141,6 +141,37 @@ describe("ControlRoomBody changes", () => {
 		expect(useUiStore.getState().inspectorSessions[sessionUiKey("a")]?.filesChangedOnly).toBe(false);
 	});
 
+	it("offers the orchestrator's own checkout as Project on the Files tab, in the same explorer, whole tree", async () => {
+		setCrew([worker({ id: "a", title: "Jira toggle" })]);
+		room.tab = "files";
+		renderBody();
+		const bar = screen.getByTestId("control-scope-bar");
+		expect(within(bar).getAllByRole("button").map((button) => button.textContent?.trim().replace(/\s+/g, " "))).toEqual(["All agents", "Project", "Jira toggle"]);
+		await userEvent.click(within(bar).getByRole("button", { name: "Project" }));
+		expect(room.setScope).toHaveBeenCalledWith("p-orchestrator");
+	});
+
+	it("shows the orchestrator's own checkout when Project is picked", () => {
+		setCrew([worker({ id: "a" })], { a: { paths: ["x.ts"] } });
+		room.tab = "files";
+		room.scope = "p-orchestrator";
+		renderBody();
+		expect(screen.getByTestId("explorer")).toHaveAttribute("data-session", "p-orchestrator");
+		expect(within(screen.getByTestId("control-scope-bar")).getByRole("button", { name: "Project" })).toHaveAttribute("aria-pressed", "true");
+		expect(within(screen.getByTestId("control-scope-bar")).getByRole("button", { name: /All agents/ })).toHaveAttribute("aria-pressed", "false");
+		expect(useUiStore.getState().inspectorSessions[sessionUiKey("p-orchestrator")]?.filesChangedOnly).toBe(false);
+	});
+
+	it("keeps Project to the Files tab: Changes and Commits scope to workers only", () => {
+		setCrew([worker({ id: "a" })], { a: { paths: ["x.ts"] } });
+		room.tab = "changes";
+		room.scope = "p-orchestrator";
+		renderBody();
+		expect(screen.queryByRole("button", { name: "Project" })).toBeNull();
+		expect(screen.queryByTestId("explorer")).toBeNull();
+		expect(screen.getByTestId("worktree-overview")).toBeInTheDocument();
+	});
+
 	it("explains a worker that has no worktree yet instead of an empty explorer", () => {
 		setCrew([worker({ id: "a", title: "Starting", workspacePublished: false })], { a: { paths: [] } });
 		room.scope = "a";

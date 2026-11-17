@@ -4747,6 +4747,7 @@
 	"controlRoom.info.usageHint": "Токены и стоимость чата самого оркестратора. Воркеры пока не суммируются.",
 	"controlRoom.scope.aria": "Область",
 	"controlRoom.scope.all": "Все агенты",
+	"controlRoom.scope.project": "Проект",
 	"controlRoom.changes.none": "Пока ни один агент не менял файлы.",
 	"controlRoom.changes.also": "также {{names}}",
 	"controlRoom.workspacePending": "У {{name}} ещё нет рабочего дерева.",

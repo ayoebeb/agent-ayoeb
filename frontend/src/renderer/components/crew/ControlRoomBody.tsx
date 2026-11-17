@@ -1,7 +1,7 @@
 import { useQueries } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { GitBranch, Users } from "@/components/app-icons";
+import { Folder, GitBranch, Users } from "@/components/app-icons";
 import { useControlRoom, type ControlRoom } from "../../hooks/useControlRoom";
 import { useCrew } from "../../hooks/useCrew";
 import { sessionWorkspaceHistoryQueryOptions } from "../../hooks/useSessionWorkspaceFiles";
@@ -26,13 +26,17 @@ export function ControlRoomBody({ orchestrator, projectKind }: { orchestrator: W
 	const { model, now } = useCrew(orchestrator, true);
 	const live = model.rows.filter((row) => row.group !== "done");
 	const scoped = scopedRow(model, room.scope);
+	// The orchestrator's own checkout is one more place in the Files tab, beside the worktrees.
+	const project = room.tab === "files" && room.scope === orchestrator.id;
 	return (
 		<div className="absolute inset-0 z-10 flex min-h-0 flex-col bg-background" data-testid="control-room-body" role="tabpanel">
-			<ScopeBar model={model} room={room} rows={live} />
+			<ScopeBar model={model} orchestrator={orchestrator} project={project} room={room} rows={live} />
 			<div className="min-h-0 flex-1" data-testid={`control-room-${room.tab}`}>
 				{room.tab === "changes" || room.tab === "files" ? (
-					scoped ? (
-						<ScopedExplorer key={`${room.tab}:${scoped.session.id}`} mode={room.tab} orchestrator={orchestrator} projectKind={projectKind} row={scoped} />
+					project ? (
+						<ScopedExplorer key={`files:${orchestrator.id}`} mode="files" orchestrator={orchestrator} projectKind={projectKind} session={orchestrator} />
+					) : scoped ? (
+						<ScopedExplorer key={`${room.tab}:${scoped.session.id}`} mode={room.tab} orchestrator={orchestrator} projectKind={projectKind} session={scoped.session} />
 					) : (
 						<WorktreeOverview model={model} onScope={(id) => room.setScope(id)} rows={live} />
 					)
@@ -44,10 +48,10 @@ export function ControlRoomBody({ orchestrator, projectKind }: { orchestrator: W
 	);
 }
 
-/** All agents, or one. The choice stays when the tab changes. */
-function ScopeBar({ model, room, rows }: { model: CrewModel; room: ControlRoom; rows: CrewRow[] }) {
+/** All agents, or one; on Files also the orchestrator's own checkout. The choice stays when the tab changes. */
+function ScopeBar({ model, orchestrator, project, room, rows }: { model: CrewModel; orchestrator: WorkspaceSession; project: boolean; room: ControlRoom; rows: CrewRow[] }) {
 	const { t } = useTranslation();
-	const all = room.scope === undefined || !rows.some((row) => row.session.id === room.scope);
+	const all = !project && (room.scope === undefined || !rows.some((row) => row.session.id === room.scope));
 	return (
 		// Wraps instead of scrolling: a chip cut off at the edge hides who is in scope,
 		// and a project rarely has more than two rows of workers.
@@ -57,6 +61,12 @@ function ScopeBar({ model, room, rows }: { model: CrewModel; room: ControlRoom; 
 				<span>{t("controlRoom.scope.all")}</span>
 				{model.totals.worktrees > 0 ? <Diff additions={model.totals.additions} deletions={model.totals.deletions} /> : null}
 			</ScopeChip>
+			{room.tab === "files" ? (
+				<ScopeChip active={project} onClick={() => room.setScope(orchestrator.id)}>
+					<Folder aria-hidden="true" className="size-icon-sm shrink-0" />
+					<span>{t("controlRoom.scope.project")}</span>
+				</ScopeChip>
+			) : null}
 			{rows.map((row) => {
 				const dot = getSessionStatusDotView(row.session);
 				return (
@@ -146,29 +156,29 @@ function WorktreeOverview({ model, onScope, rows }: { model: CrewModel; onScope:
 }
 
 /**
- * One agent's changes or files, in the explorer the Files view already is. The
+ * One agent's (or the orchestrator's own) changes or files, in the explorer the Files view already is. The
  * explorer remembers "changes only" per session, so this tab sets it for its own
  * purpose and leaves the choice to the explorer's own toggle afterwards.
  */
-function ScopedExplorer({ mode, orchestrator, projectKind, row }: { mode: "changes" | "files"; orchestrator: WorkspaceSession; projectKind?: ProjectKind; row: CrewRow }) {
+function ScopedExplorer({ mode, orchestrator, projectKind, session }: { mode: "changes" | "files"; orchestrator: WorkspaceSession; projectKind?: ProjectKind; session: WorkspaceSession }) {
 	const { t } = useTranslation();
 	const setFilesChangedOnly = useUiStore((state) => state.setFilesChangedOnly);
 	const hostId = orchestrator.hostId;
-	const uiKey = sessionUiKey(row.session.id, hostId);
+	const uiKey = sessionUiKey(session.id, hostId);
 	useEffect(() => {
 		setFilesChangedOnly(uiKey, mode === "changes");
 	}, [mode, setFilesChangedOnly, uiKey]);
-	if (!row.session.workspacePublished && row.session.workspacePublished !== undefined) {
-		return <EmptyState>{t("controlRoom.workspacePending", { name: row.session.title })}</EmptyState>;
+	if (!session.workspacePublished && session.workspacePublished !== undefined) {
+		return <EmptyState>{t("controlRoom.workspacePending", { name: session.title })}</EmptyState>;
 	}
 	return (
 		<div className="h-full min-h-0" data-testid="scoped-explorer">
 			<SessionFileExplorer
-				checkedOutBranch={row.session.branch}
+				checkedOutBranch={session.branch}
 				hostId={hostId}
 				isMaximized
 				projectKind={projectKind}
-				sessionId={row.session.id}
+				sessionId={session.id}
 			/>
 		</div>
 	);

@@ -4534,6 +4534,7 @@
 	"controlRoom.info.usageHint": "オーケストレーター自身のチャットのトークンとコストです。ワーカー分はまだ合算されていません。",
 	"controlRoom.scope.aria": "対象",
 	"controlRoom.scope.all": "すべてのエージェント",
+	"controlRoom.scope.project": "プロジェクト",
 	"controlRoom.changes.none": "ファイルを変更したエージェントはまだいません。",
 	"controlRoom.changes.also": "{{names}} も変更",
 	"controlRoom.workspacePending": "{{name}} にはまだワークツリーがありません。",

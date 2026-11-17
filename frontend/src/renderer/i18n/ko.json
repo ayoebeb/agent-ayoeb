@@ -4534,6 +4534,7 @@
 	"controlRoom.info.usageHint": "오케스트레이터 자체 채팅의 토큰과 비용입니다. 작업자는 아직 합산되지 않습니다.",
 	"controlRoom.scope.aria": "범위",
 	"controlRoom.scope.all": "모든 에이전트",
+	"controlRoom.scope.project": "프로젝트",
 	"controlRoom.changes.none": "아직 파일을 변경한 에이전트가 없습니다.",
 	"controlRoom.changes.also": "{{names}}도 변경",
 	"controlRoom.workspacePending": "{{name}}에는 아직 작업 트리가 없습니다.",

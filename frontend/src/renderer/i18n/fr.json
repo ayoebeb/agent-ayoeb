@@ -4644,6 +4644,7 @@
 	"controlRoom.info.usageHint": "Jetons et coût du chat de l’orchestrateur. Les workers ne sont pas encore additionnés.",
 	"controlRoom.scope.aria": "Portée",
 	"controlRoom.scope.all": "Tous les agents",
+	"controlRoom.scope.project": "Projet",
 	"controlRoom.changes.none": "Aucun agent n’a encore modifié de fichiers.",
 	"controlRoom.changes.also": "aussi {{names}}",
 	"controlRoom.workspacePending": "{{name}} n’a pas encore de worktree.",

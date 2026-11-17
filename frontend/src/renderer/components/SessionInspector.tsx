@@ -168,7 +168,7 @@ export const SessionInspector = memo(function SessionInspector({
 	view: viewProp,
 	onViewChange,
 }: {
-	/** An orchestrator's rail has Summary, Files (local and remote hosts), Browser, and contextual Artifacts. */
+	/** An orchestrator's rail has Crew, Summary, Browser, and contextual Artifacts. */
 	orchestrator?: boolean;
 	session?: WorkspaceSession;
 	hostId?: string;
@@ -250,9 +250,7 @@ export const SessionInspector = memo(function SessionInspector({
 	const hasCrew = orchestrator && session !== undefined && !session.cloud;
 	const availableViewDefs = orchestrator ? VIEW_DEFS.filter((entry) =>
 		entry.id === "summary" || entry.id === "browser" || (entry.id === "crew" && hasCrew)
-			// Files browses the orchestrator's own checkout of the project. A Cloud
-			// orchestrator's workspace is not reviewed through Files.
-			|| (entry.id === "files" && !session?.cloud)
+			// An orchestrator browses its own checkout in the control room's Files tab.
 			|| (entry.id === "artifacts" && ((session?.artifactFiles?.length ?? 0) > 0 || artifactRequestPending)))
 		: VIEW_DEFS.filter((entry) => entry.id !== "crew" && (!hostId || entry.id !== "browser" || browserView) && (reviewsAvailable || entry.id !== "reviews")
 			// The host passes a side chat view only where side chats can run.
