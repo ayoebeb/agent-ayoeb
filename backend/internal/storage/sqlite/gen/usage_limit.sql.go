@@ -338,6 +338,56 @@ func (q *Queries) ListPendingUsageLimitStops(ctx context.Context) ([]UsageLimitS
 	return items, nil
 }
 
+const listUnreportedUsageLimitStops = `-- name: ListUnreportedUsageLimitStops :many
+SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id FROM usage_limit_stops
+WHERE reported_at IS NULL
+  AND skip_reason NOT IN ('stopped', 'expired', 'superseded')
+ORDER BY detected_at, turn_id
+`
+
+// Stops whose report to the orchestrator never went out (the send failed, or the
+// daemon stopped between recording the stop and sending it). A stop that was
+// recorded already skipped as too old or deliberately stopped is not news, and a
+// superseded one is stale, so none of those are listed.
+func (q *Queries) ListUnreportedUsageLimitStops(ctx context.Context) ([]UsageLimitStop, error) {
+	rows, err := q.db.QueryContext(ctx, listUnreportedUsageLimitStops)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageLimitStop{}
+	for rows.Next() {
+		var i UsageLimitStop
+		if err := rows.Scan(
+			&i.TurnID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.AccountKey,
+			&i.WindowKey,
+			&i.WindowLabel,
+			&i.ResetsAt,
+			&i.DetectedAt,
+			&i.ReportedAt,
+			&i.ResumeState,
+			&i.SkipReason,
+			&i.Attempts,
+			&i.RetryAt,
+			&i.ResumedAt,
+			&i.ResumeTurnID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markUsageLimitStopReported = `-- name: MarkUsageLimitStopReported :exec
 UPDATE usage_limit_stops SET reported_at = ? WHERE turn_id = ? AND reported_at IS NULL
 `

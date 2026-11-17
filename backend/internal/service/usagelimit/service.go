@@ -47,6 +47,7 @@ type Store interface {
 	ListLimitStopCandidates(ctx context.Context, completedSince time.Time) ([]domain.LimitStopTurn, error)
 	InsertUsageLimitStop(ctx context.Context, stop domain.UsageLimitStop) (bool, error)
 	ListPendingUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error)
+	ListUnreportedUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error)
 	MarkUsageLimitStopReported(ctx context.Context, turnID string, at time.Time) error
 	SkipUsageLimitStop(ctx context.Context, turnID, reason string) (bool, error)
 	SetPendingUsageLimitStopsDisabled(ctx context.Context, disabled bool) error
@@ -182,6 +183,11 @@ func (s *Service) Sweep(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list limit stops: %w", err)
 	}
+	// Reports that failed or were cut off by a restart go out again before new
+	// stops are looked at, so a stop is never left unreported for good.
+	if err := s.retryReports(ctx, now); err != nil && ctx.Err() == nil {
+		s.log.Warn("retry usage-limit reports", "err", err)
+	}
 	live := make(map[string]bool, len(candidates))
 	var pending []domain.LimitStopTurn
 	for _, turn := range candidates {
@@ -308,6 +314,41 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 		if err := s.reporter.ReportUsageLimit(ctx, rec.ID, note); err != nil {
 			s.log.Warn("report usage-limit stop to orchestrator", "session", rec.ID, "err", err)
 		} else if err := s.store.MarkUsageLimitStopReported(ctx, turn.TurnID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// retryReports sends the orchestrator report of every recorded stop that never
+// got one. A stop whose worker is gone, or that is older than the scan window,
+// is settled without sending: there is nobody to tell, or nothing current to say.
+func (s *Service) retryReports(ctx context.Context, now time.Time) error {
+	if s.reporter == nil {
+		return nil
+	}
+	stops, err := s.store.ListUnreportedUsageLimitStops(ctx)
+	if err != nil {
+		return err
+	}
+	for _, stop := range stops {
+		rec, found, err := s.store.GetSession(ctx, stop.SessionID)
+		if err != nil {
+			return err
+		}
+		if !found || rec.Kind != domain.KindWorker || rec.IsTerminated || rec.Activity.State == domain.ActivityExited ||
+			stop.DetectedAt.Before(now.Add(-domain.UsageLimitScanWindow)) {
+			if err := s.store.MarkUsageLimitStopReported(ctx, stop.TurnID, now); err != nil {
+				return err
+			}
+			continue
+		}
+		note := ReportNote(rec, stop.WindowLabel, stop.ResetsAt, stop.SkipReason, now)
+		if err := s.reporter.ReportUsageLimit(ctx, rec.ID, note); err != nil {
+			s.log.Warn("report usage-limit stop to orchestrator", "session", rec.ID, "err", err)
+			continue
+		}
+		if err := s.store.MarkUsageLimitStopReported(ctx, stop.TurnID, now); err != nil {
 			return err
 		}
 	}

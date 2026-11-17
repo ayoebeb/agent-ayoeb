@@ -119,6 +119,22 @@ func (f *fakeStore) ListPendingUsageLimitStops(context.Context) ([]domain.UsageL
 	return out, nil
 }
 
+func (f *fakeStore) ListUnreportedUsageLimitStops(context.Context) ([]domain.UsageLimitStop, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []domain.UsageLimitStop
+	for _, stop := range f.stops {
+		switch stop.SkipReason {
+		case domain.UsageLimitSkipStopped, domain.UsageLimitOffExpired, domain.UsageLimitSkipSuperseded:
+			continue
+		}
+		if stop.ReportedAt == nil {
+			out = append(out, *stop)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) MarkUsageLimitStopReported(_ context.Context, turnID string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -254,11 +270,16 @@ func (n *fakeNotifier) Notify(_ context.Context, intent ports.NotificationIntent
 type fakeReporter struct {
 	mu    sync.Mutex
 	notes map[domain.SessionID][]string
+	fail  int // the next fail reports return an error
 }
 
 func (r *fakeReporter) ReportUsageLimit(_ context.Context, worker domain.SessionID, note string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.fail > 0 {
+		r.fail--
+		return errors.New("orchestrator unreachable")
+	}
 	if r.notes == nil {
 		r.notes = map[domain.SessionID][]string{}
 	}
@@ -358,6 +379,26 @@ func TestLimitStopIsFollowedUpOnceAndNotResumedBeforeReset(t *testing.T) {
 	}
 	if h.store.stops["turn-w1"].ReportedAt == nil {
 		t.Fatal("report was not recorded")
+	}
+}
+
+// A report that fails is not lost: the stop is already recorded, so a later
+// sweep sends it, once, and then records it as reported.
+func TestFailedReportIsRetriedOnALaterSweep(t *testing.T) {
+	h := newHarness(t)
+	h.store.addStop("w1", domain.KindWorker, limitMessage)
+	h.reporter.fail = 1
+	h.sweep()
+	if len(h.reporter.notes["w1"]) != 0 || h.store.stops["turn-w1"].ReportedAt != nil {
+		t.Fatalf("first report should have failed: notes=%v reported=%v", h.reporter.notes, h.store.stops["turn-w1"].ReportedAt)
+	}
+	h.sweep()
+	h.sweep()
+	if len(h.reporter.notes["w1"]) != 1 {
+		t.Fatalf("reports = %d, want exactly 1 after the retry", len(h.reporter.notes["w1"]))
+	}
+	if h.store.stops["turn-w1"].ReportedAt == nil {
+		t.Fatal("delivered report was not recorded")
 	}
 }
 

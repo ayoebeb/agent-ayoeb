@@ -98,6 +98,16 @@ SELECT * FROM usage_limit_stops
 WHERE resume_state = 'pending'
 ORDER BY resets_at IS NULL, resets_at, detected_at, turn_id;
 
+-- Stops whose report to the orchestrator never went out (the send failed, or the
+-- daemon stopped between recording the stop and sending it). A stop that was
+-- recorded already skipped as too old or deliberately stopped is not news, and a
+-- superseded one is stale, so none of those are listed.
+-- name: ListUnreportedUsageLimitStops :many
+SELECT * FROM usage_limit_stops
+WHERE reported_at IS NULL
+  AND skip_reason NOT IN ('stopped', 'expired', 'superseded')
+ORDER BY detected_at, turn_id;
+
 -- name: MarkUsageLimitStopReported :exec
 UPDATE usage_limit_stops SET reported_at = ? WHERE turn_id = ? AND reported_at IS NULL;
 

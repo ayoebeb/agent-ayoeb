@@ -113,6 +113,17 @@ func TestLimitStopCandidatesAndStopLifecycle(t *testing.T) {
 	if candidates, err = s.ListLimitStopCandidates(ctx, testNow.Add(-time.Hour)); err != nil || len(candidates) != 0 {
 		t.Fatalf("skipped stop still a candidate: %+v, %v", candidates, err)
 	}
+	// A stop whose report never went out stays listed, whatever happened to it
+	// since, until the report is recorded.
+	if unreported, err := s.ListUnreportedUsageLimitStops(ctx); err != nil || len(unreported) != 1 || unreported[0].TurnID != "turn-limited" {
+		t.Fatalf("unreported = %+v, err = %v", unreported, err)
+	}
+	if err := s.MarkUsageLimitStopReported(ctx, "turn-limited", testNow); err != nil {
+		t.Fatal(err)
+	}
+	if unreported, err := s.ListUnreportedUsageLimitStops(ctx); err != nil || len(unreported) != 0 {
+		t.Fatalf("a reported stop was listed again: %+v, %v", unreported, err)
+	}
 	turns, err := s.ListLatestFailedTurns(ctx, []domain.SessionID{session.ID})
 	if err != nil || len(turns) != 1 || turns[0].SkipReason != domain.UsageLimitOffCancelled {
 		t.Fatalf("turns = %+v, err = %v", turns, err)

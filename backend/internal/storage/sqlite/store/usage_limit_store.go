@@ -108,6 +108,25 @@ func (s *Store) ListPendingUsageLimitStops(ctx context.Context) ([]domain.UsageL
 	return out, nil
 }
 
+// ListUnreportedUsageLimitStops returns the stops whose orchestrator report has
+// not gone out yet and is still worth sending.
+func (s *Store) ListUnreportedUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error) {
+	rows, err := s.qr.ListUnreportedUsageLimitStops(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list unreported usage-limit stops: %w", err)
+	}
+	out := make([]domain.UsageLimitStop, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, domain.UsageLimitStop{
+			TurnID: row.TurnID, SessionID: domain.SessionID(row.SessionID), ProjectID: domain.ProjectID(row.ProjectID),
+			AccountKey: row.AccountKey, WindowKey: row.WindowKey, WindowLabel: row.WindowLabel,
+			ResetsAt: timePtr(row.ResetsAt), DetectedAt: row.DetectedAt, ReportedAt: timePtr(row.ReportedAt),
+			ResumeState: row.ResumeState, SkipReason: row.SkipReason, Attempts: int(row.Attempts), RetryAt: timePtr(row.RetryAt),
+		})
+	}
+	return out, nil
+}
+
 // MarkUsageLimitStopReported records that the orchestrator was told.
 func (s *Store) MarkUsageLimitStopReported(ctx context.Context, turnID string, at time.Time) error {
 	s.writeMu.Lock()
