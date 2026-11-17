@@ -6248,6 +6248,27 @@ html[data-native-browser-composition="true"] .browser-popout-frame {
 	border-radius: 10px;
 }
 
+/* The heading an anchor link in a chat just scrolled to (the anchor effect in
+ * ChatWorkspace's Timeline sets and removes the attribute). A flat accent tint
+ * that fades out; with reduced motion it holds still until it is removed. */
+@keyframes chat-anchor-flash {
+	from { background-color: var(--color-accent-weak); box-shadow: 0 0 0 4px var(--color-accent-weak); }
+	to { background-color: transparent; box-shadow: 0 0 0 4px transparent; }
+}
+
+.chat-md [data-anchor-flash] {
+	border-radius: var(--radius-sm);
+	animation: chat-anchor-flash 1800ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-md [data-anchor-flash] {
+		animation: none;
+		background-color: var(--color-accent-weak);
+		box-shadow: 0 0 0 4px var(--color-accent-weak);
+	}
+}
+
 /* A setting a deep link opened (lib/settings-focus.ts), marked like the
  * Harness page's focused agent. */
 .settings-focus-target {

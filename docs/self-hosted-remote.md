@@ -54,7 +54,11 @@ installer uses `~/.ao/host`; it does not copy agent or GitHub credentials from
 your laptop.
 
 Use the same channel on the VM and your desktop: stable with stable, nightly
-with nightly. Updating your laptop alone does not update the VM. A release
+with nightly. Updating your laptop alone does not update the VM. The
+**Computers** page (sidebar, once a computer is linked) lists each computer with
+the Ayo release it runs and warns when it differs from this computer's. A VM on
+a release from before this page does not report its version yet; it shows
+"Version not reported" until you update it. A release
 without `ao remote-host link` prints an address and password instead of the
 sign-in link; pair it by hand, or install nightly.
 

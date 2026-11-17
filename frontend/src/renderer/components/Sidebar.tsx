@@ -1540,6 +1540,7 @@ export function Sidebar({
 												/>;
 											}}
 											onRetry={onRetryRemoteHosts}
+											onOpenComputers={() => void remoteNavigate({ to: "/machines" })}
 										/>
 										{isIconRail && <CreateProjectListItem />}
 										<div

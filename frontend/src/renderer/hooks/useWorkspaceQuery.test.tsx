@@ -223,6 +223,35 @@ describe("useWorkspaceQuery", () => {
 		expect(result.current.data?.[0].sessions[0].artifactFiles?.[0]).toMatchObject({ path: "q3/report.html", inlineUrl });
 	});
 
+	it.each([["project", "p1"], ["standalone", undefined]] as const)(
+		"carries the daemon's last event time and the resolved model of a %s session, which the crew rail reads",
+		async (_kind, projectId) => {
+			respondWith({
+				projects: { data: { projects: [{ id: "p1", name: "Project", path: "/tmp/project" }] } },
+				sessions: { data: { sessions: [{ id: "s1", projectId, harness: "claude-code", status: "working", statusReadiness: "ready",
+					model: "claude-opus-5-5", lastEventAt: "2026-11-16T11:54:00Z",
+					activity: { state: "active", lastActivityAt: "2026-11-16T11:50:00Z" }, updatedAt: "2026-11-16T11:55:00Z", prs: [] }] } },
+			});
+			const { result } = renderHook(() => useWorkspaceQuery(), { wrapper });
+			await waitFor(() => expect(result.current.isSuccess).toBe(true));
+			const session = result.current.data?.flatMap((workspace) => workspace.sessions)[0];
+			expect(session).toMatchObject({ lastEventAt: "2026-11-16T11:54:00Z", model: "claude-opus-5-5" });
+		},
+	);
+
+	it("leaves the event time and model unset when the daemon sends none, never an empty string", async () => {
+		respondWith({
+			projects: { data: { projects: [{ id: "p1", name: "Project", path: "/tmp/project" }] } },
+			sessions: { data: { sessions: [{ id: "s1", projectId: "p1", harness: "codex", status: "working", statusReadiness: "ready",
+				model: "", lastEventAt: "", activity: { state: "idle", lastActivityAt: "2026-01-01T00:00:00Z" }, updatedAt: "2026-01-01T00:00:00Z", prs: [] }] } },
+		});
+		const { result } = renderHook(() => useWorkspaceQuery(), { wrapper });
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+		const session = result.current.data?.[0].sessions[0];
+		expect(session?.lastEventAt).toBeUndefined();
+		expect(session?.model).toBeUndefined();
+	});
+
 	it("rejects workspace reads while the daemon base URL is untrusted", async () => {
 		hasTrustedApiBaseUrlMock.mockReturnValue(false);
 

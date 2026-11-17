@@ -205,6 +205,10 @@ export type WorkspaceSession = {
 	lastUserMessageAt?: string;
 	/** ISO timestamp of human direction or deliberate same-project orchestrator direction. */
 	lastInteractionAt?: string;
+	/** ISO timestamp of the last thing a person would notice: an activity change, a PR or CI change, a review. */
+	lastEventAt?: string;
+	/** The agent model the session resolved to at spawn; absent means the agent's own default. */
+	model?: string;
 	isPinned?: boolean;
 	pinnedAt?: string;
 	/** Raw agent lifecycle activity from the daemon. */

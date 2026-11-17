@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Folder } from "@/components/app-icons";
+import { AlertTriangle, Folder, Server } from "@/components/app-icons";
 import type { RemoteHost } from "../hooks/useRemoteHosts";
 import type { WorkspaceSummary } from "../types/workspace";
 import { SidebarMenuButton, SidebarMenuItem } from "./ui/sidebar";
@@ -11,12 +11,23 @@ type Props = {
 	failedHostIds?: string[];
 	renderProject: (host: RemoteHost, workspace: WorkspaceSummary) => ReactNode;
 	onRetry: () => void;
+	/** Opens the page that lists every computer; the row shows only when given and a host is linked. */
+	onOpenComputers?: () => void;
 };
 
 /** Only host-specific chrome lives here; project and session rows are shared. */
-export function RemoteHostsSection({ hosts, workspaces, failedHostIds = [], renderProject, onRetry }: Props) {
+export function RemoteHostsSection({ hosts, workspaces, failedHostIds = [], renderProject, onRetry, onOpenComputers }: Props) {
 	const { t } = useTranslation();
 	return <>
+		{onOpenComputers && hosts.length > 0 ? <SidebarMenuItem>
+			<SidebarMenuButton
+				className="h-9 gap-2 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-interactive-hover [&_svg]:size-icon-md"
+				onClick={onOpenComputers}
+			>
+				<Server aria-hidden="true" />
+				<span className="truncate">{t("machines.title")}</span>
+			</SidebarMenuButton>
+		</SidebarMenuItem> : null}
 		{hosts.map((host) => {
 			const projects = workspaces.filter((workspace) => workspace.hostId === host.hostId);
 			// While the host connects or is offline, its last lists show under its status;
