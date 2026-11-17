@@ -4473,7 +4473,7 @@
 	"crew.age.minutes": "{{count}}m",
 	"crew.age.hours": "{{count}}h",
 	"crew.age.days": "{{count}}d",
-	"crew.openTerminal": "Open terminal",
+	"crew.openTerminal": "Open session",
 	"crew.action.changes": "Changes of {{name}}",
 	"crew.action.commits": "Commits of {{name}}",
 	"crew.action.chat": "Open {{name}}",

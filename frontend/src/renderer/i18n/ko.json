@@ -4492,7 +4492,7 @@
 	"crew.age.minutes": "{{count}}분",
 	"crew.age.hours": "{{count}}시간",
 	"crew.age.days": "{{count}}일",
-	"crew.openTerminal": "터미널 열기",
+	"crew.openTerminal": "세션 열기",
 	"crew.action.changes": "{{name}}의 변경 사항",
 	"crew.action.commits": "{{name}}의 커밋",
 	"crew.action.chat": "{{name}} 열기",

@@ -4492,7 +4492,7 @@
 	"crew.age.minutes": "{{count}}分",
 	"crew.age.hours": "{{count}}時間",
 	"crew.age.days": "{{count}}日",
-	"crew.openTerminal": "ターミナルを開く",
+	"crew.openTerminal": "セッションを開く",
 	"crew.action.changes": "{{name}} の変更",
 	"crew.action.commits": "{{name}} のコミット",
 	"crew.action.chat": "{{name}} を開く",

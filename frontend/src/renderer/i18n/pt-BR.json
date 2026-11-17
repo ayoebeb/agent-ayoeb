@@ -4602,7 +4602,7 @@
 	"crew.age.minutes": "{{count}} min",
 	"crew.age.hours": "{{count}} h",
 	"crew.age.days": "{{count}} d",
-	"crew.openTerminal": "Abrir terminal",
+	"crew.openTerminal": "Abrir sessão",
 	"crew.action.changes": "Alterações de {{name}}",
 	"crew.action.commits": "Commits de {{name}}",
 	"crew.action.chat": "Abrir {{name}}",

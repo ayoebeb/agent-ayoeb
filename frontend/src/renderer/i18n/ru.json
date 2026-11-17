@@ -4705,7 +4705,7 @@
 	"crew.age.minutes": "{{count}} мин",
 	"crew.age.hours": "{{count}} ч",
 	"crew.age.days": "{{count}} д",
-	"crew.openTerminal": "Открыть терминал",
+	"crew.openTerminal": "Открыть сессию",
 	"crew.action.changes": "Изменения {{name}}",
 	"crew.action.commits": "Коммиты {{name}}",
 	"crew.action.chat": "Открыть {{name}}",

@@ -4474,7 +4474,7 @@
 	"crew.age.minutes": "{{count}} 分",
 	"crew.age.hours": "{{count}} 小时",
 	"crew.age.days": "{{count}} 天",
-	"crew.openTerminal": "打开终端",
+	"crew.openTerminal": "打开会话",
 	"crew.action.changes": "{{name}} 的更改",
 	"crew.action.commits": "{{name}} 的提交",
 	"crew.action.chat": "打开 {{name}}",

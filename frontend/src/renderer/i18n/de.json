@@ -4492,7 +4492,7 @@
 	"crew.age.minutes": "{{count}} min",
 	"crew.age.hours": "{{count}} h",
 	"crew.age.days": "{{count}} T",
-	"crew.openTerminal": "Terminal öffnen",
+	"crew.openTerminal": "Sitzung öffnen",
 	"crew.action.changes": "Änderungen von {{name}}",
 	"crew.action.commits": "Commits von {{name}}",
 	"crew.action.chat": "{{name}} öffnen",
