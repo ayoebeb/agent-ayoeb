@@ -19,7 +19,9 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ !github.event.repository.fork }}
+    # Publishes upstream's docs site. In a private copy configure-pages cannot
+    # enable Pages and fails the run, after the docs have already been built.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +46,9 @@ jobs:
           path: frontend/src/docs/out
 
   deploy:
-    if: ${{ !github.event.repository.fork }}
+    # Publishes upstream's docs site. In a private copy configure-pages cannot
+    # enable Pages and fails the run, after the docs have already been built.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     needs: build
     runs-on: ubuntu-latest
     environment:

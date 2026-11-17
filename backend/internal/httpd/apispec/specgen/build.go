@@ -3150,6 +3150,27 @@ func projectOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/permission-rules", id: "listProjectPermissionRules", tag: "projects",
+			summary:    "List the tool permissions users chose \"Always allow\" for in this project",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListProjectPermissionRulesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/projects/{id}/permission-rules/{ruleId}", id: "revokeProjectPermissionRule", tag: "projects",
+			summary:    "Revoke a remembered permission rule for future sessions and live Claude Code sessions of the project",
+			pathParams: []any{controllers.ProjectPermissionRuleIDParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodDelete, path: "/api/v1/projects/{id}", id: "removeProject", tag: "projects",
 			summary:    "Remove a project; stops sessions, cleans workspaces, unregisters",
 			pathParams: []any{controllers.ProjectIDParam{}},

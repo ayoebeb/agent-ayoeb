@@ -26,37 +26,40 @@ import (
 
 // APIDeps bundles every service the API layer's controllers depend on.
 type APIDeps struct {
-	UsageFlush         func(context.Context)
-	Awake              controllers.AwakeService
-	Agents             controllers.AgentCatalog
-	CodexAccounts      controllers.CodexAccountService
-	AgentAccounts      controllers.AgentAccountService
-	Projects           projectsvc.Manager
-	Sessions           controllers.SessionService
-	ArtifactVersions   controllers.ArtifactVersionService
-	Automations        controllers.AutomationService
-	DesktopWorkspaces  controllers.DesktopWorkspaceService
-	Activity           controllers.ActivityRecorder
-	PRRefresh          controllers.PRRefresher
-	NativeSessions     ports.AgentNativeSessionResolver
-	UsageHooks         controllers.UsageHookRecorder
-	UsageSummary       controllers.UsageSummaryService
-	UsageReport        controllers.UsageReportService
-	UsageLimitHistory  controllers.UsageLimitHistoryService
-	UsageLimitSetting  controllers.UsageLimitHistorySetting
-	UsagePrices        controllers.UsagePriceService
-	SessionMemory      controllers.SessionMemoryService
-	SessionSteps       controllers.SessionStepsReader
-	PRs                prsvc.ActionManager
-	Reviews            reviewsvc.Manager
-	Notifications      controllers.NotificationService
-	Reports            controllers.ReportService
-	NotificationStream controllers.NotificationStream
-	Push               controllers.PushRegistry
-	Import             controllers.ImportService
-	SessionImport      controllers.SessionImportService
-	Directories        controllers.DirectoryBrowserService
-	ShellTerminals     controllers.ShellTerminalService
+	UsageFlush    func(context.Context)
+	Awake         controllers.AwakeService
+	Agents        controllers.AgentCatalog
+	CodexAccounts controllers.CodexAccountService
+	AgentAccounts controllers.AgentAccountService
+	Projects      projectsvc.Manager
+	// ProjectPermissionRules lists and revokes a project's remembered "Always
+	// allow" rules. Nil answers 501.
+	ProjectPermissionRules controllers.ProjectPermissionRules
+	Sessions               controllers.SessionService
+	ArtifactVersions       controllers.ArtifactVersionService
+	Automations            controllers.AutomationService
+	DesktopWorkspaces      controllers.DesktopWorkspaceService
+	Activity               controllers.ActivityRecorder
+	PRRefresh              controllers.PRRefresher
+	NativeSessions         ports.AgentNativeSessionResolver
+	UsageHooks             controllers.UsageHookRecorder
+	UsageSummary           controllers.UsageSummaryService
+	UsageReport            controllers.UsageReportService
+	UsageLimitHistory      controllers.UsageLimitHistoryService
+	UsageLimitSetting      controllers.UsageLimitHistorySetting
+	UsagePrices            controllers.UsagePriceService
+	SessionMemory          controllers.SessionMemoryService
+	SessionSteps           controllers.SessionStepsReader
+	PRs                    prsvc.ActionManager
+	Reviews                reviewsvc.Manager
+	Notifications          controllers.NotificationService
+	Reports                controllers.ReportService
+	NotificationStream     controllers.NotificationStream
+	Push                   controllers.PushRegistry
+	Import                 controllers.ImportService
+	SessionImport          controllers.SessionImportService
+	Directories            controllers.DirectoryBrowserService
+	ShellTerminals         controllers.ShellTerminalService
 	// CommandRuns runs commands from Chat's Run button; CommandRunKey is the
 	// key the local desktop presents for them (see DeriveCommandRunKey).
 	CommandRuns   controllers.CommandRunService
@@ -150,37 +153,39 @@ type API struct {
 	codexAccounts *controllers.CodexAccountsController
 	agentAccounts *controllers.AgentAccountsController
 	projects      *controllers.ProjectsController
-	sessions      *controllers.SessionsController
-	automations   *controllers.AutomationsController
-	desktop       *controllers.DesktopWorkspaceController
-	usage         *controllers.UsageController
-	prs           *controllers.PRsController
-	reviews       *controllers.ReviewsController
-	notifications *controllers.NotificationsController
-	reports       *controllers.ReportsController
-	push          *controllers.PushController
-	imports       *controllers.ImportController
-	sessionImport *controllers.SessionImportController
-	fs            *controllers.FSController
-	shellTerms    *controllers.ShellTerminalsController
-	commandRuns   *controllers.CommandRunsController
-	cues          *controllers.CuesController
-	conversations *controllers.ConversationsController
-	settings      *controllers.SettingsController
-	dev           *controllers.DevController
-	browser       *controllers.BrowserController
-	sharedBrowser *controllers.SharedBrowserProfilesController
-	system        *controllers.SystemController
-	identity      *controllers.IdentityController
-	endpoints     *controllers.EndpointsController
-	telemetryID   *controllers.TelemetryIdentityController
-	systemInstall *controllers.SystemInstallController
-	computerUse   *controllers.ComputerUseController
-	agentAuth     *controllers.AgentAuthController
-	linkPreview   *controllers.LinkPreviewController
-	github        *controllers.GitHubController
-	jira          *controllers.JiraController
-	events        *EventsController
+	// projectPermissionRules serves /projects/{id}/permission-rules.
+	projectPermissionRules *controllers.ProjectPermissionRulesController
+	sessions               *controllers.SessionsController
+	automations            *controllers.AutomationsController
+	desktop                *controllers.DesktopWorkspaceController
+	usage                  *controllers.UsageController
+	prs                    *controllers.PRsController
+	reviews                *controllers.ReviewsController
+	notifications          *controllers.NotificationsController
+	reports                *controllers.ReportsController
+	push                   *controllers.PushController
+	imports                *controllers.ImportController
+	sessionImport          *controllers.SessionImportController
+	fs                     *controllers.FSController
+	shellTerms             *controllers.ShellTerminalsController
+	commandRuns            *controllers.CommandRunsController
+	cues                   *controllers.CuesController
+	conversations          *controllers.ConversationsController
+	settings               *controllers.SettingsController
+	dev                    *controllers.DevController
+	browser                *controllers.BrowserController
+	sharedBrowser          *controllers.SharedBrowserProfilesController
+	system                 *controllers.SystemController
+	identity               *controllers.IdentityController
+	endpoints              *controllers.EndpointsController
+	telemetryID            *controllers.TelemetryIdentityController
+	systemInstall          *controllers.SystemInstallController
+	computerUse            *controllers.ComputerUseController
+	agentAuth              *controllers.AgentAuthController
+	linkPreview            *controllers.LinkPreviewController
+	github                 *controllers.GitHubController
+	jira                   *controllers.JiraController
+	events                 *EventsController
 }
 
 // NewAPI constructs the API surface from its dependencies. cfg carries the
@@ -204,6 +209,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		projects: &controllers.ProjectsController{
 			Mgr: deps.Projects,
 		},
+		projectPermissionRules: &controllers.ProjectPermissionRulesController{Svc: deps.ProjectPermissionRules},
 		sessions: &controllers.SessionsController{
 			Svc:                      deps.Sessions,
 			Projects:                 deps.Projects,
@@ -365,6 +371,7 @@ func (a *API) Register(root chi.Router) {
 			a.codexAccounts.Register(r)
 			a.agentAccounts.Register(r)
 			a.projects.Register(r)
+			a.projectPermissionRules.Register(r)
 			a.sessions.Register(r)
 			a.automations.Register(r)
 			a.desktop.Register(r)

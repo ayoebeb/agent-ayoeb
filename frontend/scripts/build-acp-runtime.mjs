@@ -15,6 +15,7 @@ import {
 	archiveExtraction,
 	createWorkDirectory,
 	npmInvocation,
+	patchClaudeAlwaysAllowScope,
 	patchClaudeContextUsage,
 	patchClaudeFoldedPromptSettlement,
 	patchClaudeHibernationCheck,
@@ -93,6 +94,7 @@ patchClaudeHibernationCheck(claudeAdapter);
 patchClaudeFoldedPromptSettlement(claudeAdapter);
 patchClaudeStaleIdleDebt(claudeAdapter);
 patchClaudeSteerSettlement(claudeAdapter);
+patchClaudeAlwaysAllowScope(claudeAdapter);
 
 // The Claude Agent SDK declares platform-native Claude executables as optional
 // dependencies. --omit=optional excludes them; this removal is defense-in-depth.
