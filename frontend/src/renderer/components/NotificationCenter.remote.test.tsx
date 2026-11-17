@@ -100,6 +100,8 @@ vi.mock("../hooks/useCloudNotifications", () => ({
 }));
 vi.mock("../hooks/useRestoreSession", () => ({ useRestoreSession: () => vi.fn() }));
 vi.mock("../lib/host-clients", () => ({ clientForHost: (hostId: string) => mocks.clientForHost(hostId) }));
+// Which orchestrators are waiting is not what this file covers; its hook reads the connected hosts.
+vi.mock("../hooks/useOrchestratorWaiting", () => ({ useOrchestratorWaiting: () => ({ waiting: [] }) }));
 
 beforeEach(() => {
 	for (const mock of Object.values(mocks)) mock.mockReset();
