@@ -208,7 +208,7 @@ func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.S
 }
 
 type fakeSettings struct {
-	mu      sync.Mutex
+	mu            sync.Mutex
 	enabled       bool
 	maxConcurrent int
 }
