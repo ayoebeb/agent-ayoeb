@@ -772,8 +772,10 @@ var textRules = []struct {
 	limit   domain.HardLimit
 	pattern *regexp.Regexp
 }{
-	{domain.HardLimitMoney, regexp.MustCompile(`\b(buy|purchase|subscribe to|upgrade (the |our |your )?(paid |billing )?plan|pay for|add a (credit|payment) card|change (the )?billing|enter (a )?payment)\b`)},
-	{domain.HardLimitCI, regexp.MustCompile(`\b(disable|skip|bypass|turn off|remove|weaken|silence|ignore) (the )?(ci|checks|required checks|pipeline|workflow|tests? in ci|hooks|pre-commit|review)\b|--no-verify|\[skip ci\]|\badmin merge\b|\bforce[- ]merge\b`)},
+	// A few words may sit between the verb and what it buys ("upgrade the paid CI
+	// plan", "buy more CI minutes"); the objects are the things that cost money.
+	{domain.HardLimitMoney, regexp.MustCompile(`\b(buy|purchase|subscribe to|pay for|renew|top up|upgrade)\b[^.]{0,40}\b(plan|subscription|licen[cs]es?|credits?|minutes|seats?|tier|billing|payment|card)\b|\badd a (credit|payment) card\b|\bchange (the )?billing\b|\benter (a )?payment\b`)},
+	{domain.HardLimitCI, regexp.MustCompile(`\b(disable|skip|bypass|turn off|remove|weaken|silence|ignore)\s+(the\s+)?(\w+\s+){0,2}(ci|checks?|pipeline|workflow|hooks|pre-commit|review)\b|--no-verify|\[skip ci\]|\badmin merge\b|\bforce[- ]merge\b`)},
 	{domain.HardLimitMainPush, regexp.MustCompile(`\b(push|commit|merge)\b[^.]{0,40}\b(directly )?(to|into|on) (the )?(main|master|default branch)\b[^.]{0,30}\b(without|no) (a )?(review|pr|pull request)\b|\bforce[- ]push\b`)},
 	{domain.HardLimitDataDelete, regexp.MustCompile(`\b(delete|wipe|erase|remove|format)\b[^.]{0,40}\b(outside|home directory|my documents|other projects?|another repo(sitory)?|the database|production data|backups?)\b`)},
 	{domain.HardLimitAdmin, regexp.MustCompile(`\b(run as admin(istrator)?|use sudo|with sudo|elevate|elevated rights|administrator rights|grant admin)\b`)},

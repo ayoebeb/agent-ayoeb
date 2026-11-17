@@ -248,6 +248,9 @@ func TestParseApprovalReadsTheProviderPayload(t *testing.T) {
 func TestClassifyTextFlagsChoicesThatCrossALimit(t *testing.T) {
 	flagged := map[string]domain.HardLimit{
 		"Upgrade the paid plan so the build has more minutes":    domain.HardLimitMoney,
+		"Upgrade the paid CI plan":                               domain.HardLimitMoney,
+		"Buy more CI minutes so the queue clears":                domain.HardLimitMoney,
+		"Skip the failing CI checks to merge faster":             domain.HardLimitCI,
 		"Disable the CI checks until the release is out":         domain.HardLimitCI,
 		"Force push to rewrite history":                          domain.HardLimitMainPush,
 		"Run as administrator to install the driver":             domain.HardLimitAdmin,
@@ -266,6 +269,8 @@ func TestClassifyTextFlagsChoicesThatCrossALimit(t *testing.T) {
 		"Ask the orchestrator to review the exact head",
 		"Use the existing importer cache",
 		"Tell the user in the final report what was left",
+		"Upgrade the dependency to the latest version",
+		"Keep the failing check and fix the code that breaks it",
 	} {
 		if got, ok := ClassifyText(text); ok {
 			t.Errorf("ClassifyText(%q) flagged %q, want none", text, got)
