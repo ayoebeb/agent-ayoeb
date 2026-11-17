@@ -102,6 +102,24 @@ describe("SessionInspectorShellView", () => {
     expect(body).not.toHaveClass("overflow-y-auto");
     expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-selected", "true");
   });
+  it("renders the crew under its own tab, with its own scrolling and a corner count", () => {
+    const withCrew = [{ count: 2, id: "crew" as const, icon: <svg />, label: "Crew" }, ...tabs];
+    const onViewChange = vi.fn();
+    render(<SessionInspectorShellView
+      activeView="crew" ariaLabel="Session inspector" browserPoppedOut={false}
+      crewView={<div data-testid="crew-slot" />} summaryView={<div data-testid="summary-slot" />}
+      tabs={withCrew} onViewChange={onViewChange}
+    />);
+    const body = screen.getByTestId("crew-slot").parentElement;
+    expect(body).toHaveClass("p-0", "overflow-hidden");
+    expect(body).not.toHaveClass("overflow-y-auto");
+    expect(screen.queryByTestId("summary-slot")).toBeNull();
+    const tab = screen.getByRole("tab", { name: "Crew" });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(tab).toHaveTextContent("2");
+    fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
+    expect(onViewChange).toHaveBeenCalledWith("summary");
+  });
   it("preserves the tab semantics, responsive labels, badge, and host slots", () => {
     const onViewChange = vi.fn();
     const { rerender } = render(
