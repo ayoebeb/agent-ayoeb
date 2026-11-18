@@ -3383,3 +3383,20 @@ func TestFailedReviewLaunchKeepsArchivedReviewerHidden(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewerSelectionFillsModelFromSameHarnessWorker(t *testing.T) {
+	eng := newEngineForTest(&fakeStore{}, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, &fakeLauncher{})
+	eng.projects = fakeProjects{cfg: domain.ProjectConfig{
+		Reviewers: []domain.ReviewerConfig{{Harness: domain.ReviewerCodex, AgentConfig: domain.AgentConfig{Model: "gpt-6-astra", Effort: "xhigh"}}},
+		Worker:    domain.RoleOverride{Harness: domain.HarnessClaudeCode, AgentConfig: domain.AgentConfig{Model: "claude-sonnet-5-5"}},
+	}}
+	worker := domain.SessionRecord{ReviewerHarness: domain.ReviewerClaudeCode}
+	got, cfg, err := eng.reviewerSelection(context.Background(), worker)
+	if err != nil || got != domain.ReviewerClaudeCode || cfg.Model != "claude-sonnet-5-5" {
+		t.Fatalf("selection = (%q, %+v, %v), want claude-code + claude-sonnet-5-5", got, cfg, err)
+	}
+	got, cfg, _ = eng.reviewerSelection(context.Background(), domain.SessionRecord{})
+	if got != domain.ReviewerCodex || cfg.Model != "gpt-6-astra" {
+		t.Fatalf("project reviewer selection = (%q, %+v), want codex + gpt-6-astra", got, cfg)
+	}
+}
