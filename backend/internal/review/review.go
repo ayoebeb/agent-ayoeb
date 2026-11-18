@@ -387,6 +387,11 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 		} else {
 			config = domain.AgentConfig{}
 		}
+		if config.Model == "" && override != resolvedHarness {
+			if config.Model, err = e.sameHarnessProjectModel(ctx, worker, harness); err != nil {
+				return TriggerResult{}, err
+			}
+		}
 	} else if !overrideConfig.IsZero() {
 		config = mergeReviewerAgentConfig(config, overrideConfig)
 		hasConfigOverride = config != resolvedConfig
@@ -1932,14 +1937,21 @@ func (e *Engine) reviewerSelection(
 	if err != nil || config.Model != "" {
 		return harness, config, err
 	}
-	if e.projects != nil {
-		if proj, ok, perr := e.projects.GetProject(ctx, string(worker.ProjectID)); perr != nil {
-			return "", domain.AgentConfig{}, perr
-		} else if ok {
-			config.Model = fillReviewerModel(proj.Config, harness)
-		}
+	if config.Model, err = e.sameHarnessProjectModel(ctx, worker, harness); err != nil {
+		return "", domain.AgentConfig{}, err
 	}
 	return harness, config, nil
+}
+
+func (e *Engine) sameHarnessProjectModel(ctx stdctx.Context, worker domain.SessionRecord, harness domain.ReviewerHarness) (string, error) {
+	if e.projects == nil {
+		return "", nil
+	}
+	proj, ok, err := e.projects.GetProject(ctx, string(worker.ProjectID))
+	if err != nil || !ok {
+		return "", err
+	}
+	return fillReviewerModel(proj.Config, harness), nil
 }
 
 // fillReviewerModel returns the model configured for the same harness

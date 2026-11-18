@@ -3400,3 +3400,20 @@ func TestReviewerSelectionFillsModelFromSameHarnessWorker(t *testing.T) {
 		t.Fatalf("project reviewer selection = (%q, %+v), want codex + gpt-6-astra", got, cfg)
 	}
 }
+
+func TestTriggerHarnessOverrideFillsModelFromSameHarnessWorker(t *testing.T) {
+	store := &fakeStore{}
+	launcher := &fakeLauncher{handle: "review-mer-1"}
+	projects := fakeProjects{cfg: domain.ProjectConfig{
+		Reviewers: []domain.ReviewerConfig{{Harness: domain.ReviewerCodex, AgentConfig: domain.AgentConfig{Model: "gpt-6-astra"}}},
+		Worker:    domain.RoleOverride{Harness: domain.HarnessClaudeCode, AgentConfig: domain.AgentConfig{Model: "claude-sonnet-5-5"}},
+	}}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), projects, launcher)
+
+	if _, err := eng.TriggerWithOptions(context.Background(), "mer-1", TriggerOptions{Harness: domain.ReviewerClaudeCode}); err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if got := launcher.gotSpec.AgentConfig.Model; launcher.gotSpec.Harness != domain.ReviewerClaudeCode || got != "claude-sonnet-5-5" {
+		t.Fatalf("launched = (%q, %q), want claude-code + claude-sonnet-5-5", launcher.gotSpec.Harness, got)
+	}
+}
