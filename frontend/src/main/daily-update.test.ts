@@ -25,7 +25,16 @@ function fakeChild() {
 	};
 }
 
-function setup(files: Record<string, string>, options: { platform?: NodeJS.Platform; dir?: string | undefined } = {}) {
+/** The PowerShell the relay runs, decoded from its -EncodedCommand. */
+function relayOf(spawn: { mock: { calls: unknown[][] } }): string {
+	const args = spawn.mock.calls[0][1] as string[];
+	return Buffer.from(args[args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
+}
+
+function setup(
+	files: Record<string, string>,
+	options: { platform?: NodeJS.Platform; dir?: string | undefined; runError?: (dir: string, since: number) => string | undefined } = {},
+) {
 	const child = fakeChild();
 	const spawn = vi.fn(() => child);
 	const writes: Record<string, string> = {};
@@ -44,6 +53,7 @@ function setup(files: Record<string, string>, options: { platform?: NodeJS.Platf
 		now: () => clock,
 		isFile: (file) => existing.has(file),
 		env,
+		runError: options.runError ?? (() => undefined),
 	});
 	return { controller, child, spawn, writes, files, tick: (ms: number) => (clock += ms) };
 }
@@ -73,11 +83,9 @@ describe("daily update notice state", () => {
 	it.each([null, ""])("treats configFile %j as no config file", (value) => {
 		const { controller, spawn } = setup({ [pendingPath]: pending({ configFile: value }) });
 		expect(controller.apply().state).toBe("restarting");
-		expect(spawn).toHaveBeenCalledWith(
-			toolsPwsh,
-			["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Yes"],
-			{ detached: true, stdio: "ignore", windowsHide: true },
-		);
+		expect(spawn).toHaveBeenCalledTimes(1);
+		expect(relayOf(spawn)).toContain(` -File "${script}" -Yes'`);
+		expect(relayOf(spawn)).not.toContain("-ConfigFile");
 	});
 
 	it("never starts the update by itself", () => {
@@ -90,10 +98,11 @@ describe("daily update notice state", () => {
 	it("restarts only on apply, running the script from the pending file with -Yes", () => {
 		const { controller, spawn, child } = setup({ [pendingPath]: pending({ configFile: cfg }) });
 		expect(controller.apply()).toEqual({ state: "restarting", changes: 3, target: "abc123" });
-		expect(spawn).toHaveBeenCalledWith(
-			toolsPwsh,
-			["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Yes", "-ConfigFile", cfg],
-			{ detached: true, stdio: "ignore", windowsHide: true },
+		// Not detached: DETACHED_PROCESS would stop pwsh from running anything. The relay hands the
+		// update to conhost --headless, which outlives Electron.
+		expect(spawn).toHaveBeenCalledWith(toolsPwsh, expect.arrayContaining(["-EncodedCommand"]), { stdio: "ignore", windowsHide: true });
+		expect(relayOf(spawn)).toBe(
+			`$ErrorActionPreference = 'Stop'; Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\conhost.exe') -ArgumentList '--headless "${toolsPwsh}" -NoProfile -ExecutionPolicy Bypass -File "${script}" -Yes -ConfigFile "${cfg}"' | Out-Null`,
 		);
 		expect(child.unref).toHaveBeenCalled();
 		// A second click while it runs does not start a second update.
@@ -105,8 +114,7 @@ describe("daily update notice state", () => {
 	it("uses the installed script when an older watcher wrote no script path", () => {
 		const { controller, spawn } = setup({ [pendingPath]: pending({ scriptPath: undefined }) });
 		controller.apply();
-		const call = spawn.mock.calls[0] as unknown as [string, string[]];
-		expect(call[1]).toContain(script);
+		expect(relayOf(spawn)).toContain(`-File "${script}"`);
 	});
 
 	it.each([
@@ -144,6 +152,52 @@ describe("daily update notice state", () => {
 		child.emit("exit", 0);
 		delete files[pendingPath];
 		expect(controller.getState()).toEqual({ state: "hidden" });
+	});
+
+	it("stays restarting after the relay exits 0, instead of dropping back to ready", () => {
+		const { controller, child, tick } = setup({ [pendingPath]: pending() });
+		controller.apply();
+		child.emit("exit", 0);
+		expect(controller.getState()).toEqual({ state: "restarting", changes: 3, target: "abc123" });
+		tick(10 * 60_000);
+		expect(controller.getState().state).toBe("restarting");
+	});
+
+	it("is failed when the relay itself exits with an error", () => {
+		const { controller, child } = setup({ [pendingPath]: pending() });
+		controller.apply();
+		child.emit("exit", 1);
+		expect(controller.getState()).toMatchObject({ state: "failed", message: expect.stringContaining("exit code 1") });
+	});
+
+	it("is failed after 20 minutes without the pending file going away, and Retry runs it again", () => {
+		const { controller, child, spawn, tick } = setup({ [pendingPath]: pending() });
+		controller.apply();
+		child.emit("exit", 0);
+		tick(20 * 60_000 + 1);
+		expect(controller.getState()).toMatchObject({ state: "failed", message: expect.stringContaining("20 minutes") });
+		controller.apply();
+		expect(spawn).toHaveBeenCalledTimes(2);
+		expect(controller.getState().state).toBe("restarting");
+	});
+
+	it("is failed when the run's own log reports an error, only looking at logs from this run", () => {
+		const runError = vi.fn((_dir: string, _since: number) => undefined as string | undefined);
+		const { controller, child } = setup({ [pendingPath]: pending() }, { runError });
+		controller.apply();
+		child.emit("exit", 0);
+		expect(controller.getState().state).toBe("restarting");
+		expect(runError).toHaveBeenLastCalledWith(`${dailyDir}\\logs`, 1_000_000);
+		runError.mockReturnValue("git merge failed");
+		expect(controller.getState()).toMatchObject({ state: "failed", message: "git merge failed" });
+	});
+
+	it("goes back to ready on a new target (a different update) while restarting", () => {
+		const { controller, child, files } = setup({ [pendingPath]: pending() });
+		controller.apply();
+		child.emit("exit", 0);
+		files[pendingPath] = pending({ target: "def456" });
+		expect(controller.getState()).toMatchObject({ state: "ready", target: "def456" });
 	});
 });
 

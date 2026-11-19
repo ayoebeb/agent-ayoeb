@@ -227,7 +227,10 @@ function Invoke-UpdatePass([switch]$NeverRestart) {
 $updateLock = New-DailyMutex $cfg 'AoDailyUpdate'
 function Enter-UpdateLock([int]$TimeoutMs) { Enter-DailyMutex $updateLock $TimeoutMs }
 
-$transcript = Join-Path $cfg.LogDir ("update-{0}.log" -f (Get-Date -Format 'yyyyMMdd'))
+# The watcher keeps update-YYYYMMDD.log open for days, so a second run could not log there:
+# every other run (the app's Restart button, a manual run) gets its own transcript file.
+if ($Watch) { $transcript = Join-Path $cfg.LogDir ("update-{0}.log" -f (Get-Date -Format 'yyyyMMdd')) }
+else { $transcript = Join-Path $cfg.LogDir ("update-{0}-{1}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID) }
 Start-Transcript -LiteralPath $transcript -Append | Out-Null
 try {
 	if ($Watch) {
