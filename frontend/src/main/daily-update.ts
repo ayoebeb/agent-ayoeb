@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
-import { lstatSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { HIDDEN_DAILY_UPDATE, type DailyUpdateState } from "../shared/daily-update";
 
@@ -27,6 +27,8 @@ export type DailyUpdateDeps = {
 	/** True for an existing regular file. */
 	isFile?: (file: string) => boolean;
 	env?: NodeJS.ProcessEnv;
+	/** The error a run (started at/after `since` ms) wrote to its own log, if any. */
+	runError?: (logDir: string, since: number) => string | undefined;
 };
 
 export const PENDING_FILE = "pending-restart.json";
@@ -76,6 +78,28 @@ function parsePending(text: string, dailyDir: string): Pending | undefined {
 	};
 }
 
+/** Single-quoted PowerShell literal. */
+const psQuote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+
+/**
+ * The update must really run and outlive this Electron, which the update stops.
+ * A detached spawn on Windows (DETACHED_PROCESS) never runs the script, so this starts
+ * a short non-detached relay that Start-Process-es `conhost --headless <pwsh> -File <script>`
+ * (the same way the daily scripts start their watcher) and exits at once.
+ * Sent as -EncodedCommand so no path needs command-line quoting.
+ */
+export function relayArgs(pwsh: string, scriptArgs: string[]): string[] {
+	const argLine = ["--headless", `"${pwsh}"`, ...scriptArgs.map((arg) => (win.isAbsolute(arg) ? `"${arg}"` : arg))].join(" ");
+	const script = [
+		"$ErrorActionPreference = 'Stop'",
+		`Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\\conhost.exe') -ArgumentList ${psQuote(argLine)} | Out-Null`,
+	].join("; ");
+	return ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
+}
+
+/** The relay returns at once; the update itself is expected to finish well within this. */
+export const RESTART_TIMEOUT_MS = 20 * 60_000;
+
 type Checked = { ok: true; command: string; args: string[] } | { ok: false; message: string };
 
 /** Everything that will be spawned must be an existing file in an expected place. Refuse, never repair. */
@@ -101,7 +125,27 @@ function check(pending: Pending, dailyDir: string, env: NodeJS.ProcessEnv, isFil
 		}
 		args.push("-ConfigFile", configFile);
 	}
-	return { ok: true, command: pwsh, args };
+	return { ok: true, command: pwsh, args: relayArgs(pwsh, args) };
+}
+
+/**
+ * A button/manual run writes its own transcript update-YYYYMMDD-HHmmss-<pid>.log (the
+ * watcher keeps update-YYYYMMDD.log). Returns the error of a run started at/after `since`, if any.
+ */
+function findRunError(logDir: string, since: number): string | undefined {
+	try {
+		for (const name of readdirSync(logDir)) {
+			if (!/^update-\d{8}-\d{6}-\d+\.log$/.test(name)) continue;
+			const file = path.join(logDir, name);
+			if (statSync(file).mtimeMs < since) continue;
+			const text = readFileSync(file, "utf8");
+			const match = /PS>TerminatingError\([^)]*\): "([^"]*)"/.exec(text);
+			if (match) return match[1] || "The update script reported an error.";
+		}
+	} catch {
+		// No logs folder or an unreadable log: nothing to report.
+	}
+	return undefined;
 }
 
 export function createDailyUpdateController(deps: DailyUpdateDeps) {
@@ -132,7 +176,8 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 
 	// The script's own outcome, for this app run. The file alone cannot say
 	// "restarting" or "failed": it just stays until the update succeeds.
-	let run: { phase: "restarting" | "failed"; target: string; message?: string } | undefined;
+	let run: { phase: "restarting" | "failed"; target: string; message?: string; startedAt?: number } | undefined;
+	const runError = deps.runError ?? findRunError;
 	let lastHeartbeat = 0;
 
 	const read = (): Pending | undefined => {
@@ -163,6 +208,16 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 		// A newer pending target replaces an old failure: it is a different update.
 		if (run && run.target !== pending.target) run = undefined;
 		const base = { changes: pending.changes, target: pending.target };
+		if (run?.phase === "restarting" && dailyDir) {
+			// The relay exits at once, so "restarting" lasts until the pending file goes away or
+			// its target changes (both handled above), a run log reports an error, or the timeout.
+			const startedAt = run.startedAt ?? now();
+			const error = runError(win.join(dailyDir, "logs"), startedAt);
+			if (error) run = { phase: "failed", target: run.target, message: error };
+			else if (now() - startedAt > RESTART_TIMEOUT_MS) {
+				run = { phase: "failed", target: run.target, message: "The update did not finish in 20 minutes." };
+			}
+		}
 		if (run?.phase === "restarting") return { state: "restarting", ...base };
 		beat(pending);
 		if (run?.phase === "failed") return { state: "failed", ...base, message: run.message ?? "" };
@@ -179,17 +234,18 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 			return getState();
 		}
 		const target = pending.target;
-		run = { phase: "restarting", target };
+		run = { phase: "restarting", target, startedAt: now() };
 		try {
-			// Detached: the script stops this Electron and starts a new one; it must outlive us.
-			const child = spawn(checked.command, checked.args, { detached: true, stdio: "ignore", windowsHide: true });
+			// Not detached (DETACHED_PROCESS stops pwsh from running anything on Windows). The relay
+			// starts the real update under conhost --headless, which outlives this Electron.
+			const child = spawn(checked.command, checked.args, { stdio: "ignore", windowsHide: true });
 			child.on("error", (error: Error) => {
 				run = { phase: "failed", target, message: error.message };
 			});
 			child.on("exit", (code: number | null) => {
-				// Success removes the pending file, which hides the notice.
-				if (code !== 0) run = { phase: "failed", target, message: `The update stopped (exit code ${code ?? "?"}).` };
-				else run = undefined;
+				// Exit 0 only means the update was handed off: stay "restarting" until the pending
+				// file goes away (success), a log reports an error, or the timeout.
+				if (code !== 0) run = { phase: "failed", target, message: `The update could not start (exit code ${code ?? "?"}).` };
 			});
 			child.unref();
 		} catch (error) {
