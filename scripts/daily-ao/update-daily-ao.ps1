@@ -206,9 +206,11 @@ function Invoke-UpdatePass([switch]$NeverRestart) {
 	Show-RestartSummary $plan
 	# scriptPath/pwsh/configFile let the app run this same update with -Yes when the
 	# user clicks Restart in its notice (also on a PC whose daily home differs).
-	@{ at = (Get-Date).ToString('o'); target = $plan.Target; kinds = $plan.RestKinds; commits = @($plan.Rest | ForEach-Object { "$($_.Sha.Substring(0, 9)) $($_.Subject)" })
-		scriptPath = (Join-Path $cfg.ScriptsDir 'update-daily-ao.ps1'); pwsh = (Get-PwshPath $cfg); configFile = $cfg.ConfigFile } |
-		ConvertTo-Json | Set-Content -LiteralPath $pendingFile -Encoding utf8
+	$pendingInfo = @{ at = (Get-Date).ToString('o'); target = $plan.Target; kinds = $plan.RestKinds; commits = @($plan.Rest | ForEach-Object { "$($_.Sha.Substring(0, 9)) $($_.Subject)" })
+		scriptPath = (Join-Path $cfg.ScriptsDir 'update-daily-ao.ps1'); pwsh = (Get-PwshPath $cfg) }
+	# Omit configFile when no config file is used (a null would fail the app's check).
+	if ($cfg.ConfigFile) { $pendingInfo['configFile'] = $cfg.ConfigFile }
+	$pendingInfo | ConvertTo-Json | Set-Content -LiteralPath $pendingFile -Encoding utf8
 	if ($NeverRestart -or $NonInteractive) { return 'restart-pending' }
 	if (-not $Yes) {
 		$answer = Read-Host 'Nu toepassen en AO herstarten? Lopende sessies blijven doorgaan. (j/n)'
@@ -232,8 +234,20 @@ try {
 		Write-Step "Watcher: elke $IntervalSeconds s origin/$($cfg.Branch) controleren"
 		$announced = ''
 		$firstSeen = $null
+		# A watcher runs for days with the code it loaded; when the scripts change on
+		# disk, start a fresh watcher with the new code and end this one.
+		$scriptHash = { (Get-ChildItem -LiteralPath $cfg.ScriptsDir -Filter '*.ps1' -File | Sort-Object Name | Get-FileHash -Algorithm SHA256 | ForEach-Object Hash) -join '' }
+		$loadedHash = & $scriptHash
 		while ($true) {
 			try {
+				if ((& $scriptHash) -ne $loadedHash) {
+					$self = Join-Path $cfg.ScriptsDir 'update-daily-ao.ps1'
+					$argLine = "--headless `"$(Get-PwshPath $cfg)`" -NoProfile -ExecutionPolicy Bypass -File `"$self`" -Watch"
+					if ($cfg.ConfigFile) { $argLine += " -ConfigFile `"$($cfg.ConfigFile)`"" }
+					Write-Note 'Scripts zijn bijgewerkt; watcher herstart zichzelf met de nieuwe versie.'
+					Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\conhost.exe') -ArgumentList $argLine | Out-Null
+					return
+				}
 				if (-not (Enter-UpdateLock 0)) { Start-Sleep -Seconds $IntervalSeconds; continue }
 				try { $r = Invoke-UpdateOnce -NeverRestart } finally { $updateLock.ReleaseMutex() }
 				if ($r -eq 'restart-pending') {

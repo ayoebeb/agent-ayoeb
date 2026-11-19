@@ -70,6 +70,16 @@ describe("daily update notice state", () => {
 		expect(writes[shownPath]).not.toBe(before);
 	});
 
+	it.each([null, ""])("treats configFile %j as no config file", (value) => {
+		const { controller, spawn } = setup({ [pendingPath]: pending({ configFile: value }) });
+		expect(controller.apply().state).toBe("restarting");
+		expect(spawn).toHaveBeenCalledWith(
+			toolsPwsh,
+			["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Yes"],
+			{ detached: true, stdio: "ignore", windowsHide: true },
+		);
+	});
+
 	it("never starts the update by itself", () => {
 		const { controller, spawn } = setup({ [pendingPath]: pending() });
 		controller.getState();

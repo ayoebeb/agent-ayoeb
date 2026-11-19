@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { HIDDEN_DAILY_UPDATE, type DailyUpdateState } from "../shared/daily-update";
 
@@ -94,7 +94,8 @@ function check(pending: Pending, dailyDir: string, env: NodeJS.ProcessEnv, isFil
 		return { ok: false, message: "PowerShell was not found in an expected place." };
 	}
 	const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Yes"];
-	if (configFile !== undefined) {
+	// Older watchers wrote "configFile": null when no config file is used: that means absent.
+	if (configFile !== undefined && configFile !== null && configFile !== "") {
 		if (!plainAbsolutePath(configFile) || !insideDir(configFile, dailyDir) || !isFile(configFile)) {
 			return { ok: false, message: "The update config is not in the daily folder." };
 		}
@@ -116,8 +117,16 @@ export function createDailyUpdateController(deps: DailyUpdateDeps) {
 		((file: string) => {
 			try {
 				return statSync(file).isFile();
-			} catch {
-				return false;
+			} catch (error) {
+				// A Store App Execution Alias (a reparse point) cannot be stat'ed (EACCES/EPERM/UNKNOWN) but is listed by lstat.
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code !== "EACCES" && code !== "EPERM" && code !== "UNKNOWN") return false;
+				try {
+					const link = lstatSync(file);
+					return link.isFile() || link.isSymbolicLink();
+				} catch {
+					return false;
+				}
 			}
 		});
 
