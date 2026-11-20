@@ -29,6 +29,8 @@ import type {
 	BrowserAnnotationSubmitPayload,
 } from "../shared/browser-annotations";
 import { parseAgentBrowserJSON } from "./agent-browser-runtime";
+import { CertificateTrustStore } from "./browser-certificate-trust";
+import { CERT_A, FINGERPRINT_A } from "./browser-certificate-fixtures";
 
 vi.mock("electron", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("electron")>();
@@ -155,7 +157,10 @@ function submittedAnnotationSession(
 	};
 }
 
-function setupHost(agentBrowserRuntime?: import("./agent-browser-runtime").AgentBrowserRuntime) {
+function setupHost(
+	agentBrowserRuntime?: import("./agent-browser-runtime").AgentBrowserRuntime,
+	certificateTrust?: import("./browser-certificate-trust").CertificateTrustStore,
+) {
 	let currentURL = "";
 	let browserZoomFactor = 1;
 	const webContentsListeners = new Map<string, (...args: never[]) => void>();
@@ -326,6 +331,7 @@ function setupHost(agentBrowserRuntime?: import("./agent-browser-runtime").Agent
 		rendererOrigin: "http://localhost:5173",
 		agentBrowserRuntime: runtime,
 		clipboard: { writeImage },
+		certificateTrust,
 	});
 	const rendererFrame = { processId: 5, routingId: 7 };
 	const invoke = (channel: string, ...args: unknown[]) =>
@@ -5677,6 +5683,64 @@ describe("browser:setBounds", () => {
 		expect(webContents.reload).toHaveBeenCalled();
 		expect(view.setBounds).toHaveBeenLastCalledWith({ x: 100, y: 20, width: 320, height: 240 });
 		expect(view.setVisible).toHaveBeenLastCalledWith(false);
+	});
+
+	it("offers to trust the certificate a main-frame load was rejected on", async () => {
+		const trust = new CertificateTrustStore();
+		const { invoke, sent, webContents, webContentsListeners } = setupHost(undefined, trust);
+		await invoke("browser:ensure", "sess-1");
+		trust.decide({ hostname: "devtestayoeb.yoobi.ayoeb", certificateData: CERT_A, verificationResult: "net::ERR_CERT_AUTHORITY_INVALID" });
+		sent.length = 0;
+
+		webContentsListeners.get("did-fail-load")?.(
+			{} as never,
+			-202 as never,
+			"ERR_CERT_AUTHORITY_INVALID" as never,
+			"https://devtestayoeb.yoobi.ayoeb/" as never,
+			true as never,
+		);
+
+		const failure = { host: "devtestayoeb.yoobi.ayoeb", issuer: "Yoobi Test CA a", error: "ERR_CERT_AUTHORITY_INVALID" };
+		expect(sent).toContainEqual(expect.objectContaining({
+			channel: "browser:navState",
+			payload: expect.objectContaining({ certificateError: expect.objectContaining(failure) }),
+		}));
+		// A later did-stop-loading must not drop the explanation.
+		webContentsListeners.get("did-stop-loading")?.();
+		expect(sent.at(-1)).toEqual(expect.objectContaining({
+			payload: expect.objectContaining({ certificateError: expect.objectContaining(failure) }),
+		}));
+
+		// "Trust this certificate" stores exactly that pair and reloads.
+		await invoke("browser:trustCertificate", "1:sess-1");
+		expect(trust.isTrusted("devtestayoeb.yoobi.ayoeb", FINGERPRINT_A)).toBe(true);
+		expect(trust.isTrusted("other.yoobi.ayoeb", FINGERPRINT_A)).toBe(false);
+		expect(webContents.reload).toHaveBeenCalled();
+		expect(await invoke("browser:certificates:list")).toEqual([
+			expect.objectContaining({ host: "devtestayoeb.yoobi.ayoeb", fingerprint: FINGERPRINT_A }),
+		]);
+		await invoke("browser:certificates:remove", "devtestayoeb.yoobi.ayoeb", FINGERPRINT_A);
+		expect(trust.isTrusted("devtestayoeb.yoobi.ayoeb", FINGERPRINT_A)).toBe(false);
+	});
+
+	it("does not offer certificate trust for a non-certificate failure", async () => {
+		const trust = new CertificateTrustStore();
+		const { invoke, sent, webContentsListeners } = setupHost(undefined, trust);
+		await invoke("browser:ensure", "sess-1");
+		trust.decide({ hostname: "devtestayoeb.yoobi.ayoeb", certificateData: CERT_A, verificationResult: "net::ERR_CERT_AUTHORITY_INVALID" });
+		sent.length = 0;
+
+		webContentsListeners.get("did-fail-load")?.(
+			{} as never,
+			-105 as never,
+			"Name not resolved" as never,
+			"https://devtestayoeb.yoobi.ayoeb/" as never,
+			true as never,
+		);
+
+		expect(sent).not.toContainEqual(expect.objectContaining({
+			payload: expect.objectContaining({ certificateError: expect.anything() }),
+		}));
 	});
 
 	it("does not hide the page when a subresource fails to load", async () => {

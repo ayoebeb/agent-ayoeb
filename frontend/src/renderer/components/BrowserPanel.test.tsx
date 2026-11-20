@@ -44,6 +44,7 @@ const hookState = vi.hoisted(() => ({
 	goForward: vi.fn(),
 	reload: vi.fn(),
 	stop: vi.fn(),
+	trustCertificate: vi.fn(),
 	findInPage: vi.fn(),
 	stopFindInPage: vi.fn(),
 	findOpenRequest: 0,
@@ -96,6 +97,7 @@ vi.mock("../hooks/useBrowserView", () => ({
 			goForward: hookState.goForward,
 			reload: hookState.reload,
 			stop: hookState.stop,
+			trustCertificate: hookState.trustCertificate,
 			findInPage: hookState.findInPage,
 			stopFindInPage: hookState.stopFindInPage,
 			findOpenRequest: hookState.findOpenRequest,
@@ -257,6 +259,7 @@ describe("BrowserPanel", () => {
 		hookState.goForward.mockReset();
 		hookState.reload.mockReset();
 		hookState.stop.mockReset();
+		hookState.trustCertificate.mockReset();
 		hookState.findInPage.mockReset();
 		hookState.stopFindInPage.mockReset();
 		hookState.findOpenRequest = 0;
@@ -348,6 +351,31 @@ describe("BrowserPanel", () => {
 			canGoForward: false,
 			isLoading: false,
 		};
+	});
+
+	it("explains a certificate error and trusts the certificate on request", async () => {
+		hookState.navState = {
+			...hookState.navState,
+			url: "https://devtestayoeb.yoobi.ayoeb/",
+			error: "Certificate error: ERR_CERT_AUTHORITY_INVALID",
+			certificateError: {
+				host: "devtestayoeb.yoobi.ayoeb",
+				issuer: "Yoobi Test CA",
+				fingerprint: "B9:51:F8:65",
+				error: "ERR_CERT_AUTHORITY_INVALID",
+			},
+		};
+		render(<BrowserPanel active onTogglePopOut={() => undefined} poppedOut={false} session={session} />);
+
+		const notice = screen.getByTestId("browser-certificate-error");
+		expect(notice).toHaveTextContent("devtestayoeb.yoobi.ayoeb");
+		expect(notice).toHaveTextContent("Yoobi Test CA");
+		expect(notice).toHaveTextContent("B9:51:F8:65");
+		expect(notice).toHaveTextContent("ERR_CERT_AUTHORITY_INVALID");
+		expect(screen.queryByTestId("browser-preview-error")).toBeNull();
+
+		await userEvent.click(screen.getByRole("button", { name: "Trust this certificate" }));
+		expect(hookState.trustCertificate).toHaveBeenCalledTimes(1);
 	});
 
 	it("navigates to the entered URL on submit", async () => {

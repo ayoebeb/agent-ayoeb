@@ -208,6 +208,7 @@ import { repairBrowserProfileCookies } from "./main/browser-cookie-repair";
 import { browserProfilePartition } from "./shared/browser-profiles";
 import { createBrowserProfileStore } from "./main/browser-profile-store";
 import { BrowserHistoryStore } from "./main/browser-history-store";
+import { CertificateTrustStore } from "./main/browser-certificate-trust";
 import { createAwakeTrayMonitor } from "./main/awake-tray";
 import { createAwakeDownloadBridge } from "./main/awake-download-bridge";
 import { createBrowserDownloadManager } from "./main/browser-download-manager";
@@ -1260,6 +1261,8 @@ async function createWindowInternal(): Promise<void> {
 		isCloseShellTerminalShortcutEnabled: () => closeShellTerminalShortcutEnabled,
 		browserProfileStore,
 		browserHistoryStore,
+		// Lives next to the other browser state under ~/.ao (browserProfileStateDir).
+		certificateTrust: new CertificateTrustStore(browserProfileStateDir()),
 		browserDownloadManager: createBrowserDownloadManager({
 			downloadsDirectory: app.getPath("downloads"),
 			historyPath: path.join(desktopDataDir, "browser-downloads.json"),

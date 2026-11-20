@@ -114,6 +114,7 @@ import type {
 	BrowserDownloadActionInput,
 	BrowserDownloadsState,
 } from "./shared/browser-downloads";
+import type { BrowserTrustedCertificate } from "./shared/browser-certificate";
 
 if (typeof document !== "undefined") {
 	const markNativeBrowserComposition = () => {
@@ -613,6 +614,13 @@ const api = {
 		goForward: (viewId: string) => ipcRenderer.invoke("browser:goForward", viewId) as Promise<BrowserNavState>,
 		reload: (viewId: string) => ipcRenderer.invoke("browser:reload", viewId) as Promise<BrowserNavState>,
 		stop: (viewId: string) => ipcRenderer.invoke("browser:stop", viewId) as Promise<BrowserNavState>,
+		trustCertificate: (viewId: string) =>
+			ipcRenderer.invoke("browser:trustCertificate", viewId) as Promise<BrowserNavState>,
+		certificates: {
+			list: () => ipcRenderer.invoke("browser:certificates:list") as Promise<BrowserTrustedCertificate[]>,
+			remove: (host: string, fingerprint: string) =>
+				ipcRenderer.invoke("browser:certificates:remove", host, fingerprint) as Promise<BrowserTrustedCertificate[]>,
+		},
 		getFindState: (viewId: string) =>
 			ipcRenderer.invoke("browser:find:get", viewId) as Promise<BrowserFindState>,
 		findInPage: (input: BrowserFindInput) =>
