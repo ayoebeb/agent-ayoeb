@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildCrew } from "../../lib/crew";
+import { useUiStore } from "../../stores/ui-store";
 import type { ConversationUsage } from "../../types/conversation";
 import type { WorkspaceSession } from "../../types/workspace";
 
@@ -10,7 +11,8 @@ const NOW = Date.parse("2026-11-16T12:00:00Z");
 const MIN = 60_000;
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
-const { room, crewState, conversation, interrupt, pin, unpin } = vi.hoisted(() => ({
+const { room, crewState, conversation, interrupt, pin, unpin, live } = vi.hoisted(() => ({
+	live: { servers: [] as unknown[] },
 	room: { tab: "session" as string, scope: undefined as string | undefined, setTab: vi.fn(), setScope: vi.fn(), show: vi.fn() },
 	crewState: { current: undefined as unknown },
 	conversation: { snapshot: undefined as unknown },
@@ -21,6 +23,10 @@ const { room, crewState, conversation, interrupt, pin, unpin } = vi.hoisted(() =
 
 vi.mock("../../hooks/useControlRoom", () => ({ useControlRoom: () => room }));
 vi.mock("../../hooks/useCrew", () => ({ useCrew: () => crewState.current }));
+vi.mock("../../hooks/useLiveServers", () => ({
+	useLiveServers: () => ({ servers: live.servers, isError: false, isLoading: false }),
+	liveServerLabel: (server: { name: string; port: number }) => `${server.name} :${server.port}`,
+}));
 vi.mock("../../hooks/useConversation", () => ({
 	useConversation: () => ({ snapshot: conversation.snapshot }),
 	useConversationCommands: () => ({ interrupt }),
@@ -187,5 +193,30 @@ describe("OrchestratorControlBar actions", () => {
 		expect(unpinButton).toHaveAttribute("aria-pressed", "true");
 		await userEvent.click(unpinButton);
 		expect(unpin.mutate).toHaveBeenCalledWith(expect.objectContaining({ id: "p-orchestrator" }));
+	});
+});
+
+describe("OrchestratorControlBar live server chips", () => {
+	const server = (over: Record<string, unknown>) => ({ key: "managed:s1", name: "vite", port: 5173, health: "up", ...over });
+
+	it("shows no chips group while nothing runs", () => {
+		renderBar();
+		expect(screen.queryByTestId("live-server-chips")).toBeNull();
+	});
+
+	it("shows one chip per server with its health, and a hanging server is flagged as not answering", () => {
+		live.servers = [server({}), server({ key: "managed:s2", name: "Yoobi", port: 8080, health: "down", healthNote: "no response within the time limit" })];
+		renderBar();
+		const chips = within(screen.getByTestId("live-server-chips")).getAllByRole("button");
+		expect(chips.map((chip) => chip.textContent)).toEqual(["vite :5173", "Yoobi :8080"]);
+		expect(chips.map((chip) => chip.getAttribute("data-health"))).toEqual(["up", "down"]);
+		expect(chips[1]).toHaveAccessibleName("Yoobi :8080, Not answering. Open in Live.");
+	});
+
+	it("opens the Live tab on the clicked server", async () => {
+		live.servers = [server({}), server({ key: "detected:3000", name: "node", port: 3000 })];
+		renderBar();
+		await userEvent.click(screen.getByTestId("live-chip-detected:3000"));
+		expect(useUiStore.getState().inspectorSessions["p-orchestrator"]).toMatchObject({ isOpen: true, view: "live", liveServerKey: "detected:3000" });
 	});
 });

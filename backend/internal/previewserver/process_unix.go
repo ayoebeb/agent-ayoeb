@@ -182,3 +182,8 @@ func forceKillPreviewProcess(cmd *exec.Cmd, startTime string) error {
 func forceKillPreviewPID(pid int, startTime string) error {
 	return signalPreviewGroup(pid, startTime, syscall.SIGKILL)
 }
+
+// ptyArgv is the argv for running executable+args inside a PTY.
+func ptyArgv(executable string, args []string) []string {
+	return append([]string{executable}, args...)
+}

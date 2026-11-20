@@ -183,3 +183,9 @@ func CPUPercent(procs []Process, prev *Table, elapsed float64) float64 {
 	}
 	return delta / elapsed * 100
 }
+
+// Get returns one process from the snapshot.
+func (t *Table) Get(pid int) (Process, bool) {
+	p, ok := t.byPID[pid]
+	return p, ok
+}

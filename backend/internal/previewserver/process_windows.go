@@ -147,3 +147,17 @@ func forceKillPreviewProcess(cmd *exec.Cmd, startTime string) error {
 	}
 	return killPreviewTree(cmd.Process.Pid, startTime, true)
 }
+
+// ptyArgv is the argv for running executable+args inside a PTY. .cmd and .bat
+// shims (npm, npx, pnpm) cannot be spawned directly, so they run through the
+// command interpreter, as previewCommand does for pipe-backed servers.
+func ptyArgv(executable string, args []string) []string {
+	if resolved, err := exec.LookPath(executable); err == nil && isWindowsBatchFile(resolved) {
+		shell := strings.TrimSpace(os.Getenv("COMSPEC"))
+		if shell == "" {
+			shell = "cmd.exe"
+		}
+		return append([]string{shell, "/d", "/c", resolved}, args...)
+	}
+	return append([]string{executable}, args...)
+}

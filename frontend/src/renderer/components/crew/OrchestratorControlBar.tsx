@@ -4,18 +4,21 @@ import { ChevronDown, CircleStop, GitBranch, Monitor, Pin, PinOff, Server } from
 import { useConversation, useConversationCommands } from "../../hooks/useConversation";
 import { useControlRoom } from "../../hooks/useControlRoom";
 import { useCrew } from "../../hooks/useCrew";
+import { useLiveServers } from "../../hooks/useLiveServers";
 import { usePinSession, useUnpinSession } from "../../hooks/usePinSession";
 import type { CrewModel } from "../../lib/crew";
 import { labelForHost } from "../../lib/host-clients";
+import { sessionUiKey } from "../../lib/hosts";
 import { formatTokens } from "../../lib/usage-format";
 import { cn } from "../../lib/utils";
 import type { ConversationUsage } from "../../types/conversation";
 import { activeTurn } from "../../types/conversation";
-import type { ControlRoomTab } from "../../stores/ui-store";
+import { useUiStore, type ControlRoomTab } from "../../stores/ui-store";
 import type { WorkspaceSession } from "../../types/workspace";
 import { Button } from "../ui/button";
 import { Pressable } from "../ui/pressable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { LiveServerChips } from "./LiveServerChips";
 
 export const CONTROL_ROOM_TABS: readonly ControlRoomTab[] = ["session", "changes", "commits", "files"];
 
@@ -171,6 +174,8 @@ function InfoRow({
 	const modelName = orchestrator.model ?? fallbackModel;
 	const remoteLabel = orchestrator.hostId ? labelForHost(orchestrator.hostId) : undefined;
 	const { additions, deletions, worktrees } = model.totals;
+	const { servers: liveServers } = useLiveServers(orchestrator);
+	const openLiveServer = useUiStore((state) => state.openLiveServer);
 	return (
 		<div className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1.5 text-caption text-muted-foreground" data-testid="control-info-row">
 			{orchestrator.branch ? (
@@ -186,6 +191,7 @@ function InfoRow({
 					<span>{t("controlRoom.info.worktrees", { count: worktrees })}</span>
 				</span>
 			) : null}
+			<LiveServerChips onOpen={(key) => openLiveServer(sessionUiKey(orchestrator.id, orchestrator.hostId), key)} servers={liveServers} />
 			<UsageChunk locale={locale} usage={usage} />
 			{modelName ? <span className="font-mono text-foreground" title={t("controlRoom.info.model")}>{modelName}</span> : null}
 			<span className="ml-auto inline-flex items-center gap-1" data-testid="control-info-machine" title={t("controlRoom.info.machine")}>
