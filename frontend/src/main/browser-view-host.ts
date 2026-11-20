@@ -2718,10 +2718,16 @@ export function createBrowserViewHost(
       applyBrowserViewBounds(entry.view, session.bounds, false);
       return;
     }
+    // While a certificate failure is shown, the renderer's "Trust this
+    // certificate" card must stay visible and clickable. Chromium's blank error
+    // page in the native view would paint over it, so keep the view hidden on
+    // every bounds sync until the next load clears the failure.
     applyBrowserViewBounds(
       entry.view,
       session.bounds,
-      session.bounds.width > 0 && session.bounds.height > 0,
+      !entry.certificateFailure &&
+        session.bounds.width > 0 &&
+        session.bounds.height > 0,
     );
   }
 
@@ -5081,7 +5087,12 @@ export function createBrowserViewHost(
       setTimeout(() => {
         const current = entries.get(targetViewId);
         if (!current || !current.visible || !current.tabs.size) return;
-        applyBrowserViewBounds(activeEntry(current).view, current.bounds, true);
+        const currentEntry = activeEntry(current);
+        applyBrowserViewBounds(
+          currentEntry.view,
+          current.bounds,
+          !currentEntry.certificateFailure,
+        );
       }, 0);
     },
   };
@@ -5824,7 +5835,11 @@ function wireNavEvents(
   });
   contents.on("page-title-updated", update);
   contents.on("did-start-loading", () => {
+    const hadCertificateFailure = entry.certificateFailure !== undefined;
     entry.certificateFailure = undefined;
+    // Trusting the certificate (reload) or navigating away ends the failure:
+    // show the native view again.
+    if (hadCertificateFailure && isActive()) syncActiveBounds();
     update();
   });
   contents.on("did-stop-loading", () => {
