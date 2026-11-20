@@ -72,6 +72,8 @@ function setupBridge() {
 		goForward: vi.fn(async (viewId: string) => bridge.stateFor(viewId)),
 		reload: vi.fn(async (viewId: string) => bridge.stateFor(viewId)),
 		stop: vi.fn(async (viewId: string) => bridge.stateFor(viewId)),
+		trustCertificate: vi.fn(async (viewId: string) => bridge.stateFor(viewId)),
+		certificates: { list: vi.fn(async () => []), remove: vi.fn(async () => []) },
 		getTabs: vi.fn(async (viewId: string) => ({
 			viewId,
 			activeTabId: "t1",

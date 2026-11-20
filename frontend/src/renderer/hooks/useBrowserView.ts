@@ -99,6 +99,9 @@ export type BrowserViewModel = {
 	goForward: () => Promise<void>;
 	reload: () => Promise<void>;
 	stop: () => Promise<void>;
+	// Trusts the certificate the page failed on (exactly that host and
+	// fingerprint), then reloads the page.
+	trustCertificate: () => Promise<void>;
 	findState: BrowserFindState;
 	findOpenRequest: number;
 	findInPage: (query: string, forward: boolean, newSession: boolean) => Promise<void>;
@@ -1304,6 +1307,7 @@ export function useBrowserView({
 		goForward: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.goForward(id)) : Promise.resolve()),
 		reload: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.reload(id)) : Promise.resolve()),
 		stop: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.stop(id)) : Promise.resolve()),
+		trustCertificate: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.trustCertificate(id)) : Promise.resolve()),
 		findState: stateBelongsToSession ? findState : EMPTY_FIND_STATE,
 		findOpenRequest: stateBelongsToSession ? findOpenRequest : 0,
 		findInPage,

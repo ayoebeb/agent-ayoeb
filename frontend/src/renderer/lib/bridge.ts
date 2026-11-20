@@ -271,6 +271,18 @@ export const aoBridge: AoBridge =
 				canGoForward: false,
 				isLoading: false,
 			}),
+			trustCertificate: async (viewId: string) => ({
+				viewId,
+				url: "",
+				title: "",
+				canGoBack: false,
+				canGoForward: false,
+				isLoading: false,
+			}),
+			certificates: {
+				list: async () => [],
+				remove: async () => [],
+			},
 			getFindState: async (viewId: string) => ({
 				viewId,
 				tabId: "t1",

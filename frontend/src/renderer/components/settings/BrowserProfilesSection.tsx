@@ -17,6 +17,7 @@ import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 import { BrowserImportDialog } from "./BrowserImportDialog";
 import { BrowserOtherMachinesSection } from "./BrowserOtherMachinesSection";
+import { BrowserTrustedCertificates } from "./BrowserTrustedCertificates";
 import { Switch } from "../ui/switch";
 
 type ProfileBridge = AoBridge["browserProfiles"];
@@ -300,6 +301,7 @@ export function BrowserProfilesSection({ titleHidden }: { titleHidden?: boolean 
 						/>
 					))
 				)}
+				<BrowserTrustedCertificates />
 			</SettingsSection>
 			<BrowserOtherMachinesSection
 				bridge={bridge}
