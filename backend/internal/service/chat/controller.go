@@ -273,6 +273,10 @@ type Controller struct {
 	sendingTurnID string
 	// A compact request can be accepted before its provider turn starts.
 	compactionPending bool
+	// providerRunning is the provider's own last running/idle report (Claude's
+	// session_state_changed). It stays true while the agent works on after an AO
+	// turn ended, for example on a background command.
+	providerRunning bool
 	// Provider calls keep automatic hibernation out without blocking explicit Kill.
 	operations int
 	// ackedTurnID is the turn the PROVIDER has confirmed it started, which lags
@@ -3839,6 +3843,15 @@ func (c *Controller) reportProviderState(ctx context.Context, state *ports.ChatT
 		return
 	}
 	c.mu.Lock()
+	// Recorded even while a turn is in flight: the missing-report fallback reads
+	// it after the turn ends to tell a stopped worker from one whose background
+	// command is still running.
+	switch state.Status {
+	case domain.ThreadStatusActive:
+		c.providerRunning = true
+	case domain.ThreadStatusIdle:
+		c.providerRunning = false
+	}
 	turnInFlight := c.pendingTurnID != "" || c.dispatchingTurnID != "" || c.compactionPending
 	c.mu.Unlock()
 	if turnInFlight {
