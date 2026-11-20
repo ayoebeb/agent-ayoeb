@@ -10,7 +10,6 @@ import {
 	processList,
 	stableResourceOrder,
 	type ChipTone,
-	type PressureState,
 	type ProcessRow as ProcessListRow,
 	type ResourceSessionFacts,
 } from "@aoagents/product-ui";
@@ -74,17 +73,6 @@ export function toSessionFacts(session: WorkspaceSession, reading: SessionMemory
 	};
 }
 
-const stateDot: Record<PressureState, string> = {
-	fine: "bg-success",
-	tight_soon: "bg-warning",
-	tight: "animate-status-pulse bg-destructive",
-};
-const stateText: Record<PressureState, string> = {
-	fine: "",
-	tight_soon: "text-warning",
-	tight: "text-destructive",
-};
-
 /** The pressure state and what each live session holds, for the row chips. */
 function usePressureFacts(projectId?: string) {
 	const workspaces = useWorkspaceQuery().data ?? EMPTY_WORKSPACES;
@@ -132,31 +120,34 @@ export function AppMemoryIndicator() {
 				<TooltipTrigger asChild>
 					<Pressable
 						aria-label={`${word} · ${detail}`}
-						className="inline-flex items-center gap-2 rounded-md bg-sidebar/90 px-2 py-0.5 font-mono text-2xs tabular-nums text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
+						className={cn(
+							"flex w-full min-w-0 items-center gap-1 truncate rounded-md px-2 py-1 text-2xs tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline",
+							state === "tight" ? "text-destructive" : "text-muted-foreground",
+						)}
 						data-memory-state={state ?? "unknown"}
 						data-testid="app-memory-indicator"
 						onClick={() => setOpen(true)}
 						type="button"
 					>
-						<span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", state ? stateDot[state] : "bg-passive")} />
-						<span className={cn("inline-flex items-center gap-2", state ? stateText[state] : undefined)}>
-							{parts.ram ? (
-								<span data-testid="app-memory-ram">
-									{t("shell.resourceStatus.ram")} {parts.ram.used}/{parts.ram.total}
-								</span>
-							) : null}
-							{parts.cpu ? (
-								<span data-testid="app-memory-cpu">
-									{t("shell.resourceStatus.cpu")} {parts.cpu}
-								</span>
-							) : null}
+						{parts.ram ? (
+							<span data-testid="app-memory-ram">
+								{t("shell.resourceStatus.ram")} {parts.ram.used}/{parts.ram.total}
+							</span>
+						) : null}
+						{parts.ram && parts.cpu ? <span aria-hidden="true">·</span> : null}
+						{parts.cpu ? (
+							<span data-testid="app-memory-cpu">
+								{t("shell.resourceStatus.cpu")} {parts.cpu}
+							</span>
+						) : null}
+						{parts.ram || parts.cpu ? null : (
 							<span data-testid="app-memory-ayo">
 								{t("shell.resourceStatus.ayo")} {parts.ayo}
 							</span>
-						</span>
+						)}
 					</Pressable>
 				</TooltipTrigger>
-				<TooltipContent side="top">{detail}</TooltipContent>
+				<TooltipContent side="right">{detail}</TooltipContent>
 			</Tooltip>
 			{open ? <SessionMemoryPanel onOpenChange={setOpen} open /> : null}
 		</>

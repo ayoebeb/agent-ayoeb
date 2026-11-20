@@ -1472,7 +1472,7 @@
 	"settings.renderMath": "Afficher les formules",
 	"settings.renderMathHint": "Affiche $…$, $$…$$, \\(…\\) et \\[…\\] comme des équations dans les chats et les aperçus Markdown. Un prix écrit avec $ peut s’afficher comme une formule.",
 	"settings.resourceStatus": "Afficher l’état de la RAM et du CPU",
-	"settings.resourceStatusHint": "Affiche l’utilisation de la mémoire et du CPU en bas à droite de la fenêtre. Cliquez pour voir le détail par session.",
+	"settings.resourceStatusHint": "Affiche l’utilisation de la mémoire et du CPU dans la barre latérale, au-dessus de votre compte. Cliquez pour voir le détail par session.",
 	"settings.terminalCopyOnSelect": "Copier lors de la sélection",
 	"settings.projectAvatars": "Avatars des dépôts",
 	"settings.projectAvatars.description": "Affiche l'avatar du propriétaire du dépôt à la place de l'icône de dossier.",
