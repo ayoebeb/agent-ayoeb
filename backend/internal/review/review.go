@@ -20,6 +20,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
 
 // ErrInvalid and ErrNotFound let the transport layer map failures to 422/404.
@@ -1879,6 +1880,10 @@ func (e *Engine) terminateReviewer(ctx stdctx.Context, workerID domain.SessionID
 		return TerminateResult{}, err
 	}
 	destroyedHandle := ""
+	// Worker termination must not be blocked by a reviewer pane that cannot be
+	// confirmed gone (for example a stale pty-host pid). Remember the failure,
+	// finish the review-state cleanup, and report it last so the caller can warn.
+	var paneErr error
 	for _, review := range reviews {
 		if archive && review.InterfaceMode == domain.ReviewerInterfaceChat {
 			if err := e.stopReviewChatWork(ctx, review); err != nil {
@@ -1886,7 +1891,10 @@ func (e *Engine) terminateReviewer(ctx stdctx.Context, workerID domain.SessionID
 			}
 		} else if review.ReviewerHandleID != "" {
 			if err := e.launcher.Destroy(ctx, review.ReviewerHandleID); err != nil {
-				return TerminateResult{}, err
+				if archive {
+					return TerminateResult{}, err
+				}
+				paneErr = errors.Join(paneErr, fmt.Errorf("%w: %s: %w", sessionmanager.ErrReviewerPaneTeardown, review.ReviewerHandleID, err))
 			}
 		}
 		if destroyedHandle == "" {
@@ -1918,7 +1926,7 @@ func (e *Engine) terminateReviewer(ctx stdctx.Context, workerID domain.SessionID
 		run.GithubReviewID = ""
 		cancelled = append(cancelled, run)
 	}
-	return TerminateResult{ReviewerHandleID: destroyedHandle, CancelledRuns: cancelled}, nil
+	return TerminateResult{ReviewerHandleID: destroyedHandle, CancelledRuns: cancelled}, paneErr
 }
 
 // reviewerSelection resolves which reviewer reviews the worker's PR: a

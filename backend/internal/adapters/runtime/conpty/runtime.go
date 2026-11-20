@@ -14,6 +14,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/conpty/ptyregistry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
 	"github.com/aoagents/agent-orchestrator/backend/internal/procmem"
 )
 
@@ -62,6 +63,11 @@ type hostSession struct {
 	// elevated marks an administrator host. Its address carries a secret, so
 	// it lives only in memory and is never written to the pty registry.
 	elevated bool
+	// startedAt is the pty-host's OS creation time, captured when it was
+	// spawned. With registeredAt it tells our host apart from an unrelated
+	// process that Windows later gave the same pid.
+	startedAt    time.Time
+	registeredAt time.Time
 }
 
 // Options configures the Runtime. All fields are optional; zero values use
@@ -93,6 +99,7 @@ type Runtime struct {
 	elevatedSpawner elevatedSpawner
 	killHost        func(string) error
 	pidIsAlive      func(int) bool
+	pidStartTime    func(int) (time.Time, error)
 	processFinder   func(int) (processKiller, error)
 	registerHost    func(context.Context, ptyregistry.Entry) error
 	unregisterHost  func(context.Context, string) error
@@ -125,6 +132,7 @@ func New(opts Options) *Runtime {
 		elevatedSpawner: elevated,
 		killHost:        clientKill,
 		pidIsAlive:      pidAlive,
+		pidStartTime:    processalive.StartTime,
 		processFinder:   findProcess,
 		registerHost:    ptyregistry.Register,
 		unregisterHost:  unregisterHost,
@@ -215,7 +223,7 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 			// spawner could not prove cleanup. Retain its PID and launch fence in
 			// both memory and the restart registry. The sentinel address prevents
 			// ordinary client traffic while keeping the possible handle probeable.
-			sess := &hostSession{addr: unresolvedHostAddress, pid: pid, launchID: cfg.Env[runtimeLaunchIDEnv], currentOwner: true}
+			sess := &hostSession{addr: unresolvedHostAddress, pid: pid, launchID: cfg.Env[runtimeLaunchIDEnv], currentOwner: true, startedAt: r.hostStartTime(pid)}
 			r.mu.Lock()
 			r.sessions[id] = sess
 			r.mu.Unlock()
@@ -235,7 +243,7 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 			return ports.RuntimeHandle{}, conptyPartialCreateFailure(cause, handle, ports.RuntimeCleanupFailed)
 		}
 		r.mu.Lock()
-		r.sessions[id] = &hostSession{addr: addr, pid: pid, launchID: cfg.Env[runtimeLaunchIDEnv], currentOwner: true}
+		r.sessions[id] = &hostSession{addr: addr, pid: pid, launchID: cfg.Env[runtimeLaunchIDEnv], currentOwner: true, startedAt: r.hostStartTime(pid)}
 		r.mu.Unlock()
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 		cleanupErr := r.Destroy(cleanupCtx, handle)
@@ -249,6 +257,7 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 	sess := &hostSession{
 		addr: addr, pid: pid, launchID: cfg.Env[runtimeLaunchIDEnv], currentOwner: true,
 		protocolVersion: conPTYHostProtocolVersion, protocolResolved: true,
+		startedAt: r.hostStartTime(pid),
 	}
 
 	r.mu.Lock()
@@ -256,11 +265,12 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 	r.mu.Unlock()
 
 	if err := r.registerHost(ctx, ptyregistry.Entry{
-		SessionID:    id,
-		PtyHostPID:   pid,
-		PipePath:     addr, // ponytail: reuse PipePath field for loopback addr
-		LaunchID:     sess.launchID,
-		RegisteredAt: time.Now().UTC().Format(time.RFC3339),
+		SessionID:        id,
+		PtyHostPID:       pid,
+		PipePath:         addr, // ponytail: reuse PipePath field for loopback addr
+		LaunchID:         sess.launchID,
+		RegisteredAt:     time.Now().UTC().Format(time.RFC3339),
+		PtyHostStartedAt: formatStartedAt(sess.startedAt),
 	}); err != nil {
 		handle := ports.RuntimeHandle{ID: id}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
@@ -299,7 +309,7 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	if sess.addr != unresolvedHostAddress {
 		gracefulErr = r.killHost(sess.addr)
 	}
-	exited, waitErr := r.waitForPIDExit(ctx, sess.pid)
+	exited, waitErr := r.waitForPIDExit(ctx, sess)
 	if waitErr != nil {
 		return errors.Join(gracefulErr, waitErr)
 	}
@@ -312,7 +322,7 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 		} else if err := process.Kill(); err != nil {
 			forceErr = fmt.Errorf("force-kill pty-host pid %d: %w", sess.pid, err)
 		}
-		exited, waitErr = r.waitForPIDExit(ctx, sess.pid)
+		exited, waitErr = r.waitForPIDExit(ctx, sess)
 		if waitErr != nil {
 			return errors.Join(gracefulErr, forceErr, waitErr)
 		}
@@ -333,11 +343,11 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	return nil
 }
 
-func (r *Runtime) waitForPIDExit(ctx context.Context, pid int) (bool, error) {
-	if pid <= 0 {
+func (r *Runtime) waitForPIDExit(ctx context.Context, sess *hostSession) (bool, error) {
+	if sess.pid <= 0 {
 		return true, nil
 	}
-	if !r.pidIsAlive(pid) {
+	if !r.hostPIDAlive(sess) {
 		return true, nil
 	}
 	wait := r.destroyWait
@@ -357,9 +367,9 @@ func (r *Runtime) waitForPIDExit(ctx context.Context, pid int) (bool, error) {
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-timer.C:
-			return !r.pidIsAlive(pid), nil
+			return !r.hostPIDAlive(sess), nil
 		case <-ticker.C:
-			if !r.pidIsAlive(pid) {
+			if !r.hostPIDAlive(sess) {
 				return true, nil
 			}
 		}
@@ -388,7 +398,7 @@ func (r *Runtime) IsAlive(ctx context.Context, handle ports.RuntimeHandle) (bool
 		return false, nil // no in-memory entry, no registry entry -> definitively gone
 	}
 	if sess.addr == unresolvedHostAddress {
-		if sess.pid <= 0 || r.pidIsAlive(sess.pid) {
+		if sess.pid <= 0 || r.hostPIDAlive(sess) {
 			return false, fmt.Errorf("conpty: pty-host pid %d started without a READY address: %w", sess.pid, ports.ErrRuntimeProbeInconclusive)
 		}
 		return false, nil
@@ -407,7 +417,7 @@ func (r *Runtime) IsChildAlive(ctx context.Context, handle ports.RuntimeHandle) 
 		return false, nil
 	}
 	if sess.addr == unresolvedHostAddress {
-		if sess.pid <= 0 || r.pidIsAlive(sess.pid) {
+		if sess.pid <= 0 || r.hostPIDAlive(sess) {
 			return false, fmt.Errorf("conpty: child status unavailable for unresolved pty-host pid %d: %w", sess.pid, ports.ErrRuntimeProbeInconclusive)
 		}
 		return false, nil
@@ -453,7 +463,7 @@ func (r *Runtime) ProbeFencedRuntime(ctx context.Context, ref ports.FencedRuntim
 		return ports.FencedProbeResult{Liveness: ports.FencedUnknown, Reason: ports.FencedReasonGenerationMismatch}
 	}
 	if sess.addr == unresolvedHostAddress {
-		if sess.pid <= 0 || r.pidIsAlive(sess.pid) {
+		if sess.pid <= 0 || r.hostPIDAlive(sess) {
 			return ports.FencedProbeResult{Liveness: ports.FencedUnknown, Reason: ports.FencedReasonProbeFailed}
 		}
 		return ports.FencedProbeResult{Liveness: ports.FencedDead, Reason: ports.FencedReasonExactAbsent}
@@ -677,7 +687,8 @@ func (r *Runtime) resolveWithEvidence(ctx context.Context, id string) (*hostSess
 			continue
 		}
 		// Re-populate the map so subsequent calls skip the file scan.
-		recovered := &hostSession{addr: e.PipePath, pid: e.PtyHostPID, launchID: e.LaunchID}
+		recovered := &hostSession{addr: e.PipePath, pid: e.PtyHostPID, launchID: e.LaunchID,
+			startedAt: parseStartedAt(e.PtyHostStartedAt), registeredAt: parseStartedAt(e.RegisteredAt)}
 		r.mu.Lock()
 		// Only store if another goroutine hasn't beaten us.
 		if r.sessions[id] == nil {
@@ -750,4 +761,52 @@ func (r *Runtime) WatchTerminalTitle(ctx context.Context, handle ports.RuntimeHa
 		return fmt.Errorf("conpty: pty-host protocol version %d: %w", protocolVersion, ports.ErrTerminalTitleUnavailable)
 	}
 	return clientWatchTitle(ctx, sess.addr, func(state TitlePayload) { fn(state.Title) })
+}
+
+// hostPIDAlive reports whether the pid still belongs to our pty-host. Windows
+// reuses pids, and a stale pid can land on an unrelated (even elevated)
+// process; counting that as the host would wedge teardown forever.
+func (r *Runtime) hostPIDAlive(sess *hostSession) bool {
+	if !r.pidIsAlive(sess.pid) {
+		return false
+	}
+	return !r.pidReused(sess)
+}
+
+// pidReused reports whether sess.pid now identifies a different process than
+// the pty-host we started: a different creation time, a process created after
+// the host was registered, or a process this user cannot even query (our host
+// is always queryable unless it is an elevated host).
+func (r *Runtime) pidReused(sess *hostSession) bool {
+	if r.pidStartTime == nil || sess.pid <= 0 {
+		return false
+	}
+	started, err := r.pidStartTime(sess.pid)
+	return processalive.Reused(started, err, sess.startedAt, sess.registeredAt, !sess.elevated)
+}
+
+func (r *Runtime) hostStartTime(pid int) time.Time {
+	if r.pidStartTime == nil || pid <= 0 {
+		return time.Time{}
+	}
+	started, err := r.pidStartTime(pid)
+	if err != nil {
+		return time.Time{}
+	}
+	return started
+}
+
+func formatStartedAt(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func parseStartedAt(s string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
