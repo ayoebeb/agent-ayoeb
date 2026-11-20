@@ -1448,7 +1448,7 @@
 	"settings.renderMath": "数式を表示",
 	"settings.renderMathHint": "チャットと Markdown プレビューで $…$、$$…$$、\\(…\\)、\\[…\\] を数式として表示します。$ を使った価格が数式として表示されることがあります。",
 	"settings.resourceStatus": "RAM と CPU の状態を表示",
-	"settings.resourceStatusHint": "ウィンドウ右下にメモリと CPU の使用状況を表示します。クリックするとセッションごとの内訳を開きます。",
+	"settings.resourceStatusHint": "サイドバーのアカウントの上にメモリと CPU の使用状況を表示します。クリックするとセッションごとの内訳を開きます。",
 	"settings.terminalCopyOnSelect": "選択時にコピー",
 	"settings.projectAvatars": "リポジトリのアバター",
 	"settings.projectAvatars.description": "各プロジェクトのフォルダーアイコンの代わりにリポジトリ所有者のアバターを表示します。",

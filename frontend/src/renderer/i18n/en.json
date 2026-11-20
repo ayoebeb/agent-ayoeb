@@ -1454,7 +1454,7 @@
 	"settings.renderMath": "Render math",
 	"settings.renderMathHint": "Show $…$, $$…$$, \\(…\\) and \\[…\\] as equations in chats and Markdown previews. A price written with $ can show as math.",
 	"settings.resourceStatus": "Show RAM and CPU status",
-	"settings.resourceStatusHint": "Shows memory and CPU use in the bottom-right corner of the window. Click it for the per-session breakdown.",
+	"settings.resourceStatusHint": "Shows memory and CPU use above your account in the sidebar. Click it for the per-session breakdown.",
 	"settings.terminalCopyOnSelect": "Copy on select",
 	"settings.projectAvatars": "Repository avatars",
 	"settings.projectAvatars.description": "Show the repository owner's avatar in place of each project's folder icon.",

@@ -350,7 +350,7 @@ describe("SessionsBoard", () => {
 		});
 		renderBoard("p1");
 		expect(screen.queryByRole("button", { name: /^Archive, \d+ sessions?$/ })).not.toBeInTheDocument();
-		// The status lives in the shell's bottom-right corner now, not in the board's action row.
+		// The status lives above the sidebar's user row now, not in the board's action row.
 		expect(screen.queryByTestId("app-memory-indicator")).not.toBeInTheDocument();
 	});
 
