@@ -174,6 +174,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersAgentAccountUsageQuery":                    "AgentAccountUsageQuery",
 	"ControllersAgentAccountResponse":                      "AgentAccountResponse",
 	"ControllersAgentAccountsResponse":                     "AgentAccountsResponse",
+	"ControllersAccountLimitsResponse":                     "AccountLimitsResponse",
 	"ControllersStartAgentAccountLoginRequest":             "StartAgentAccountLoginRequest",
 	"ControllersStartAgentAccountLoginResponse":            "StartAgentAccountLoginResponse",
 	"ControllersVerifyAgentAccountLoginResponse":           "VerifyAgentAccountLoginResponse",
@@ -2360,6 +2361,11 @@ func agentOperations() []operation {
 			method: http.MethodGet, path: "/api/v1/agents/accounts", id: "listAgentAccounts", tag: "agents",
 			summary: "List Claude Code and Codex accounts with their limits", pathParams: []any{controllers.AgentAccountListQuery{}},
 			resps: []respUnit{{http.StatusOK, controllers.AgentAccountsResponse{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/usage/account-limits", id: "getUsageAccountLimits", tag: "usage",
+			summary: "Read the accounts' limits and a session's accounts, read-only, for another computer's desktop", pathParams: []any{controllers.AccountLimitsQuery{}},
+			resps: []respUnit{{http.StatusOK, controllers.AccountLimitsResponse{}}, {http.StatusNotImplemented, envelope.APIError{}}},
 		},
 		{
 			method: http.MethodGet, path: "/api/v1/agents/accounts/usage", id: "getAgentAccountUsage", tag: "agents",

@@ -4232,6 +4232,18 @@ type AgentAccountsResponse struct {
 	Accounts []AgentAccountResponse `json:"accounts"`
 }
 
+// AccountLimitsQuery documents GET /usage/account-limits.
+type AccountLimitsQuery struct {
+	SessionID string `query:"sessionId" description:"Also return the account this session runs under."`
+}
+
+// AccountLimitsResponse is the body of GET /usage/account-limits: every account
+// with its limits, and the accounts of the named session when one was asked for.
+type AccountLimitsResponse struct {
+	Accounts []AgentAccountResponse        `json:"accounts"`
+	Session  *SessionAgentAccountsResponse `json:"session,omitempty"`
+}
+
 // StartAgentAccountLoginRequest asks to add an account of a provider.
 type StartAgentAccountLoginRequest struct {
 	Provider domain.AgentAccountProvider `json:"provider" enum:"claude,codex"`

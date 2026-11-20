@@ -100,13 +100,13 @@ func (m *LANManager) serveLoopbackTunnel(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "nothing is listening on that loopback port", http.StatusBadGateway)
 		return
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return
 	}
 	conn := websocket.NetConn(context.WithoutCancel(r.Context()), ws, websocket.MessageBinary)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	pumpIdle(conn, target, loopbackIdleTimeout)
 }
 

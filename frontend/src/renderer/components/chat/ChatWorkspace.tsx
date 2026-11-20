@@ -1649,8 +1649,9 @@ function ChatWorkspaceContent({
 	// Claude Code compacts at the window picked for it, well before its model's full context.
 	const compactsAt = snapshot.harness === "claude-code" ? snapshot.settings?.autoCompactWindow : undefined;
 	const stableUsage = useStableValue(snapshot.usage);
-	// Subscription limits come from this computer's accounts, so only a local session shows them.
-	const usageLimitsSessionId = session && !session.cloud && !activeRemoteHostId ? session.id : undefined;
+	// Subscription limits come from the accounts of the computer the session runs on:
+	// this one's, or a linked computer's, read from its own daemon. Cloud has none.
+	const usageLimitsSessionId = session && !session.cloud ? session.id : undefined;
 	// A reroute describes the model it was recorded against; once the user picks a
 	// different model it no longer says anything about the next turn.
 	const currentModelReroute =
@@ -1669,7 +1670,7 @@ function ChatWorkspaceContent({
 				<TurnSettingsBar
 					agentSwitch={agentSwitch}
 					beforePicker={agentSwitch ? <ContextMeter usage={stableUsage} compactsAt={compactsAt} /> : undefined}
-					afterPicker={usageLimitsSessionId ? <ComposerUsageLimits harness={snapshot.harness} sessionId={usageLimitsSessionId} /> : undefined}
+					afterPicker={usageLimitsSessionId ? <ComposerUsageLimits harness={snapshot.harness} sessionId={usageLimitsSessionId} hostId={activeRemoteHostId} /> : undefined}
 					// While the agent wakes or starts; a chat reads "hibernated" until ready.
 					modelsLoading={settingsLoading}
 					lastModel={lastModel}
@@ -1735,6 +1736,7 @@ function ChatWorkspaceContent({
 			stableSettings,
 			compactsAt,
 			usageLimitsSessionId,
+			activeRemoteHostId,
 			snapshot.harness,
 		],
 	);
