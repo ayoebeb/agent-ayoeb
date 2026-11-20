@@ -5593,6 +5593,138 @@ paths:
       summary: Create a cue for a project
       tags:
       - cues
+  /api/v1/projects/{projectId}/live-servers:
+    get:
+      operationId: listLiveServers
+      parameters:
+      - description: Project whose running dev servers are listed.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          description: Project whose running dev servers are listed.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListLiveServersResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the dev servers running for a project, with an HTTP health reading
+        each
+      tags:
+      - liveServers
+  /api/v1/projects/{projectId}/live-servers/restart:
+    post:
+      operationId: restartLiveServer
+      parameters:
+      - description: Project whose running dev servers are listed.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          description: Project whose running dev servers are listed.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveServerActionRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveServerEnvelope'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Restart a dev server that AO started from .ao/launch.json
+      tags:
+      - liveServers
+  /api/v1/projects/{projectId}/live-servers/stop:
+    post:
+      operationId: stopLiveServer
+      parameters:
+      - description: Project whose running dev servers are listed.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          description: Project whose running dev servers are listed.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveServerActionRequest'
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop one running dev server
+      tags:
+      - liveServers
   /api/v1/projects/clone:
     post:
       operationId: cloneProject
@@ -20506,6 +20638,15 @@ components:
       - parent
       - entries
       type: object
+    ListLiveServersResponse:
+      properties:
+        servers:
+          items:
+            $ref: '#/components/schemas/LiveServerResponse'
+          type: array
+      required:
+      - servers
+      type: object
     ListNotificationsResponse:
       properties:
         nextCursor:
@@ -20741,6 +20882,97 @@ components:
       - path
       - entries
       - truncated
+      type: object
+    LiveServerActionRequest:
+      properties:
+        key:
+          description: The key of a server from the list.
+          type: string
+      required:
+      - key
+      type: object
+    LiveServerEnvelope:
+      properties:
+        server:
+          $ref: '#/components/schemas/LiveServerResponse'
+      required:
+      - server
+      type: object
+    LiveServerResponse:
+      properties:
+        canRestart:
+          type: boolean
+        command:
+          type: string
+        error:
+          type: string
+        health:
+          description: up when the server answered an HTTP request within a few seconds.
+          enum:
+          - up
+          - down
+          type: string
+        healthMs:
+          format: int64
+          type: integer
+        healthNote:
+          type: string
+        key:
+          description: 'Stable identifier within the project: managed:<sessionId>
+            or detected:<port>.'
+          type: string
+        logs:
+          items:
+            type: string
+          type: array
+        name:
+          type: string
+        outputAvailable:
+          type: boolean
+        pid:
+          type: integer
+        port:
+          type: integer
+        sessionId:
+          type: string
+        sessionName:
+          type: string
+        source:
+          description: managed servers were started by AO from .ao/launch.json; detected
+            ones by a worker on its own.
+          enum:
+          - managed
+          - detected
+          type: string
+        startedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        state:
+          description: 'Lifecycle state: starting, ready, stopping or failed.'
+          type: string
+        terminalId:
+          description: PTY handle the terminal mux attaches to; present only for managed
+            servers.
+          type: string
+        url:
+          type: string
+        workingDir:
+          type: string
+      required:
+      - key
+      - source
+      - name
+      - port
+      - url
+      - sessionId
+      - state
+      - health
+      - healthMs
+      - logs
+      - outputAvailable
+      - canRestart
       type: object
     MarkAllNotificationsReadRequest:
       properties:

@@ -2100,6 +2100,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectId}/live-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the dev servers running for a project, with an HTTP health reading each */
+        get: operations["listLiveServers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/live-servers/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restart a dev server that AO started from .ao/launch.json */
+        post: operations["restartLiveServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/live-servers/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop one running dev server */
+        post: operations["stopLiveServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/clone": {
         parameters: {
             query?: never;
@@ -7045,6 +7096,9 @@ export interface components {
             /** @description True when the listing hit the entry cap and more subdirectories exist. */
             truncated?: boolean;
         };
+        ListLiveServersResponse: {
+            servers: components["schemas"]["LiveServerResponse"][];
+        };
         ListNotificationsResponse: {
             nextCursor?: string;
             notifications: components["schemas"]["NotificationResponse"][];
@@ -7123,6 +7177,48 @@ export interface components {
             /** @description True only when the tree was read from the requested immutable snapshot. */
             snapshot?: boolean;
             truncated: boolean;
+        };
+        LiveServerActionRequest: {
+            /** @description The key of a server from the list. */
+            key: string;
+        };
+        LiveServerEnvelope: {
+            server: components["schemas"]["LiveServerResponse"];
+        };
+        LiveServerResponse: {
+            canRestart: boolean;
+            command?: string;
+            error?: string;
+            /**
+             * @description up when the server answered an HTTP request within a few seconds.
+             * @enum {string}
+             */
+            health: "up" | "down";
+            /** Format: int64 */
+            healthMs: number;
+            healthNote?: string;
+            /** @description Stable identifier within the project: managed:<sessionId> or detected:<port>. */
+            key: string;
+            logs: string[];
+            name: string;
+            outputAvailable: boolean;
+            pid?: number;
+            port: number;
+            sessionId: string;
+            sessionName?: string;
+            /**
+             * @description managed servers were started by AO from .ao/launch.json; detected ones by a worker on its own.
+             * @enum {string}
+             */
+            source: "managed" | "detected";
+            /** Format: date-time */
+            startedAt?: null | string;
+            /** @description Lifecycle state: starting, ready, stopping or failed. */
+            state: string;
+            /** @description PTY handle the terminal mux attaches to; present only for managed servers. */
+            terminalId?: string;
+            url: string;
+            workingDir?: string;
         };
         MarkAllNotificationsReadRequest: {
             /** @description Acknowledge exactly these notifications. Omit to acknowledge every unread notification; paginating clients should send the ids they actually rendered so later pages stay unread. */
@@ -16516,6 +16612,171 @@ export interface operations {
             };
             /** @description Request Entity Too Large */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLiveServers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project whose running dev servers are listed. */
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListLiveServersResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    restartLiveServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project whose running dev servers are listed. */
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveServerActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveServerEnvelope"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopLiveServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project whose running dev servers are listed. */
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveServerActionRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

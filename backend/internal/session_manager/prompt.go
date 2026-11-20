@@ -95,7 +95,7 @@ func buildSystemPromptText(cfg systemPromptConfig) string {
 		}
 	case sessionPromptRoleWorker:
 		if cfg.Standalone {
-			sections = append(sections, standaloneWorkerSystemPrompt(), workerContainerLabelPrompt())
+			sections = append(sections, standaloneWorkerSystemPrompt(), workerContainerLabelPrompt(), workerDevServerPrompt())
 			break
 		}
 		orchestratorID := strings.TrimSpace(cfg.OrchestratorSessionID)
@@ -106,7 +106,7 @@ func buildSystemPromptText(cfg systemPromptConfig) string {
 		if strings.TrimSpace(cfg.Project.Repo) != "" {
 			sections = append(sections, workerNativeReviewPrompt(cfg.Project, orchestratorID != ""))
 		}
-		sections = append(sections, workerMultiPRPrompt(), workerContainerLabelPrompt(), workerGitIsolationPrompt())
+		sections = append(sections, workerMultiPRPrompt(), workerContainerLabelPrompt(), workerDevServerPrompt(), workerGitIsolationPrompt())
 		if rules := strings.TrimSpace(cfg.ProjectRules); rules != "" {
 			sections = append(sections, "## Project Rules\n"+rules)
 		}
@@ -472,4 +472,10 @@ func projectValue(value string) string {
 		return trimmed
 	}
 	return "not configured"
+}
+
+// workerDevServerPrompt asks workers to start long-running dev servers through
+// ao preview, so they show in the Live overview with a terminal.
+func workerDevServerPrompt() string {
+	return "## Dev Servers\n\nStart long-running dev servers through `ao preview` (with a `.ao/launch.json` configuration) instead of a background shell command, so they appear in Live with a terminal and Stop/Restart buttons."
 }

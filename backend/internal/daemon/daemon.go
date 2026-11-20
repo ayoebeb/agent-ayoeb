@@ -952,6 +952,9 @@ func Run(buildVersion string) error {
 	// lifetime — see internal/service/shellterm.
 	shellTermSvc := startShellTerminals(ctx, cfg, runtimeAdapter, store, projectSvc, sessionSvc, log)
 	configureShellTerminalElevation(shellTermSvc, termMgr, elevationSecret)
+	// Managed preview servers run in PTYs so the Live tab can attach a terminal.
+	managedPreview.SetTerminals(previewTerminals{terminals: shellTermSvc, runtime: runtimeAdapter})
+	liveServers := newLiveServerService(liveServerDeps{dataDir: cfg.DataDir, managed: managedPreview, sessions: sessionSvc, projects: projectSvc, runtime: runtimeAdapter})
 	// Agents started by hand in a shell give its tab their logo and status.
 	if rt, ok := runtimeAdapter.(shellagent.Runtime); ok {
 		shellAgents := shellagent.NewManager(ctx, rt, agents, log)
@@ -1307,6 +1310,7 @@ func Run(buildVersion string) error {
 		SharedBrowserProfiles:    newSharedBrowserProfilesViaDesktop(browserBroker, log),
 		LinkPreview:              linkpreviewsvc.New(nil),
 		PreviewServer:            managedPreview,
+		LiveServers:              liveServers,
 		SessionCapabilities:      browserAuthority,
 		ShellPreviewCapabilities: shellTermSvc,
 	})
