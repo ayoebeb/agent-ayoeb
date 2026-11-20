@@ -235,7 +235,27 @@ const graphQLCheckContextLimit = 100
 // checkRunFields is the CheckRun selection every rollup query uses. The
 // workflow name and event identify which runs are reruns of the same check
 // (see latestCheckRuns).
-const checkRunFields = `name status conclusion detailsUrl url databaseId checkSuite{ workflowRun{ event workflow{ name } } }`
+//
+// annotations carries GitHub's own reason for a job that never started (e.g.
+// "recent account payments have failed"); see billingAnnotation.
+const checkRunFields = `name status conclusion detailsUrl url databaseId annotations(first: 3){ nodes{ message } } checkSuite{ workflowRun{ event workflow{ name } } }`
+
+// billingAnnotation returns a check run's annotation message when it says the
+// job was blocked by account billing or a spending limit, else "". Such a run
+// has no steps and no log; the message stands in for the log tail.
+func billingAnnotation(n map[string]any) string {
+	ann, _ := n["annotations"].(map[string]any)
+	for _, a := range nodes(ann["nodes"]) {
+		msg := str(a["message"])
+		low := strings.ToLower(msg)
+		if strings.Contains(low, "recent account payments have failed") ||
+			strings.Contains(low, "spending limit") ||
+			strings.Contains(low, "billing issue") {
+			return msg
+		}
+	}
+	return ""
+}
 
 // prObservationQuery is the GraphQL query (derived from PR #28, credited
 // to @whoisasx) that pulls everything we need in one round trip:
