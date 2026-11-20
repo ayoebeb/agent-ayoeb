@@ -22,15 +22,15 @@ import (
 // 0.0.0.0 only while Connect Mobile is enabled and wraps the shared router in
 // authMiddleware. The loopback listener is unaffected.
 type LANManager struct {
-	handler     http.Handler // shared router, already auth-wrapped
-	tunnel      http.Handler // lanTunnelPath, behind the same auth
+	handler http.Handler // shared router, already auth-wrapped
+	tunnel  http.Handler // lanTunnelPath, behind the same auth
 	// lanLoopbackTunnelPath, behind the same auth; loopbackSlots caps it.
 	loopbackTunnel http.Handler
 	loopbackSlots  chan struct{}
 	defaultPort    int
-	log         *slog.Logger
-	state       *authState // shared with authMiddleware; SetPasswordHash writes through here
-	lock        *lockout
+	log            *slog.Logger
+	state          *authState // shared with authMiddleware; SetPasswordHash writes through here
+	lock           *lockout
 
 	transitionMu sync.Mutex // serializes Start and Stop without blocking status reads
 	mu           sync.Mutex
