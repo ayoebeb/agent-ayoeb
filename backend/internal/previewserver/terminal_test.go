@@ -3,7 +3,6 @@ package previewserver
 import (
 	"context"
 	"errors"
-	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"io"
 	"log/slog"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 // fakeTerminals hosts each "terminal" as a plain child process so the manager
