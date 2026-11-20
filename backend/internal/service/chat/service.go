@@ -1354,6 +1354,21 @@ func (s *Service) ControllerForOwner(owner domain.ConversationOwner) (*Controlle
 	return controller, nil
 }
 
+// BackgroundWorkRunning reports whether a Chat session's provider says it is
+// still running after its turn ended, such as on a background shell. Only
+// providers that report their running state (Claude) ever answer true.
+func (s *Service) BackgroundWorkRunning(sessionID domain.SessionID) bool {
+	s.mu.RLock()
+	controller := s.controllers[sessionID]
+	s.mu.RUnlock()
+	if controller == nil {
+		return false
+	}
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	return controller.providerRunning && controller.state != ports.ChatControllerStopped
+}
+
 // HasLiveChatController reports whether the service owns a controller that can
 // still process provider events. A stopped controller can remain in the registry
 // briefly while its final cleanup lands; Start waits for that cleanup before

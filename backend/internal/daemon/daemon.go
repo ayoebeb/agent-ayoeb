@@ -818,7 +818,7 @@ func Run(buildVersion string) error {
 	// A worker that ends a turn without running `ao report` gets one automatic
 	// report to its orchestrator, for Chat and terminal workers alike.
 	lcStack.LCM.SetTurnObserver(reportsvc.NewMissingReportFallback(reportsvc.MissingReportDeps{
-		Store: store, Reports: reportSvc, Turns: chatSvc, Logger: log,
+		Store: store, Reports: reportSvc, Turns: chatSvc, Sessions: store, Busy: chatSvc, Logger: log,
 	}))
 	// A turn that stops on the provider's usage limit is followed up exactly once:
 	// the orchestrator is told, the person gets one notification per account and
