@@ -552,6 +552,7 @@
 	"browser.urlCopyFailed": "无法复制 URL",
 	"browser.urlSuggestions": "地址建议",
 	"browser.urlPlaceholder": "搜索或输入网址",
+	"browser.viaComputer": "通过 {{name}}",
 	"browser.verb.checkTabs": "检查标签",
 	"browser.verb.clearHighlight": "清除高亮",
 	"browser.verb.click": "点击",

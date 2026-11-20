@@ -416,6 +416,7 @@ if (typeof window !== "undefined") {
 			onAnnotationSubmit: () => () => undefined,
 			onAnnotationCancel: () => () => undefined,
 			onAnnotationState: () => () => undefined,
+			setSessionHost: async () => ({ routed: false }),
 		},
 		browserProfiles: {
 			list: async () => ({ profiles: [], defaultProfileId: null }),

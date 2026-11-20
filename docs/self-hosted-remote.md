@@ -177,6 +177,21 @@ native host. Projects still need their own build dependencies on the host.
 Removing a saved connection on desktop/mobile does not stop the host or its
 sessions.
 
+### Open the host's localhost dev servers
+
+In the Browser panel of a session that runs on a remote host, `localhost`,
+`127.0.0.1`, `[::1]` and `*.localhost` (any port) mean the **host's** loopback:
+`npm run dev` on `localhost:5173` there opens at `http://localhost:5173` in the
+panel, hot reload included, and the address bar shows "via <host name>". The
+desktop sends those connections over a WebSocket to the host's
+`/api/v1/loopback-tunnel` (same password and host-ID check as every other host
+request); TLS stays end to end between the panel and the dev server. Every other
+address keeps using this computer's network. The host dials loopback addresses
+only, never another machine, caps concurrent tunnels at 256 and drops one that
+is silent for 15 minutes. The route is per Browser profile: a profile also used
+by a local session or a session on another host stays unrouted. Hosts without
+this endpoint (older daemons) answer an error page for such URLs.
+
 ## Security and limits
 
 - AO's unauthenticated listener stays on `127.0.0.1`. The opt-in remote

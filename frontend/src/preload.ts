@@ -594,6 +594,8 @@ const api = {
 		getRuntimeState: () => ipcRenderer.invoke("browser:runtime:state") as Promise<BrowserRuntimeState>,
 		nativeCompositionEnabled: true,
 		ensure: (sessionId: string, createInitialTab = true) => ipcRenderer.invoke("browser:ensure", sessionId, createInitialTab) as Promise<BrowserNavState>,
+		/** Tell main which computer a session's browser belongs to (null: this PC), so that computer's localhost opens there. */
+		setSessionHost: (sessionId: string, hostId: string | null) => ipcRenderer.invoke("browser:setSessionHost", sessionId, hostId) as Promise<{ routed: boolean }>,
 		setBounds: (input: BrowserBoundsInput) => ipcRenderer.send("browser:setBounds", input),
 		onBoundsApplied: (listener: (result: BrowserBoundsApplied) => void) => {
 			const wrapped = (_event: Electron.IpcRendererEvent, result: BrowserBoundsApplied) => listener(result);

@@ -522,6 +522,7 @@
 	"browser.urlCopyFailed": "Не удалось скопировать URL",
 	"browser.urlSuggestions": "Подсказки адреса",
 	"browser.urlPlaceholder": "Поиск или ввод URL",
+	"browser.viaComputer": "через {{name}}",
 	"browser.verb.checkTabs": "проверяет вкладки",
 	"browser.verb.clearHighlight": "снимает выделение",
 	"browser.verb.click": "нажимает",

@@ -47,6 +47,12 @@ export type ActiveProxy = {
 	isAgentBrowserUrl: (url: string) => boolean;
 	/** A preview's address for a browser outside AO; any other URL unchanged. */
 	externalUrl: (url: string) => string;
+	/**
+	 * A byte stream to host:port on the host's own loopback (the daemon's
+	 * loopback tunnel), for a session's Browser panel to reach a dev server
+	 * there. The daemon refuses anything but loopback addresses.
+	 */
+	openLoopbackStream: (host: string, port: number) => Promise<Duplex>;
 	close: () => Promise<void>;
 };
 
@@ -107,6 +113,8 @@ const UPSTREAM_SESSION_WINDOW = 32 << 20;
 // How long opening an upstream session may take (connect, TLS, the tunnel's
 // handshake, the identity probe), and how often a live session is pinged.
 const UPSTREAM_TIMING = { openMs: 5_000, pingMs: 10_000 };
+// How long a successful identity proof covers further loopback streams.
+const LOOPBACK_VERIFY_TTL_MS = 10_000;
 
 function previewHostForSession(id: string, label = "ao-preview"): string {
 	const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
@@ -208,6 +216,9 @@ export async function startRemoteProxy(entry: RemoteEntry, rendererOrigin = REND
 	const artifactHosts = new Map<string, { host: string; sourceHref: string }>();
 	const previewSessions = new Map<string, { host: string; sourceUrl: string; sourceHref: string; url: string }>();
 	const tunnels = new Set<() => void>();
+	// Loopback streams to the host (openLoopbackStream): dropped with the proxy.
+	const loopbackStreams = new Set<Duplex>();
+	let loopbackVerifiedAt = 0;
 	// Allow slow uploads; SSE response timeouts are disabled on the upstream request below.
 	server.requestTimeout = 0;
 
@@ -936,6 +947,42 @@ export async function startRemoteProxy(entry: RemoteEntry, rendererOrigin = REND
 				return false;
 			}
 		},
+		openLoopbackStream: async (host, port) => {
+			if (closing) throw new Error("remote proxy closed");
+			if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("invalid loopback port");
+			// The upgrade carries the credential: prove the host first, as every
+			// other request does. A browser opens many connections at once, so a
+			// recent proof is reused rather than probing for each.
+			if (Date.now() - loopbackVerifiedAt > LOOPBACK_VERIFY_TTL_MS) {
+				await verifyUpstream();
+				loopbackVerifiedAt = Date.now();
+			}
+			const query = new URLSearchParams({ host, port: String(port) });
+			const socket = new WebSocket(`${secure ? "wss" : "ws"}://${upstream.host}${prefix}/api/v1/loopback-tunnel?${query}`, {
+				headers: { authorization: `Bearer ${entry.password}`, ...(entry.hostId ? { "x-ao-expected-host-id": entry.hostId } : {}) },
+				perMessageDeflate: false,
+				handshakeTimeout: timing.openMs,
+				...(secure && !isIP(hostname) ? { servername: hostname } : {}),
+			});
+			const stream = webSocketTunnelStream(socket);
+			stream.on("error", () => undefined);
+			loopbackStreams.add(stream);
+			stream.once("close", () => loopbackStreams.delete(stream));
+			try {
+				await new Promise<void>((resolve, reject) => {
+					socket.once("open", () => resolve());
+					socket.once("unexpected-response", (_req, response) => {
+						response.resume();
+						reject(new Error(`loopback tunnel refused (${response.statusCode})`));
+					});
+					socket.once("error", (error: Error) => reject(error));
+				});
+			} catch (error) {
+				stream.destroy();
+				throw error;
+			}
+			return stream;
+		},
 		externalUrl: (url) => {
 			let parsed: URL;
 			try { parsed = new URL(url); } catch { return url; }
@@ -952,6 +999,7 @@ export async function startRemoteProxy(entry: RemoteEntry, rendererOrigin = REND
 				// a deactivated proxy must actually stop serving.
 				closing = true;
 				for (const drop of tunnels) drop();
+				for (const stream of loopbackStreams) stream.destroy();
 				server.closeAllConnections();
 				for (const socket of secureSockets) socket.destroy();
 				void upstreamSession?.then((session) => session.destroy(), () => undefined);

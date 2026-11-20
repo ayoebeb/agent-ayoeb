@@ -556,6 +556,7 @@
 	"browser.urlCopyFailed": "Impossible de copier l’URL",
 	"browser.urlSuggestions": "Suggestions d’adresses",
 	"browser.urlPlaceholder": "Rechercher ou saisir une URL",
+	"browser.viaComputer": "via {{name}}",
 	"browser.verb.checkTabs": "vérification des onglets",
 	"browser.verb.clearHighlight": "suppression du surlignage",
 	"browser.verb.click": "clic",

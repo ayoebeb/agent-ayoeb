@@ -24,7 +24,10 @@ import (
 type LANManager struct {
 	handler     http.Handler // shared router, already auth-wrapped
 	tunnel      http.Handler // lanTunnelPath, behind the same auth
-	defaultPort int
+	// lanLoopbackTunnelPath, behind the same auth; loopbackSlots caps it.
+	loopbackTunnel http.Handler
+	loopbackSlots  chan struct{}
+	defaultPort    int
 	log         *slog.Logger
 	state       *authState // shared with authMiddleware; SetPasswordHash writes through here
 	lock        *lockout
@@ -52,6 +55,8 @@ func NewLANManager(handler http.Handler, state *authState, defaultPort int, log 
 		lock:        lock,
 	}
 	m.tunnel = auth(http.HandlerFunc(m.serveTunnel))
+	m.loopbackSlots = make(chan struct{}, maxLoopbackTunnels)
+	m.loopbackTunnel = auth(http.HandlerFunc(m.serveLoopbackTunnel))
 	return m
 }
 
@@ -318,6 +323,10 @@ func (m *LANManager) dispatch() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == lanTunnelPath {
 			m.tunnel.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == lanLoopbackTunnelPath {
+			m.loopbackTunnel.ServeHTTP(w, r)
 			return
 		}
 		m.handler.ServeHTTP(w, r)

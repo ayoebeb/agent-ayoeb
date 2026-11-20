@@ -514,6 +514,7 @@
 	"browser.urlCopyFailed": "Could not copy URL",
 	"browser.urlSuggestions": "Address suggestions",
 	"browser.urlPlaceholder": "Search or enter a URL",
+	"browser.viaComputer": "via {{name}}",
 	"browser.verb.checkTabs": "checking tabs",
 	"browser.verb.clearHighlight": "clearing highlight",
 	"browser.verb.click": "clicking",
