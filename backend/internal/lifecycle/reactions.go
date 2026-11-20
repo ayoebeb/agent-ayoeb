@@ -821,15 +821,15 @@ func isBillingBlockedCheck(ch ports.PRCheckObservation) bool {
 
 // splitBillingBlocked separates never-started billing-blocked checks from real
 // failures.
-func splitBillingBlocked(checks []ports.PRCheckObservation) (real, billing []ports.PRCheckObservation) {
+func splitBillingBlocked(checks []ports.PRCheckObservation) (failing, billing []ports.PRCheckObservation) {
 	for _, ch := range checks {
 		if isBillingBlockedCheck(ch) {
 			billing = append(billing, ch)
 		} else {
-			real = append(real, ch)
+			failing = append(failing, ch)
 		}
 	}
-	return real, billing
+	return failing, billing
 }
 
 func formatCIBillingMessage() string {
