@@ -235,6 +235,8 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 					goForward: async (viewId: string) => navState(viewId),
 					reload: async (viewId: string) => navState(viewId),
 					stop: async (viewId: string) => navState(viewId),
+					trustCertificate: async (viewId: string) => navState(viewId),
+					certificates: { list: async () => [], remove: async () => [] },
 					getFindState: async (viewId: string) => ({
 						viewId,
 						tabId: "t1",
@@ -1197,6 +1199,8 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 					goForward: async (viewId: string) => navState(viewId),
 					reload: async (viewId: string) => navState(viewId),
 					stop: async (viewId: string) => navState(viewId),
+					trustCertificate: async (viewId: string) => navState(viewId),
+					certificates: { list: async () => [], remove: async () => [] },
 					getFindState: async (viewId: string) => ({
 						viewId,
 						tabId: "t1",
