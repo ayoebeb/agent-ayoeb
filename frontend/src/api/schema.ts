@@ -4828,6 +4828,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/usage/account-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the accounts' limits and a session's accounts, read-only, for another computer's desktop */
+        get: operations["getUsageAccountLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage/limit-history": {
         parameters: {
             query?: never;
@@ -4962,6 +4979,10 @@ export interface components {
             /** @enum {string} */
             reporting_owner?: "http";
             requestId?: string;
+        };
+        AccountLimitsResponse: {
+            accounts: components["schemas"]["AgentAccountResponse"][];
+            session?: components["schemas"]["SessionAgentAccountsResponse"];
         };
         AcknowledgeSessionInterfaceTransitionNoticeResponse: {
             ok: boolean;
@@ -27237,6 +27258,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TerminalShellCheckResponse"];
+                };
+            };
+        };
+    };
+    getUsageAccountLimits: {
+        parameters: {
+            query?: {
+                /** @description Also return the account this session runs under. */
+                sessionId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLimitsResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };

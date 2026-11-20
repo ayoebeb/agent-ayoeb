@@ -1,6 +1,7 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient } from "../lib/api-client";
+import { clientForSessionHost } from "../lib/host-clients";
 import { apiErrorException } from "../lib/api-error-exception";
 import type { UsageReport } from "../lib/usage-report";
 import type { UsageLimitWindows } from "../lib/usage-limits";
@@ -11,27 +12,31 @@ export function localTimeZone(): string {
 	return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
-export function useUsageReport(days: number, offset: number, projectId: string | undefined) {
+/** hostId reads another computer's own daemon; omitted, this computer's. */
+export function useUsageReport(days: number, offset: number, projectId: string | undefined, hostId?: string, enabled = true) {
 	const timeZone = localTimeZone();
 	return useQuery({
-		queryKey: [...usageReportQueryKey, days, offset, timeZone, projectId ?? ""],
+		queryKey: [...usageReportQueryKey, days, offset, timeZone, projectId ?? "", hostId ?? ""],
+		enabled,
 		queryFn: async (): Promise<UsageReport> => {
-			const { data, error } = await apiClient.GET("/api/v1/usage/report", {
+			const { data, error } = await clientForSessionHost(hostId).GET("/api/v1/usage/report", {
 				params: { query: { days, offset, tz: timeZone, ...(projectId ? { projectId } : {}) } },
 			});
 			if (error) throw apiErrorException(error);
 			return data as UsageReport;
 		},
-		placeholderData: keepPreviousData,
+		// Page flips and period changes keep the last report on screen; another
+		// computer's numbers must never stand in for this one's while it loads.
+		placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[6] === (hostId ?? "") ? previous : undefined),
 		refetchInterval: 60_000,
 	});
 }
 
-export function useUsageLimitWindows(days: number, enabled: boolean) {
+export function useUsageLimitWindows(days: number, enabled: boolean, hostId?: string) {
 	return useQuery({
-		queryKey: [...usageReportQueryKey, "limit-windows", days],
+		queryKey: [...usageReportQueryKey, "limit-windows", days, ...(hostId ? [hostId] : [])],
 		queryFn: async (): Promise<UsageLimitWindows> => {
-			const { data, error } = await apiClient.GET("/api/v1/usage/limit-windows", { params: { query: { days } } });
+			const { data, error } = await clientForSessionHost(hostId).GET("/api/v1/usage/limit-windows", { params: { query: { days } } });
 			if (error) throw apiErrorException(error);
 			return data as UsageLimitWindows;
 		},

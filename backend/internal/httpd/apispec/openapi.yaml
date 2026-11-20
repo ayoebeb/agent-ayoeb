@@ -14688,6 +14688,33 @@ paths:
       summary: Check that a custom shell path is an executable
       tags:
       - shellTerminals
+  /api/v1/usage/account-limits:
+    get:
+      operationId: getUsageAccountLimits
+      parameters:
+      - description: Also return the account this session runs under.
+        in: query
+        name: sessionId
+        schema:
+          description: Also return the account this session runs under.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountLimitsResponse'
+          description: OK
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read the accounts' limits and a session's accounts, read-only, for
+        another computer's desktop
+      tags:
+      - usage
   /api/v1/usage/limit-history:
     put:
       operationId: setUsageLimitHistory
@@ -15008,6 +15035,17 @@ components:
       - error
       - code
       - message
+      type: object
+    AccountLimitsResponse:
+      properties:
+        accounts:
+          items:
+            $ref: '#/components/schemas/AgentAccountResponse'
+          type: array
+        session:
+          $ref: '#/components/schemas/SessionAgentAccountsResponse'
+      required:
+      - accounts
       type: object
     AcknowledgeSessionInterfaceTransitionNoticeResponse:
       properties:
