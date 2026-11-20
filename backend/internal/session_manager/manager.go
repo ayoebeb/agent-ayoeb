@@ -41,9 +41,6 @@ var (
 	ErrSemanticAcceptanceUnsupported = errors.New("session: semantic message acceptance unsupported")
 	ErrNotRestorable                 = errors.New("session: not restorable (not terminal)")
 	ErrTerminated                    = errors.New("session: terminated")
-	// ErrReviewerPaneTeardown marks a reviewer pane that could not be confirmed
-	// gone during worker termination. Kill logs it and continues.
-	ErrReviewerPaneTeardown = errors.New("session: reviewer pane teardown failed")
 	ErrAgentExited                   = errors.New("session: agent exited")
 	ErrAgentNotExited                = errors.New("session: agent has not exited")
 	ErrAgentExitInProgress           = errors.New("session: agent exit is already in progress")
@@ -167,6 +164,10 @@ var (
 	ErrClientRequestIncomplete = errors.New("client request has an incomplete prior spawn")
 	ErrChatController          = errors.New("chat controller")
 )
+
+// ErrReviewerPaneTeardown marks a reviewer pane that could not be confirmed
+// gone during worker termination. Kill logs it and continues.
+var ErrReviewerPaneTeardown = errors.New("session: reviewer pane teardown failed")
 
 // wrapSpawnStage annotates a spawn failure with a stage sentinel. The original
 // error stays in the chain so errors.Is still matches inner sentinels.
