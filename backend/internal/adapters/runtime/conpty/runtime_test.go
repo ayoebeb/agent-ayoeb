@@ -16,6 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/conpty/ptyregistry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
 )
 
 // livePID returns a PID that is guaranteed to be alive (the current process).
@@ -1167,3 +1168,79 @@ func TestClientKill_Idempotent(t *testing.T) {
 
 // Ensure the packages compile (import check).
 var _ = io.Discard
+
+// A stale pty-host pid that Windows handed to another process must read as
+// "pane gone": Destroy has to finish and unregister instead of reporting the
+// host still alive (reviewer replace / kill used to fail on AMDRSServ.exe).
+func TestDestroyTreatsReusedPIDAsGone(t *testing.T) {
+	started := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		sess     hostSession
+		observed time.Time
+		err      error
+	}{
+		{"different creation time", hostSession{startedAt: started}, started.Add(time.Hour), nil},
+		{"created after legacy registration", hostSession{registeredAt: started}, started.Add(time.Hour), nil},
+		{"access denied on foreign process", hostSession{startedAt: started}, time.Time{}, processalive.ErrAccessDenied},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateRegistry(t)
+			rt := New(Options{})
+			rt.killHost = func(string) error { return nil }
+			rt.pidIsAlive = func(int) bool { return true } // OpenProcess succeeds or is access denied
+			rt.pidStartTime = func(int) (time.Time, error) { return tt.observed, tt.err }
+			rt.processFinder = func(int) (processKiller, error) {
+				t.Fatal("must not look up or kill a process that is not our pty-host")
+				return nil, nil
+			}
+			rt.destroyWait = 0
+			unregistered := ""
+			rt.unregisterHost = func(_ context.Context, id string) error { unregistered = id; return nil }
+			sess := tt.sess
+			sess.addr, sess.pid = "127.0.0.1:1", 5548
+			rt.sessions["review-x"] = &sess
+
+			if err := rt.Destroy(context.Background(), ports.RuntimeHandle{ID: "review-x"}); err != nil {
+				t.Fatalf("Destroy with reused pid = %v, want nil", err)
+			}
+			if unregistered != "review-x" || rt.sessions["review-x"] != nil {
+				t.Fatalf("session not cleared: unregistered=%q sessions=%v", unregistered, rt.sessions)
+			}
+		})
+	}
+}
+
+// The same pid with the recorded creation time is still our host, and an
+// elevated host that this user cannot query stays alive.
+func TestDestroyKeepsGenuineHostAlive(t *testing.T) {
+	started := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		sess hostSession
+		err  error
+	}{
+		{"same creation time", hostSession{startedAt: started}, nil},
+		{"elevated host access denied", hostSession{startedAt: started, elevated: true}, processalive.ErrAccessDenied},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateRegistry(t)
+			rt := New(Options{})
+			rt.killHost = func(string) error { return nil }
+			rt.pidIsAlive = func(int) bool { return true }
+			rt.pidStartTime = func(int) (time.Time, error) { return started, tt.err }
+			rt.processFinder = func(int) (processKiller, error) { return nil, errors.New("permission denied") }
+			rt.destroyWait = 0
+			sess := tt.sess
+			sess.addr, sess.pid = "127.0.0.1:1", 5548
+			rt.sessions["review-x"] = &sess
+
+			err := rt.Destroy(context.Background(), ports.RuntimeHandle{ID: "review-x"})
+			if err == nil || !strings.Contains(err.Error(), "still alive after teardown") {
+				t.Fatalf("Destroy = %v, want still-alive error", err)
+			}
+		})
+	}
+}

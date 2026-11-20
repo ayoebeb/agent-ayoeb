@@ -11,6 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
 )
 
 // Entry is one registered pty-host process.
@@ -20,6 +23,9 @@ type Entry struct {
 	PipePath     string `json:"pipePath"`
 	LaunchID     string `json:"launchId,omitempty"`
 	RegisteredAt string `json:"registeredAt"` // RFC3339; set by caller
+	// PtyHostStartedAt is the host's OS creation time (RFC3339Nano). It lets a
+	// later scan tell the host from an unrelated process that reused its pid.
+	PtyHostStartedAt string `json:"ptyHostStartedAt,omitempty"`
 }
 
 // pidAlive is the PID-liveness probe. Tests replace it with a fake.
@@ -293,7 +299,7 @@ func scanLocked(ctx context.Context) (entries []Entry, complete bool, err error)
 			// A prelaunch reservation has no PID to probe. Retain it until an
 			// exact owner replaces or explicitly unregisters the reservation.
 			live = append(live, e)
-		} else if pidAlive(e.PtyHostPID) {
+		} else if entryAlive(e) {
 			live = append(live, e)
 		}
 		if err := ctx.Err(); err != nil {
@@ -333,3 +339,18 @@ func Clear(ctx context.Context) error {
 	}
 	return writeRaw(ctx, nil)
 }
+
+// entryAlive reports whether the entry's pid is alive and still the pty-host
+// that was registered rather than a process that later reused the pid.
+func entryAlive(e Entry) bool {
+	if !pidAlive(e.PtyHostPID) {
+		return false
+	}
+	started, err := pidStartTime(e.PtyHostPID)
+	recorded, _ := time.Parse(time.RFC3339Nano, e.PtyHostStartedAt)
+	registered, _ := time.Parse(time.RFC3339Nano, e.RegisteredAt)
+	return !processalive.Reused(started, err, recorded, registered, true)
+}
+
+// pidStartTime is the start-time probe. Tests replace it with a fake.
+var pidStartTime = processalive.StartTime

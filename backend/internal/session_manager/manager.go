@@ -41,6 +41,9 @@ var (
 	ErrSemanticAcceptanceUnsupported = errors.New("session: semantic message acceptance unsupported")
 	ErrNotRestorable                 = errors.New("session: not restorable (not terminal)")
 	ErrTerminated                    = errors.New("session: terminated")
+	// ErrReviewerPaneTeardown marks a reviewer pane that could not be confirmed
+	// gone during worker termination. Kill logs it and continues.
+	ErrReviewerPaneTeardown = errors.New("session: reviewer pane teardown failed")
 	ErrAgentExited                   = errors.New("session: agent exited")
 	ErrAgentNotExited                = errors.New("session: agent has not exited")
 	ErrAgentExitInProgress           = errors.New("session: agent exit is already in progress")
@@ -2805,7 +2808,13 @@ func (m *Manager) kill(ctx context.Context, id domain.SessionID, backgroundClean
 		}
 	}
 	if err := m.terminateReviewer(ctx, id, "cancelled by worker session termination"); err != nil {
-		return KillResult{}, fmt.Errorf("kill %s: reviewer: %w", id, err)
+		if !errors.Is(err, ErrReviewerPaneTeardown) {
+			return KillResult{}, fmt.Errorf("kill %s: reviewer: %w", id, err)
+		}
+		// Only the reviewer pane teardown failed; the review rows were already
+		// cleaned up. A stale reviewer pane must not keep the worker alive, and
+		// the next review launch replaces the pane.
+		m.logger.Warn("kill: reviewer pane teardown failed; continuing", "session", id, "error", err)
 	}
 	// Gate shut any shell terminal scoped to this session BEFORE the worktree
 	// goes away: an open shell whose cwd is that directory can otherwise
