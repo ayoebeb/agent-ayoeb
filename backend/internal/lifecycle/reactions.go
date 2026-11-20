@@ -186,7 +186,17 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			case !ok:
 				ciPolicyErr = fmt.Errorf("load CI injection policy for %s: PR not found", o.URL)
 			case pr.AutoInjectCI:
-				checks := failedPRChecks(o.Checks)
+				checks, billing := splitBillingBlocked(failedPRChecks(o.Checks))
+				// Jobs GitHub never started (billing block) are not code failures:
+				// when they are all that is failing, send one short infrastructure
+				// notice per head SHA instead of a "fix it" nudge.
+				if len(checks) == 0 && len(billing) > 0 {
+					msg := formatCIBillingMessage()
+					if o.URL != "" {
+						msg += "\nPR: " + domain.SanitizeControlChars(o.URL)
+					}
+					nudges = append(nudges, pendingNudge{key: "ci:" + o.URL, sig: "billing\x00" + billing[0].CommitHash, msg: msg, maxAttempts: 0})
+				}
 				if len(checks) > 0 {
 					msg := formatCIFailureMessage(checks)
 					if ident != "your PR" {
@@ -774,12 +784,56 @@ func failedPRChecks(checks []ports.PRCheckObservation) []ports.PRCheckObservatio
 	return failed
 }
 
+// ciFailureSignature is the CI-failure dedup key: head commit plus the set of
+// failing (check name, status) pairs. It deliberately omits the check URL and
+// the log tail, and sorts the set: those vary between polls of an unchanged
+// run (a log fetch that errors differently, GraphQL returning the same checks
+// in another order), and each wobble re-sent the same notice every poll. A new
+// head SHA or a different failing set still produces a new signature.
 func ciFailureSignature(checks []ports.PRCheckObservation) string {
 	parts := make([]string, 0, len(checks))
 	for _, ch := range checks {
-		parts = append(parts, strings.Join([]string{ch.Name, ch.CommitHash, string(ch.Status), ch.URL, ch.LogTail}, "\x00"))
+		parts = append(parts, strings.Join([]string{ch.Name, ch.CommitHash, string(ch.Status)}, "\x00"))
 	}
+	sort.Strings(parts)
 	return strings.Join(parts, "\x01")
+}
+
+// ciBillingPhrases are the lowercase GitHub annotation phrases for a job that
+// never started because the account is blocked (failed payment or spending
+// limit). Such a run has no steps and no log: it is an infrastructure state,
+// not a code failure.
+var ciBillingPhrases = []string{
+	"recent account payments have failed",
+	"spending limit",
+	"account is locked due to a billing issue",
+}
+
+func isBillingBlockedCheck(ch ports.PRCheckObservation) bool {
+	low := strings.ToLower(ch.LogTail)
+	for _, p := range ciBillingPhrases {
+		if strings.Contains(low, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitBillingBlocked separates never-started billing-blocked checks from real
+// failures.
+func splitBillingBlocked(checks []ports.PRCheckObservation) (failing, billing []ports.PRCheckObservation) {
+	for _, ch := range checks {
+		if isBillingBlockedCheck(ch) {
+			billing = append(billing, ch)
+		} else {
+			failing = append(failing, ch)
+		}
+	}
+	return failing, billing
+}
+
+func formatCIBillingMessage() string {
+	return "CI cannot run on your PR: GitHub is not starting the jobs because of an account billing or spending-limit problem. This is not a code failure, so do not change code to fix it. The repo owner has to resolve GitHub billing; nothing is needed from you."
 }
 
 func formatCIFailureMessage(checks []ports.PRCheckObservation) string {

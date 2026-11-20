@@ -626,6 +626,9 @@ func scmChecksFromGraphQL(pr map[string]any) []ports.SCMCheckObservation {
 			if id := int64(num(n["databaseId"])); id > 0 {
 				ch.ProviderID = strconv.FormatInt(id, 10)
 			}
+			if isFailingCheckStatus(domain.PRCheckStatus(ch.Status)) {
+				ch.LogTail = billingAnnotation(n)
+			}
 		case "StatusContext":
 			ch.Name = str(n["context"])
 			ch.Status = string(checkStatusFromGraphQL(n))

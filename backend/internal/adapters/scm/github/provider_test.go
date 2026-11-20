@@ -2149,3 +2149,29 @@ func TestListOpenPRsByBranchFiltersOnTheServer(t *testing.T) {
 		t.Fatalf("list requests = %d, want 1", n)
 	}
 }
+
+func TestSCMChecksFromGraphQL_BillingAnnotationBecomesLogTail(t *testing.T) {
+	billing := "The job was not started because recent account payments have failed or your spending limit needs to be increased."
+	pr := map[string]any{
+		"commits": map[string]any{"nodes": []any{
+			map[string]any{"commit": map[string]any{"statusCheckRollup": map[string]any{
+				"contexts": map[string]any{"nodes": []any{
+					map[string]any{"__typename": "CheckRun", "name": "blocked", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "https://ci/1",
+						"annotations": map[string]any{"nodes": []any{map[string]any{"message": billing}}}},
+					map[string]any{"__typename": "CheckRun", "name": "real", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "https://ci/2",
+						"annotations": map[string]any{"nodes": []any{map[string]any{"message": "Process completed with exit code 1."}}}},
+				}},
+			}}},
+		}},
+	}
+	checks := scmChecksFromGraphQL(pr)
+	if len(checks) != 2 {
+		t.Fatalf("checks = %d, want 2", len(checks))
+	}
+	if checks[0].LogTail != billing {
+		t.Fatalf("billing annotation not surfaced as LogTail: %q", checks[0].LogTail)
+	}
+	if checks[1].LogTail != "" {
+		t.Fatalf("ordinary annotation must not become LogTail: %q", checks[1].LogTail)
+	}
+}
