@@ -552,6 +552,7 @@
 	"browser.urlCopyFailed": "URL をコピーできませんでした",
 	"browser.urlSuggestions": "アドレスの候補",
 	"browser.urlPlaceholder": "検索または URL を入力",
+	"browser.viaComputer": "{{name}} 経由",
 	"browser.verb.checkTabs": "タブを確認中",
 	"browser.verb.clearHighlight": "ハイライトを解除中",
 	"browser.verb.click": "クリック中",

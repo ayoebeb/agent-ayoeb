@@ -552,6 +552,7 @@
 	"browser.urlCopyFailed": "URL을 복사할 수 없습니다",
 	"browser.urlSuggestions": "주소 제안",
 	"browser.urlPlaceholder": "검색 또는 URL 입력",
+	"browser.viaComputer": "{{name}} 경유",
 	"browser.verb.checkTabs": "탭 확인 중",
 	"browser.verb.clearHighlight": "하이라이트 제거 중",
 	"browser.verb.click": "클릭 중",

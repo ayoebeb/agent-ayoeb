@@ -1,3 +1,4 @@
+import type { Duplex } from "node:stream";
 import type { ActiveProxy } from "./remote-proxy";
 import type { RemoteEntry } from "./remotes-store";
 
@@ -52,6 +53,13 @@ export class RemoteRegistry {
 		const connected = [...this.live.values()].find(({ view }) => view.hostId === hostId);
 		if (!connected) throw new Error(`Host ${hostId} is not connected`);
 		return connected.proxy.previewUrl(sessionId, sourceUrl);
+	}
+
+	/** A byte stream to host:port on a connected host's own loopback. */
+	openLoopbackStream(hostId: string, host: string, port: number): Promise<Duplex> {
+		const connected = [...this.live.values()].find(({ view }) => view.hostId === hostId);
+		if (!connected) return Promise.reject(new Error(`Host ${hostId} is not connected`));
+		return connected.proxy.openLoopbackStream(host, port);
 	}
 
 	isAgentBrowserUrl(url: string): boolean {

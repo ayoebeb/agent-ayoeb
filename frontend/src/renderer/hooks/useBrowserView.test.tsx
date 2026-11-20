@@ -45,6 +45,7 @@ function setupBridge() {
 	const annotationStateListeners = new Set<AnnotationStateListener>();
 	const bridge = {
 		nativeCompositionEnabled: false,
+		setSessionHost: vi.fn(async (_sessionId: string, _hostId: string | null) => ({ routed: false })),
 		stateFor(viewId: string): BrowserNavState {
 			return {
 				viewId,
@@ -1755,6 +1756,37 @@ describe("useBrowserView", () => {
 		rerender({ previewUrl: "http://localhost:5173/", previewRevision: 3, terminated: true });
 		await waitFor(() => expect(resolve).toHaveBeenLastCalledWith("box-a", "ao-1", ""));
 		expect(browser.navigate).not.toHaveBeenCalledWith(expect.objectContaining({ url: "http://localhost:5173/" }));
+	});
+
+	describe("loopback through the session's computer", () => {
+		const bridgeWithRouting = (routed: boolean) => {
+			const browser = setupBridge();
+			browser.setSessionHost.mockResolvedValue({ routed });
+			return { browser, setSessionHost: browser.setSessionHost };
+		};
+		const remote = { sessionId: "remote:box-a:ao-1", origin: { hostId: "box-a", sessionId: "ao-1", proxyBase: "http://127.0.0.1:4000/token", label: "NLSTATION78" }, active: true, poppedOut: false };
+
+		it("tells main which computer a remote session runs on and names it once main routes", async () => {
+			const { setSessionHost } = bridgeWithRouting(true);
+			const { result } = renderHook(() => useBrowserView(remote));
+			await waitFor(() => expect(setSessionHost).toHaveBeenCalledWith("remote:box-a:ao-1", "box-a"));
+			await waitFor(() => expect(result.current.loopbackVia).toBe("NLSTATION78"));
+		});
+
+		it("does not name the computer when main could not route the partition", async () => {
+			const { setSessionHost } = bridgeWithRouting(false);
+			const { result } = renderHook(() => useBrowserView(remote));
+			await waitFor(() => expect(setSessionHost).toHaveBeenCalled());
+			expect(result.current.loopbackVia).toBeNull();
+		});
+
+		it("leaves a local session alone", async () => {
+			const { browser, setSessionHost } = bridgeWithRouting(true);
+			const { result } = renderHook(() => useBrowserView({ sessionId: "sess-1", active: true, poppedOut: false }));
+			await waitFor(() => expect(browser.ensure).toHaveBeenCalled());
+			expect(setSessionHost).not.toHaveBeenCalled();
+			expect(result.current.loopbackVia).toBeNull();
+		});
 	});
 
 	describe("agent browser tab", () => {

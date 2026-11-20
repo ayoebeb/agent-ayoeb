@@ -218,6 +218,7 @@ export const aoBridge: AoBridge =
 				canGoForward: false,
 				isLoading: false,
 			}),
+			setSessionHost: async () => ({ routed: false }),
 			setBounds: () => undefined,
 			onBoundsApplied: () => () => undefined,
 			setOverlayOpen: () => undefined,

@@ -58,6 +58,7 @@ import type { BrowserDownloadActionInput } from "../shared/browser-downloads";
 import { matchInstruction } from "./browser-act-matcher";
 import { trustPreviewCertificate } from "./preview-certificate";
 import type { CertificateTrustStore } from "./browser-certificate-trust";
+import type { LoopbackRoutes } from "./loopback-routes";
 import type { BrowserCertificateError, BrowserTrustedCertificate } from "../shared/browser-certificate";
 import { REMOTE_TAB_REPORT, parseRemoteTabReport, type RemoteTabReport } from "../shared/remote-tab";
 import type { ActCandidate } from "./browser-act-matcher";
@@ -517,6 +518,8 @@ export type BrowserViewHostOptions = {
   clearBrowserProfileData?: (partition: string) => Promise<void>;
   // Configures a browser partition's session before its first page exists.
   prepareBrowserPartition?: (partition: string) => void;
+  // Sends a remote session's loopback traffic through its computer (loopback-routes.ts).
+  loopbackRoutes?: Pick<LoopbackRoutes, "claim" | "release">;
   // Electron 44 removed clipboard.writeImage; main.ts adapts the async
   // ClipboardItem API to this narrow image-only writer.
   clipboard?: { writeImage(image: Electron.NativeImage): void | Promise<void> };
@@ -996,6 +999,41 @@ export function createBrowserViewHost(
       return defaultProfileId;
     return null;
   };
+  // The computer each session runs on (null: this PC), as its panel reports it.
+  // A remote session's loopback traffic goes through that computer, per
+  // partition (loopback-routes.ts); every session claims its partition, a
+  // local one too, so a shared profile never routes a local session remotely.
+  const hostIdBySessionId = new Map<string, string | null>();
+  const claimedPartitions = new Map<string, string>();
+  const syncLoopbackClaim = (
+    session: BrowserSessionEntry,
+  ): Promise<{ routed: boolean }> => {
+    const routes = options.loopbackRoutes;
+    if (!routes) return Promise.resolve({ routed: false });
+    const previous = claimedPartitions.get(session.sessionId);
+    if (previous && previous !== session.profilePartition)
+      void routes.release(previous, session.sessionId).catch(() => undefined);
+    claimedPartitions.set(session.sessionId, session.profilePartition);
+    return routes
+      .claim(
+        session.profilePartition,
+        session.sessionId,
+        hostIdBySessionId.get(session.sessionId) ?? null,
+      )
+      .catch((error: unknown) => {
+        console.warn("[browser] loopback routing unavailable", error);
+        return { routed: false };
+      });
+  };
+  const releaseLoopbackClaim = (session: BrowserSessionEntry): void => {
+    hostIdBySessionId.delete(session.sessionId);
+    const partition = claimedPartitions.get(session.sessionId);
+    claimedPartitions.delete(session.sessionId);
+    if (partition)
+      void options.loopbackRoutes
+        ?.release(partition, session.sessionId)
+        .catch(() => undefined);
+  };
   const ipcDisposers: Array<() => void> = [];
   let disposePromise: Promise<void> | null = null;
   // viewId of the panel that most recently held native focus; cleared when the
@@ -1176,6 +1214,7 @@ export function createBrowserViewHost(
       sandbox: true,
     };
     options.prepareBrowserPartition?.(session.profilePartition);
+    void syncLoopbackClaim(session);
     const view = new options.WebContentsView({
       webPreferences,
       ...(popupOptions?.webContents ? { webContents: popupOptions.webContents } : {}),
@@ -3028,6 +3067,7 @@ export function createBrowserViewHost(
     void options.agentBrowserRuntime?.closeSession(session.sessionId);
     entries.delete(viewId);
     viewIdsBySessionId.delete(session.sessionId);
+    releaseLoopbackClaim(session);
     rendererOwnersByViewId.delete(viewId);
     forgetNativeFocus(viewId);
     forgetBrowserShortcutTarget(viewId);
@@ -3289,6 +3329,7 @@ export function createBrowserViewHost(
       session.profilePartition = normalizedRequestedProfileId
         ? browserProfilePartition(normalizedRequestedProfileId)
         : temporaryBrowserPartition();
+      void syncLoopbackClaim(session);
       await rebuildSessionTabs(
         session,
         savedTabs,
@@ -3325,6 +3366,7 @@ export function createBrowserViewHost(
       }
       session.profileId = previousProfileId;
       session.profilePartition = previousPartition;
+      if (sessionIsCurrent) void syncLoopbackClaim(session);
       if (sessionIsCurrent && didTearDown) {
         try {
           await rebuildSessionTabs(
@@ -3664,6 +3706,21 @@ export function createBrowserViewHost(
     pushProfileState(session);
     return session.tabs.size ? pushNavState(options, activeEntry(session)) : emptyNavState(session.viewId);
   });
+  // The panel of a session that runs on another computer says so, so that
+  // computer's localhost dev servers open in this session's tabs. Answers
+  // whether the session's partition is routed (a profile shared with a session
+  // on another computer is not: see loopback-routes.ts).
+  handle(
+    "browser:setSessionHost",
+    async (_event, sessionId: unknown, hostId: unknown): Promise<{ routed: boolean }> => {
+      if (typeof sessionId !== "string" || sessionId === "" || sessionId.length > 256) return { routed: false };
+      if (hostId !== null && (typeof hostId !== "string" || hostId === "" || hostId.length > 256)) return { routed: false };
+      hostIdBySessionId.set(sessionId, hostId);
+      const viewId = viewIdsBySessionId.get(sessionId);
+      const session = viewId ? entries.get(viewId) : undefined;
+      return session ? syncLoopbackClaim(session) : { routed: false };
+    },
+  );
   on("browser:setBounds", (event, input: BrowserBoundsInput) => {
     if (!input || !isRendererOwned(event, input.viewId)) return;
     const applied = setBounds(input, event.sender.getZoomFactor());

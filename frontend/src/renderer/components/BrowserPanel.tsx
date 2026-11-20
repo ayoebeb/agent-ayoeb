@@ -71,6 +71,7 @@ import { useBrowserRuntimeState } from "../hooks/useBrowserRuntimeState";
 import { useTabScrollEdges } from "../hooks/useTabScrollEdges";
 import { formatBrowserAnnotationMessage, type BrowserAnnotationSubmitPayload } from "../../shared/browser-annotations";
 import type { BrowserProfile } from "../../shared/browser-profiles";
+import { urlRoutesThroughHost } from "../../shared/loopback-routing";
 import type { WorkspaceSession } from "../types/workspace";
 import { Button } from "./ui/button";
 import {
@@ -422,6 +423,7 @@ export function BrowserPanelView({
 	const prefersReducedMotion = useReducedMotion();
 	const browserUnavailable = sessionBrowserUnavailable(session);
 	const {
+		loopbackVia = null,
 		viewId,
 		navState,
 		slotRef,
@@ -974,6 +976,15 @@ export function BrowserPanelView({
 			}}
 			onSubmit={submit}
 		>
+			{loopbackVia && urlRoutesThroughHost(session.hostId, navState.url) ? (
+				<span
+					className="max-w-32 shrink-0 truncate pr-1.5 text-caption text-muted-foreground"
+					data-testid="browser-via-computer"
+					title={t("browser.viaComputer", { name: loopbackVia })}
+				>
+					{t("browser.viaComputer", { name: loopbackVia })}
+				</span>
+			) : null}
 			<Popover
 				onOpenChange={(open) => {
 					if (!open && suggestionsOpen) {

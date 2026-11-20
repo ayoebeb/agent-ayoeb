@@ -275,6 +275,8 @@ import { sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
 import { createLocalHostIdentity, readRemoteIdentity } from "./main/remote-request";
 import { RemoteRegistry } from "./main/remote-registry";
 import { startRemoteProxy } from "./main/remote-proxy";
+import { newLoopbackCredential, startLoopbackProxy } from "./main/loopback-proxy";
+import { LoopbackRoutes } from "./main/loopback-routes";
 import { captureMainError, reportDaemonFailure, ExpectedIpcError, installIpcErrorCapture, setMainErrorSink } from "./main/main-error-capture";
 
 // Every ipcMain.handle registered from here on reports unexpected throws.
@@ -1270,6 +1272,7 @@ async function createWindowInternal(): Promise<void> {
 			notify: (state) => { awakeDownloads.update(state); shellWebContents.send("browser:downloadsChanged", state); },
 		}),
 		clearBrowserProfileData: clearElectronBrowserProfileData,
+		loopbackRoutes,
 		prepareBrowserPartition: (partition) =>
 			applyBrowserIdentity(session.fromPartition(partition), {
 				chromeVersion: process.versions.chrome,
@@ -3533,6 +3536,33 @@ const remoteRegistry = new RemoteRegistry((entry) => {
 	const devUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined" ? undefined : MAIN_WINDOW_VITE_DEV_SERVER_URL;
 	return startRemoteProxy(entry, devUrl ? new URL(devUrl).origin : RENDERER_ORIGIN);
 });
+// A remote session's Browser tabs open that computer's localhost dev servers:
+// its loopback traffic goes through a routing proxy over the remote connection
+// (main/loopback-proxy.ts). Chromium bypasses proxies for loopback unless the
+// bypass list says "<-loopback>", and a PAC script cannot lift that, so a
+// routed partition uses a fixed proxy that dials everything else from this PC.
+const loopbackCredential = newLoopbackCredential();
+const loopbackRoutes = new LoopbackRoutes({
+	credential: loopbackCredential,
+	startProxy: (hostId) => startLoopbackProxy({
+		hostId,
+		credential: loopbackCredential,
+		openStream: (host, port) => remoteRegistry.openLoopbackStream(hostId, host, port),
+	}),
+	applyProxy: (partition, address) => session.fromPartition(partition).setProxy(
+		address
+			? { mode: "fixed_servers", proxyRules: `http://${address}`, proxyBypassRules: "<-loopback>" }
+			: { mode: "system" },
+	),
+});
+// Only our own routing proxies get the credential; any other proxy's challenge is left alone.
+app.on("login", (event, _webContents, _details, authInfo, callback) => {
+	if (!authInfo.isProxy) return;
+	const credential = loopbackRoutes.credentialFor(authInfo.host, authInfo.port);
+	if (!credential) return;
+	event.preventDefault();
+	callback(credential.username, credential.password);
+});
 setPasswordCipher(() => protectedStorageAvailable() ? {
 	encrypt: (text) => safeStorage.encryptString(text).toString("base64"),
 	decrypt: (sealed) => safeStorage.decryptString(Buffer.from(sealed, "base64")),
@@ -4642,6 +4672,7 @@ app.on("before-quit", (event) => {
 			};
 			const cleanup = Promise.all([
 				disposeAllBrowserViewHosts(),
+				loopbackRoutes.closeAll(),
 				remoteRegistry.closeAll(),
 				cloudAgentProxy.close(),
 				telemetryPolicyController?.close() ?? Promise.resolve(),
