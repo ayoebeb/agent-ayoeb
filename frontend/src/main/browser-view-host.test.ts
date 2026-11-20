@@ -5723,6 +5723,52 @@ describe("browser:setBounds", () => {
 		expect(trust.isTrusted("devtestayoeb.yoobi.ayoeb", FINGERPRINT_A)).toBe(false);
 	});
 
+	// The "Trust this certificate" card is renderer DOM; the native view would
+	// paint a blank page over it. Bounds syncs and the overlay refresh (menu
+	// close) used to re-show the view, so the card was only visible while a menu
+	// was open.
+	it("keeps the native view hidden while a certificate failure is shown, and restores it on the next load", async () => {
+		const trust = new CertificateTrustStore();
+		const { emit, host, invoke, view, webContentsListeners } = setupHost(undefined, trust);
+		await invoke("browser:ensure", "sess-1");
+		emit("browser:setBounds", 1, {
+			viewId: "1:sess-1",
+			revision: 1,
+			rect: { x: 10, y: 20, width: 320, height: 240 },
+			visible: true,
+		});
+		await invoke("browser:navigate", { viewId: "1:sess-1", url: "https://devtestayoeb.yoobi.ayoeb/" });
+		trust.decide({ hostname: "devtestayoeb.yoobi.ayoeb", certificateData: CERT_A, verificationResult: "net::ERR_CERT_AUTHORITY_INVALID" });
+
+		webContentsListeners.get("did-fail-load")?.(
+			{} as never,
+			-202 as never,
+			"ERR_CERT_AUTHORITY_INVALID" as never,
+			"https://devtestayoeb.yoobi.ayoeb/" as never,
+			true as never,
+		);
+		expect(view.setVisible).toHaveBeenLastCalledWith(false);
+
+		// A layout change re-sends bounds: the view must stay hidden.
+		emit("browser:setBounds", 1, {
+			viewId: "1:sess-1",
+			revision: 2,
+			rect: { x: 10, y: 20, width: 300, height: 240 },
+			visible: true,
+		});
+		expect(view.setVisible).toHaveBeenLastCalledWith(false);
+
+		// Closing a toolbar menu runs the overlay refresh: still hidden.
+		view.setVisible.mockClear();
+		host.refreshLastFocusedPanelSurface();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(view.setVisible).not.toHaveBeenCalledWith(true);
+
+		// Trust (reload) or navigating away starts a load: the view comes back.
+		webContentsListeners.get("did-start-loading")?.();
+		expect(view.setVisible).toHaveBeenLastCalledWith(true);
+	});
+
 	it("does not offer certificate trust for a non-certificate failure", async () => {
 		const trust = new CertificateTrustStore();
 		const { invoke, sent, webContentsListeners } = setupHost(undefined, trust);
