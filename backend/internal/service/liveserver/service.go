@@ -174,7 +174,7 @@ func New(deps Deps) *Service {
 
 // List returns the project's running servers, managed first, with health.
 func (s *Service) List(ctx context.Context, project domain.ProjectID) ([]Server, error) {
-	servers, _, err := s.discover(ctx, project)
+	servers, err := s.discover(ctx, project)
 	if err != nil {
 		return nil, err
 	}
@@ -190,10 +190,10 @@ func (s *Service) List(ctx context.Context, project domain.ProjectID) ([]Server,
 	return servers, nil
 }
 
-func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Server, *procmem.Table, error) {
+func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Server, error) {
 	sessions, err := s.deps.Sessions(ctx, project)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	byID := make(map[domain.SessionID]Session, len(sessions))
 	for _, sess := range sessions {
@@ -215,7 +215,7 @@ func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Ser
 			Logs: st.Logs, OutputAvailable: true, CanRestart: true, Error: st.Error,
 		})
 	}
-	detected, table, err := s.detect(ctx, sessions, managedPorts)
+	detected, err := s.detect(ctx, sessions, managedPorts)
 	if err == nil {
 		out = append(out, detected...)
 	}
@@ -225,7 +225,7 @@ func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Ser
 		}
 		return out[i].Port < out[j].Port
 	})
-	return out, table, nil
+	return out, nil
 }
 
 // ignoredProcesses are agent harness and AO executables that open local
@@ -235,17 +235,17 @@ var ignoredProcesses = map[string]bool{
 	"opencode": true, "copilot": true, "aider": true, "conhost": true,
 }
 
-func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts map[int]bool) ([]Server, *procmem.Table, error) {
+func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts map[int]bool) ([]Server, error) {
 	if s.deps.Listeners == nil || s.deps.Table == nil || len(sessions) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	listeners, err := s.deps.Listeners(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	table, err := s.deps.Table(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	owner := map[int]Session{}
 	for _, sess := range sessions {
@@ -291,7 +291,7 @@ func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts m
 	for _, sv := range byPort {
 		out = append(out, sv)
 	}
-	return out, table, nil
+	return out, nil
 }
 
 // Stop ends one server. A detected server is only killed while its process
@@ -440,7 +440,7 @@ func (s *Service) Restart(ctx context.Context, project domain.ProjectID, key str
 }
 
 func (s *Service) find(ctx context.Context, project domain.ProjectID, key string) (Server, error) {
-	servers, _, err := s.discover(ctx, project)
+	servers, err := s.discover(ctx, project)
 	if err != nil {
 		return Server{}, err
 	}
