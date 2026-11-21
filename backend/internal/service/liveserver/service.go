@@ -298,7 +298,7 @@ func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts m
 // still has the start time it had when it was found and was shown to belong to
 // the project, so a recycled pid is refused rather than killed.
 func (s *Service) Stop(ctx context.Context, project domain.ProjectID, key string) error {
-	sv, _, err := s.find(ctx, project, key)
+	sv, err := s.find(ctx, project, key)
 	if err != nil {
 		return err
 	}
@@ -403,7 +403,7 @@ func (s *Service) startTime(pid int) string {
 
 // Restart stops a managed server and starts it again from its configuration.
 func (s *Service) Restart(ctx context.Context, project domain.ProjectID, key string) (Server, error) {
-	sv, _, err := s.find(ctx, project, key)
+	sv, err := s.find(ctx, project, key)
 	if err != nil {
 		return Server{}, err
 	}
@@ -439,17 +439,17 @@ func (s *Service) Restart(ctx context.Context, project domain.ProjectID, key str
 	return Server{Key: sv.Key, Source: SourceManaged, Name: status.Configuration, URL: status.URL, Port: status.Port, SessionID: sv.SessionID, State: string(status.State)}, nil
 }
 
-func (s *Service) find(ctx context.Context, project domain.ProjectID, key string) (Server, *procmem.Table, error) {
-	servers, table, err := s.discover(ctx, project)
+func (s *Service) find(ctx context.Context, project domain.ProjectID, key string) (Server, error) {
+	servers, _, err := s.discover(ctx, project)
 	if err != nil {
-		return Server{}, nil, err
+		return Server{}, err
 	}
 	for _, sv := range servers {
 		if sv.Key == key {
-			return sv, table, nil
+			return sv, nil
 		}
 	}
-	return Server{}, nil, apierr.NotFound("LIVE_SERVER_NOT_FOUND", "That server is no longer running")
+	return Server{}, apierr.NotFound("LIVE_SERVER_NOT_FOUND", "That server is no longer running")
 }
 
 func (s *Service) clearPreview(ctx context.Context, id domain.SessionID, url string) {
