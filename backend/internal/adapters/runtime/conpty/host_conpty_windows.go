@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"syscall"
 
 	gopty "github.com/aymanbagabas/go-pty"
 	"golang.org/x/sys/windows"
@@ -50,6 +51,10 @@ func newConPTY(cwd, shellCmd string, shellArgs []string, cols, rows uint16) (pty
 
 	cmd := cp.Command(shellCmd, shellArgs...)
 	cmd.Dir = cwd
+	if line, ok := cmdExeRawLine(shellCmd, shellArgs); ok {
+		// A command already quoted for cmd.exe must reach it verbatim.
+		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: line}
+	}
 	// Inherit parent env so PATH, HOME, etc. are available.
 	cmd.Env = os.Environ()
 

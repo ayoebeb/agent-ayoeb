@@ -24,6 +24,9 @@ type fakeTerminals struct {
 	closed []string
 	output string
 	opens  []TerminalSpec
+	// closeErr makes Close fail without ending the process, like a host that
+	// reports SHELL_TERMINAL_STILL_RUNNING.
+	closeErr error
 }
 
 func newFakeTerminals() *fakeTerminals {
@@ -75,7 +78,11 @@ func (f *fakeTerminals) Close(_ context.Context, id string) error {
 	f.mu.Lock()
 	cmd := f.procs[id]
 	f.closed = append(f.closed, id)
+	closeErr := f.closeErr
 	f.mu.Unlock()
+	if closeErr != nil {
+		return closeErr
+	}
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
@@ -155,5 +162,45 @@ func TestManagerMarksTerminalRunFailedWhenProcessExits(t *testing.T) {
 	}
 	if os.Getenv("NEVER") != "" {
 		t.Skip()
+	}
+}
+
+func TestManagerKeepsTerminalRunTrackedWhenCloseFailsAndProcessLives(t *testing.T) {
+	prev := terminalPollInterval
+	terminalPollInterval = 20 * time.Millisecond
+	t.Cleanup(func() { terminalPollInterval = prev })
+
+	workspace := writeLaunchFile(t, []Configuration{helperConfiguration("web", TargetApp)})
+	terminals := newFakeTerminals()
+	manager := New(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	manager.SetTerminals(terminals)
+	t.Cleanup(manager.Close)
+	started, err := manager.Start(context.Background(), "ao-3", workspace, "", nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	terminals.mu.Lock()
+	terminals.closeErr = errors.New("SHELL_TERMINAL_STILL_RUNNING")
+	terminals.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	status, err := manager.Stop(ctx, "ao-3")
+	assertPreviewErrorCode(t, err, "PREVIEW_STOP_FAILED")
+	if status.State != StateFailed || status.TerminalID != started.TerminalID {
+		t.Fatalf("status after failed stop = %+v, want the run kept as failed", status)
+	}
+	if got := manager.List(); len(got) != 1 {
+		t.Fatalf("List = %+v, want the still-running server tracked", got)
+	}
+
+	terminals.mu.Lock()
+	terminals.closeErr = nil
+	terminals.mu.Unlock()
+	if stopped, err := manager.Stop(context.Background(), "ao-3"); err != nil || stopped.State != StateStopped {
+		t.Fatalf("retry Stop = %+v, %v, want a clean stop", stopped, err)
+	}
+	if got := manager.List(); len(got) != 0 {
+		t.Fatalf("List after retry = %+v", got)
 	}
 }

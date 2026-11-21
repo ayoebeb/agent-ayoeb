@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/previewserver"
 	"github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
 
@@ -170,12 +171,15 @@ func SystemProbe(ctx context.Context, url string) (int, error) {
 	return resp.StatusCode, nil
 }
 
-// SystemKill ends each pid in order. On Unix it asks politely with SIGTERM; on
-// Windows there is no such signal, so the process is killed.
-func SystemKill(_ context.Context, pids []int) error {
+// SystemKill ends each process in order. On Unix it asks politely with SIGTERM;
+// on Windows there is no such signal, so the process is killed. A process whose
+// start time no longer matches the one AO recorded has been replaced under a
+// reused pid and is left alone.
+func SystemKill(_ context.Context, procs []ProcessRef) error {
 	var firstErr error
-	for _, pid := range pids {
-		if pid <= 0 || pid == os.Getpid() {
+	for _, ref := range procs {
+		pid := ref.PID
+		if pid <= 0 || pid == os.Getpid() || ref.Start == "" || previewserver.ProcessStartTime(pid) != ref.Start {
 			continue
 		}
 		p, err := os.FindProcess(pid)

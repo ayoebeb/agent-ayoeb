@@ -41,7 +41,7 @@ func (f *fakeLiveServers) Restart(_ context.Context, _ domain.ProjectID, key str
 func TestLiveServersRoutes(t *testing.T) {
 	svc := &fakeLiveServers{}
 	r := chi.NewRouter()
-	(&LiveServersController{Svc: svc}).Register(r)
+	(&LiveServersController{Svc: svc, UserClientGate: func(next http.Handler) http.Handler { return next }}).Register(r)
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/projects/p1/live-servers", nil))
@@ -72,5 +72,16 @@ func TestLiveServersRoutes(t *testing.T) {
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/projects/p1/live-servers/stop", strings.NewReader(`{}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("stop without key = %d, want 400", rec.Code)
+	}
+}
+
+func TestLiveServersRefuseEveryRequestWithoutAGate(t *testing.T) {
+	svc := &fakeLiveServers{}
+	r := chi.NewRouter()
+	(&LiveServersController{Svc: svc}).Register(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/projects/p1/live-servers", nil))
+	if rec.Code != http.StatusForbidden || svc.listed != "" {
+		t.Fatalf("ungated list = %d listed=%q, want 403 before the service", rec.Code, svc.listed)
 	}
 }

@@ -26,6 +26,21 @@ type LiveServerService interface {
 // LiveServersController owns the /projects/{projectId}/live-servers routes.
 type LiveServersController struct {
 	Svc LiveServerService
+	// UserClientGate admits only a person's client (the desktop renderer or a
+	// paired remote client). Without a gate every request is refused.
+	UserClientGate func(http.Handler) http.Handler
+}
+
+func (c *LiveServersController) gate() func(http.Handler) http.Handler {
+	if c.UserClientGate != nil {
+		return c.UserClientGate
+	}
+	return func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "LIVE_SERVER_USER_CLIENT_REQUIRED",
+				"Running servers can only be managed from the Orchestrator app", nil)
+		})
+	}
 }
 
 // LiveServerProjectIDParam is the {projectId} path parameter of the live
@@ -75,9 +90,10 @@ type LiveServerEnvelope struct {
 
 // Register mounts the live server routes.
 func (c *LiveServersController) Register(r chi.Router) {
-	r.Get("/projects/{projectId}/live-servers", c.list)
-	r.Post("/projects/{projectId}/live-servers/stop", c.stop)
-	r.Post("/projects/{projectId}/live-servers/restart", c.restart)
+	gated := r.With(c.gate())
+	gated.Get("/projects/{projectId}/live-servers", c.list)
+	gated.Post("/projects/{projectId}/live-servers/stop", c.stop)
+	gated.Post("/projects/{projectId}/live-servers/restart", c.restart)
 }
 
 func liveServerResponse(s liveserver.Server) LiveServerResponse {

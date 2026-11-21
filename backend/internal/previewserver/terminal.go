@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/agentlaunch"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
@@ -131,19 +132,48 @@ func (m *Manager) watchTerminal(ctx context.Context, sessionID domain.SessionID,
 	})
 }
 
-// stopTerminalRun closes a terminal-hosted run's PTY and waits for the
-// watcher to see the exit.
+// stopTerminalRun closes a terminal-hosted run's PTY and waits for the exit
+// to be confirmed. When the terminal host refuses to close it, or the process
+// is still alive after the wait, the run stays tracked (still stoppable) and
+// the stop fails: reporting success for a server that holds its port would let
+// a restart launch a second instance beside it.
 func (m *Manager) stopTerminalRun(ctx context.Context, sessionID domain.SessionID, run *serverRun, terminals Terminals) (Status, error) {
-	if err := terminals.Close(ctx, run.terminalID); err != nil {
-		m.log.Warn("close preview terminal", "session", sessionID, "err", err)
+	closeErr := terminals.Close(ctx, run.terminalID)
+	if closeErr != nil {
+		m.log.Warn("close preview terminal", "session", sessionID, "err", closeErr)
 	}
+	exited := false
 	select {
 	case <-run.done:
+		exited = true
 	case <-ctx.Done():
 		return m.Status(sessionID), ctx.Err()
 	case <-time.After(5 * time.Second):
 	}
+	if !exited {
+		// The watcher polls on an interval, so ask the host directly before
+		// deciding the process outlived the close.
+		if alive, err := terminals.Alive(ctx, run.terminalID); err == nil && !alive {
+			exited = true
+		}
+	}
 	m.mu.Lock()
+	if !exited {
+		message := "preview server did not exit when its terminal was closed"
+		if closeErr != nil {
+			message += ": " + closeErr.Error()
+		}
+		if m.runs[sessionID] == run {
+			run.status.State = StateFailed
+			run.status.Error = message
+			// Not stopping any more: if it exits later on its own that is an
+			// exit to report, and a retry sets this again.
+			run.stopping = false
+		}
+		status := m.statusForLocked(run)
+		m.mu.Unlock()
+		return status, serviceError("PREVIEW_STOP_FAILED", agentlaunch.RedactValues(message, run.projectEnv))
+	}
 	if m.runs[sessionID] == run {
 		run.exited = true
 		run.status.State = StateStopped
@@ -154,3 +184,7 @@ func (m *Manager) stopTerminalRun(ctx context.Context, sessionID domain.SessionI
 	m.mu.Unlock()
 	return status, nil
 }
+
+// ProcessStartTime is the kernel-reported start time of pid ("" when it cannot
+// be read). Two readings of the same pid that differ mean the pid was reused.
+func ProcessStartTime(pid int) string { return previewProcessStartTime(pid) }

@@ -159,6 +159,27 @@ func (s *Service) CommandTerminalHandles(ctx context.Context, owner string) ([]s
 	return handles, nil
 }
 
+// CommandTerminalHandlesOwnedBy returns this app launch's command terminals
+// whose recorded owner is exactly owner. Unlike CommandTerminalHandles it never
+// includes terminals that predate ownership metadata, so it is safe to close
+// what it returns.
+func (s *Service) CommandTerminalHandlesOwnedBy(ctx context.Context, owner string) ([]string, error) {
+	if owner == "" {
+		return nil, nil
+	}
+	records, err := s.store.SelectShellTerminalsByAppRunID(ctx, s.appRunID)
+	if err != nil {
+		return nil, fmt.Errorf("list command terminals: %w", err)
+	}
+	var handles []string
+	for _, rec := range records {
+		if rec.Transient && rec.CommandOwner == owner {
+			handles = append(handles, rec.HandleID)
+		}
+	}
+	return handles, nil
+}
+
 // sessionGate is the admission/teardown barrier for one session's scoped
 // shell terminals. It is held for the ENTIRE span from BeginSessionTeardown
 // through the release function it returns on success — deliberately crossing

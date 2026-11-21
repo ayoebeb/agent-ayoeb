@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -42,7 +44,8 @@ func psTable(t *testing.T, rows string) *procmem.Table {
 type harness struct {
 	svc      *Service
 	managed  *fakeManaged
-	killed   []int
+	killed   []ProcessRef
+	starts   map[int]string
 	preview  map[domain.SessionID]string
 	probes   map[string]error
 	probeHit map[string]int
@@ -51,7 +54,7 @@ type harness struct {
 
 func newHarness(t *testing.T, listeners []Listener, ps string, sessions []Session) *harness {
 	t.Helper()
-	h := &harness{managed: &fakeManaged{}, preview: map[domain.SessionID]string{}, probes: map[string]error{}, probeHit: map[string]int{}}
+	h := &harness{managed: &fakeManaged{}, preview: map[domain.SessionID]string{}, probes: map[string]error{}, probeHit: map[string]int{}, starts: map[int]string{}}
 	h.svc = New(Deps{
 		Managed:   h.managed,
 		Sessions:  func(context.Context, domain.ProjectID) ([]Session, error) { return sessions, nil },
@@ -66,7 +69,15 @@ func newHarness(t *testing.T, listeners []Listener, ps string, sessions []Sessio
 			}
 			return 200, nil
 		},
-		Kill:       func(_ context.Context, pids []int) error { h.killed = append(h.killed, pids...); return nil },
+		StartTime: func(pid int) string {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if s, ok := h.starts[pid]; ok {
+				return s
+			}
+			return "start-" + strconv.Itoa(pid)
+		},
+		Kill:       func(_ context.Context, procs []ProcessRef) error { h.killed = append(h.killed, procs...); return nil },
 		SetPreview: func(_ context.Context, id domain.SessionID, url string) error { h.preview[id] = url; return nil },
 		PreviewURL: func(_ context.Context, id domain.SessionID) string { return h.preview[id] },
 		OwnPID:     1,
@@ -178,11 +189,45 @@ func TestStopDetectedKillsTreeLeavesFirstAndRefusesStaleKeys(t *testing.T) {
 	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.killed, []int{12, 11}) {
+	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 12, Start: "start-12"}, {PID: 11, Start: "start-11"}}) {
 		t.Fatalf("killed = %v, want child before parent", h.killed)
 	}
 	if err := h.svc.Stop(context.Background(), "p1", "detected:9999"); err == nil {
 		t.Fatal("stopping an unknown server must fail")
+	}
+}
+
+func TestStopRefusesAPidThatWasReusedAfterDiscovery(t *testing.T) {
+	listeners := []Listener{{PID: 11, Port: 5173, Addr: "127.0.0.1"}}
+	h := newHarness(t, listeners, psRows, []Session{{ID: "s1", RootPIDs: []int{10}}})
+	// The service reads the listener's start time when it finds the server, then
+	// again before killing: the second reading belongs to an unrelated process.
+	reads := 0
+	h.svc.deps.StartTime = func(pid int) string {
+		if pid != 11 {
+			return "start-" + strconv.Itoa(pid)
+		}
+		reads++
+		if reads == 1 {
+			return "original"
+		}
+		return "replacement"
+	}
+	err := h.svc.Stop(context.Background(), "p1", "detected:5173")
+	if err == nil || !strings.Contains(err.Error(), "prove") {
+		t.Fatalf("Stop = %v, want an identity refusal", err)
+	}
+	if len(h.killed) != 0 {
+		t.Fatalf("killed %v after the pid was reused", h.killed)
+	}
+}
+
+func TestStopRefusesWhenStartTimeIsUnreadable(t *testing.T) {
+	listeners := []Listener{{PID: 11, Port: 5173, Addr: "127.0.0.1"}}
+	h := newHarness(t, listeners, psRows, []Session{{ID: "s1", RootPIDs: []int{10}}})
+	h.svc.deps.StartTime = func(int) string { return "" }
+	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err == nil || len(h.killed) != 0 {
+		t.Fatalf("Stop = %v killed=%v, want a refusal without killing", err, h.killed)
 	}
 }
 

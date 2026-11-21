@@ -249,7 +249,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 			UserClientGate: commandRunGate(cfg.AllowedOrigins, deps.CommandRunKey),
 		},
 		cues:          &controllers.CuesController{Svc: deps.Cues},
-		liveServers:   &controllers.LiveServersController{Svc: deps.LiveServers},
+		liveServers:   &controllers.LiveServersController{Svc: deps.LiveServers, UserClientGate: liveServerGate(cfg.AllowedOrigins, deps.CommandRunKey)},
 		conversations: &controllers.ConversationsController{Svc: deps.Conversations, Renders: attachmentstore.New(cfg.DataDir), Search: deps.ConversationSearch, UserMessages: userMessageRecorder(deps.Sessions)},
 		settings:      &controllers.SettingsController{Svc: deps.Settings},
 		dev:           &controllers.DevController{Import: deps.DevImport},

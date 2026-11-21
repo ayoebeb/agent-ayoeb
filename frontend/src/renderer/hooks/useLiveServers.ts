@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
+import { userClientHeaders } from "../lib/command-runs";
 import { clientForSessionHost } from "../lib/host-clients";
 import type { WorkspaceSession } from "../types/workspace";
 
@@ -33,6 +34,7 @@ export function useLiveServers(orchestrator: WorkspaceSession | undefined, enabl
 		retry: false,
 		queryFn: async (): Promise<LiveServer[]> => {
 			const { data, error } = await clientForSessionHost(hostId).GET("/api/v1/projects/{projectId}/live-servers", {
+				headers: await userClientHeaders(hostId),
 				params: { path: { projectId: projectId ?? "" } },
 			});
 			if (error || !data) throw error ?? new Error("live servers unavailable");
@@ -51,6 +53,7 @@ export function useLiveServerActions(orchestrator: WorkspaceSession | undefined)
 	const stop = useMutation({
 		mutationFn: async (key: string) => {
 			const { error } = await clientForSessionHost(hostId).POST("/api/v1/projects/{projectId}/live-servers/stop", {
+				headers: await userClientHeaders(hostId),
 				params: { path: { projectId } },
 				body: { key },
 			});
@@ -61,6 +64,7 @@ export function useLiveServerActions(orchestrator: WorkspaceSession | undefined)
 	const restart = useMutation({
 		mutationFn: async (key: string) => {
 			const { error } = await clientForSessionHost(hostId).POST("/api/v1/projects/{projectId}/live-servers/restart", {
+				headers: await userClientHeaders(hostId),
 				params: { path: { projectId } },
 				body: { key },
 			});

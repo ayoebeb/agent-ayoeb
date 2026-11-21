@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -50,6 +51,36 @@ func (p previewTerminals) Close(ctx context.Context, handleID string) error {
 	return p.terminals.CloseShellTerminal(ctx, handleID)
 }
 
+// previewTerminalReaper is the slice of the shell-terminal service needed to
+// close preview terminals a previous daemon left running.
+type previewTerminalReaper interface {
+	CommandTerminalHandlesOwnedBy(ctx context.Context, owner string) ([]string, error)
+	CloseShellTerminal(ctx context.Context, handleID string) error
+}
+
+// reapAbandonedPreviewTerminals closes the preview-server terminals of this app
+// launch. Preview terminals are detached, so one survives a daemon crash that
+// Electron recovers within the same launch, but the new preview manager starts
+// with no runs and could neither show, stop nor deduplicate it while it kept
+// holding its port. It runs before the daemon serves, so every such terminal is
+// abandoned by construction. It returns how many were closed.
+func reapAbandonedPreviewTerminals(ctx context.Context, svc previewTerminalReaper, log *slog.Logger) int {
+	handles, err := svc.CommandTerminalHandlesOwnedBy(ctx, previewOwner)
+	if err != nil {
+		log.Warn("list abandoned preview terminals", "err", err)
+		return 0
+	}
+	closed := 0
+	for _, handle := range handles {
+		if err := svc.CloseShellTerminal(ctx, handle); err != nil {
+			log.Warn("close abandoned preview terminal", "handleId", handle, "err", err)
+			continue
+		}
+		closed++
+	}
+	return closed
+}
+
 // liveServerDeps are the daemon pieces the live server service reads.
 type liveServerDeps struct {
 	dataDir  string
@@ -91,6 +122,7 @@ func newLiveServerService(d liveServerDeps) *liveserversvc.Service {
 		Table:     func(ctx context.Context) (*procmem.Table, error) { return procmem.Snapshot(ctx, nil) },
 		Probe:     liveserversvc.SystemProbe,
 		Kill:      liveserversvc.SystemKill,
+		StartTime: previewserver.ProcessStartTime,
 		SetPreview: func(ctx context.Context, id domain.SessionID, url string) error {
 			_, err := d.sessions.SetPreview(ctx, id, url)
 			return err

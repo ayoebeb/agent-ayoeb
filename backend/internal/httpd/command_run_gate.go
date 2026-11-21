@@ -46,12 +46,27 @@ func DeriveCommandRunKey(runtimeToken string) string {
 // Origin, no key). A future elevated "Run as administrator" must additionally
 // require the local branch, never the remote one.
 func commandRunGate(allowedOrigins []string, key string) func(http.Handler) http.Handler {
+	return userClientGate(allowedOrigins, key, "COMMAND_RUN_USER_CLIENT_REQUIRED",
+		"Commands can only be run from the Orchestrator app")
+}
+
+// liveServerGate admits only a person's client to the Live server routes, by
+// the same rule as commandRunGate: they list every server in a project and
+// stop or restart them, so an agent, the ao CLI, a preview page or any local
+// process that merely reaches the loopback port is refused. A paired remote
+// client is admitted on purpose: another desktop reads a remote computer's
+// Live list through that connection.
+func liveServerGate(allowedOrigins []string, key string) func(http.Handler) http.Handler {
+	return userClientGate(allowedOrigins, key, "LIVE_SERVER_USER_CLIENT_REQUIRED",
+		"Running servers can only be managed from the Orchestrator app")
+}
+
+func userClientGate(allowedOrigins []string, key, code, message string) func(http.Handler) http.Handler {
 	allowed := exactAllowedOrigins(allowedOrigins)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !commandRunUserClient(r, allowed, key) {
-				envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "COMMAND_RUN_USER_CLIENT_REQUIRED",
-					"Commands can only be run from the Orchestrator app", nil)
+				envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", code, message, nil)
 				return
 			}
 			next.ServeHTTP(w, r)

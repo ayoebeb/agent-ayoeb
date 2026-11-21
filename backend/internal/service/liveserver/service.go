@@ -62,7 +62,10 @@ type Server struct {
 	// WorkingDir is the owning session's workspace, for "open a terminal here".
 	WorkingDir string
 	PID        int
-	Logs       []string
+	// PIDStart is the listener process's start time when it was found; a later
+	// reading that differs means the pid was reused.
+	PIDStart string
+	Logs     []string
 	// OutputAvailable is false for detected servers: AO did not start them, so
 	// it holds neither their output nor a terminal.
 	OutputAvailable bool
@@ -78,6 +81,13 @@ type Session struct {
 	// RootPIDs are the process ids the session's tree starts from.
 	RootPIDs   []int
 	Terminated bool
+}
+
+// ProcessRef names one process by pid and the start time it had when AO
+// established that it belongs to the project.
+type ProcessRef struct {
+	PID   int
+	Start string
 }
 
 // Listener is one listening TCP socket.
@@ -108,8 +118,11 @@ type Deps struct {
 	Table func(ctx context.Context) (*procmem.Table, error)
 	// Probe asks url for one HTTP response.
 	Probe func(ctx context.Context, url string) (status int, err error)
-	// Kill ends the given processes, leaves first.
-	Kill func(ctx context.Context, pids []int) error
+	// StartTime reads a process's kernel start time ("" when unreadable).
+	StartTime func(pid int) string
+	// Kill ends the given processes in order. It must re-check each ref's start
+	// time immediately before signaling and skip a process that no longer matches.
+	Kill func(ctx context.Context, procs []ProcessRef) error
 	// SetPreview points a session's Browser preview at url ("" clears it).
 	SetPreview func(ctx context.Context, id domain.SessionID, url string) error
 	// PreviewURL reads a session's current Browser preview URL.
@@ -154,7 +167,7 @@ func New(deps Deps) *Service {
 
 // List returns the project's running servers, managed first, with health.
 func (s *Service) List(ctx context.Context, project domain.ProjectID) ([]Server, error) {
-	servers, err := s.discover(ctx, project)
+	servers, _, err := s.discover(ctx, project)
 	if err != nil {
 		return nil, err
 	}
@@ -170,10 +183,10 @@ func (s *Service) List(ctx context.Context, project domain.ProjectID) ([]Server,
 	return servers, nil
 }
 
-func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Server, error) {
+func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Server, *procmem.Table, error) {
 	sessions, err := s.deps.Sessions(ctx, project)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	byID := make(map[domain.SessionID]Session, len(sessions))
 	for _, sess := range sessions {
@@ -195,7 +208,7 @@ func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Ser
 			Logs: st.Logs, OutputAvailable: true, CanRestart: true, Error: st.Error,
 		})
 	}
-	detected, err := s.detect(ctx, sessions, managedPorts)
+	detected, table, err := s.detect(ctx, sessions, managedPorts)
 	if err == nil {
 		out = append(out, detected...)
 	}
@@ -205,7 +218,7 @@ func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Ser
 		}
 		return out[i].Port < out[j].Port
 	})
-	return out, nil
+	return out, table, nil
 }
 
 // ignoredProcesses are agent harness and AO executables that open local
@@ -215,17 +228,17 @@ var ignoredProcesses = map[string]bool{
 	"opencode": true, "copilot": true, "aider": true, "conhost": true,
 }
 
-func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts map[int]bool) ([]Server, error) {
+func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts map[int]bool) ([]Server, *procmem.Table, error) {
 	if s.deps.Listeners == nil || s.deps.Table == nil || len(sessions) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	listeners, err := s.deps.Listeners(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	table, err := s.deps.Table(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	owner := map[int]Session{}
 	for _, sess := range sessions {
@@ -259,20 +272,21 @@ func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts m
 			Key: "detected:" + strconv.Itoa(l.Port), Source: SourceDetected,
 			Name: name, Command: proc.Command, Port: l.Port, URL: probeURL(l),
 			SessionID: sess.ID, SessionName: sess.Name, State: string(previewserver.StateReady),
-			WorkingDir: sess.WorkspacePath, PID: l.PID, Logs: []string{},
+			WorkingDir: sess.WorkspacePath, PID: l.PID, PIDStart: s.startTime(l.PID), Logs: []string{},
 		}
 	}
 	out := make([]Server, 0, len(byPort))
 	for _, sv := range byPort {
 		out = append(out, sv)
 	}
-	return out, nil
+	return out, table, nil
 }
 
-// Stop ends one server. A detected server is re-checked against the current
-// process table first, so a recycled pid is never killed.
+// Stop ends one server. A detected server is only killed while its process
+// still has the start time it had when it was found and was shown to belong to
+// the project, so a recycled pid is refused rather than killed.
 func (s *Service) Stop(ctx context.Context, project domain.ProjectID, key string) error {
-	sv, err := s.find(ctx, project, key)
+	sv, table, err := s.find(ctx, project, key)
 	if err != nil {
 		return err
 	}
@@ -284,20 +298,31 @@ func (s *Service) Stop(ctx context.Context, project domain.ProjectID, key string
 		s.clearPreview(ctx, sv.SessionID, previous)
 		return nil
 	}
-	table, err := s.deps.Table(ctx)
-	if err != nil {
-		return err
+	if table == nil || sv.PIDStart == "" || s.startTime(sv.PID) != sv.PIDStart {
+		return apierr.Conflict("LIVE_SERVER_IDENTITY_UNPROVEN",
+			"AO can no longer prove this process is the server it found, so it was not stopped", nil)
 	}
-	pids := treePIDs(table, sv.PID)
-	if len(pids) == 0 {
-		return nil
+	procs := []ProcessRef{}
+	for _, pid := range treePIDs(table, sv.PID) {
+		if pid == sv.PID {
+			procs = append(procs, ProcessRef{PID: pid, Start: sv.PIDStart})
+		} else if start := s.startTime(pid); start != "" {
+			procs = append(procs, ProcessRef{PID: pid, Start: start})
+		}
 	}
-	return s.deps.Kill(ctx, pids)
+	return s.deps.Kill(ctx, procs)
+}
+
+func (s *Service) startTime(pid int) string {
+	if s.deps.StartTime == nil {
+		return ""
+	}
+	return s.deps.StartTime(pid)
 }
 
 // Restart stops a managed server and starts it again from its configuration.
 func (s *Service) Restart(ctx context.Context, project domain.ProjectID, key string) (Server, error) {
-	sv, err := s.find(ctx, project, key)
+	sv, _, err := s.find(ctx, project, key)
 	if err != nil {
 		return Server{}, err
 	}
@@ -333,17 +358,17 @@ func (s *Service) Restart(ctx context.Context, project domain.ProjectID, key str
 	return Server{Key: sv.Key, Source: SourceManaged, Name: status.Configuration, URL: status.URL, Port: status.Port, SessionID: sv.SessionID, State: string(status.State)}, nil
 }
 
-func (s *Service) find(ctx context.Context, project domain.ProjectID, key string) (Server, error) {
-	servers, err := s.discover(ctx, project)
+func (s *Service) find(ctx context.Context, project domain.ProjectID, key string) (Server, *procmem.Table, error) {
+	servers, table, err := s.discover(ctx, project)
 	if err != nil {
-		return Server{}, err
+		return Server{}, nil, err
 	}
 	for _, sv := range servers {
 		if sv.Key == key {
-			return sv, nil
+			return sv, table, nil
 		}
 	}
-	return Server{}, apierr.NotFound("LIVE_SERVER_NOT_FOUND", "That server is no longer running")
+	return Server{}, nil, apierr.NotFound("LIVE_SERVER_NOT_FOUND", "That server is no longer running")
 }
 
 func (s *Service) clearPreview(ctx context.Context, id domain.SessionID, url string) {
