@@ -92,9 +92,12 @@ type ProcessRef struct {
 	PID   int
 	Start string
 	// PPID and ParentStart identify the parent this process had when ownership
-	// was established. They are empty for the listener itself.
+	// was established. They are empty only for the first anchor (a session root).
 	PPID        int
 	ParentStart string
+	// Anchor marks a process that is verified but never signaled: the session
+	// ancestors that tie the listener back to the session that owns it.
+	Anchor bool
 }
 
 // Listener is one listening TCP socket.
@@ -275,10 +278,12 @@ func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts m
 		if _, dup := byPort[l.Port]; dup {
 			continue
 		}
-		tree := s.identityTree(table, l.PID)
+		tree := s.identityTree(table, l.PID, sess.RootPIDs)
 		pidStart := ""
-		if len(tree) > 0 {
-			pidStart = tree[0].Start
+		for _, ref := range tree {
+			if ref.PID == l.PID {
+				pidStart = ref.Start
+			}
 		}
 		byPort[l.Port] = Server{
 			Key: "detected:" + strconv.Itoa(l.Port), Source: SourceDetected,
@@ -321,17 +326,23 @@ func (s *Service) Stop(ctx context.Context, project domain.ProjectID, key string
 	if err != nil {
 		return err
 	}
-	root := sv.Tree[0]
-	if !s.verified(fresh, root) {
-		return identityUnproven()
-	}
 	procs := make([]ProcessRef, 0, len(sv.Tree))
-	// Leaves first: the recorded tree is parents-before-children, so walk it
-	// backwards.
-	for i := len(sv.Tree) - 1; i >= 0; i-- {
-		if ref := sv.Tree[i]; s.verified(fresh, ref) {
+	// The recorded tree is the session ancestry (anchors), the listener, then its
+	// descendants, parents before children. The anchors and the listener must
+	// all still verify: if the chain back to the owning session is broken, the
+	// listener may be a reused pid, so nothing is signaled. A descendant that
+	// fails is just skipped. Signal leaves first.
+	for _, ref := range sv.Tree {
+		ok := s.verified(fresh, ref)
+		if !ok && (ref.Anchor || ref.PID == sv.PID) {
+			return identityUnproven()
+		}
+		if ok && !ref.Anchor {
 			procs = append(procs, ref)
 		}
+	}
+	for i, j := 0, len(procs)-1; i < j; i, j = i+1, j-1 {
+		procs[i], procs[j] = procs[j], procs[i]
 	}
 	return s.deps.Kill(ctx, procs)
 }
@@ -365,20 +376,51 @@ func (s *Service) identity(p procmem.Process) string {
 	return s.startTime(p.PID)
 }
 
-// identityTree records pid and its descendants with the identity each has in
-// this snapshot, parents before children. A descendant whose identity cannot
-// be read is left out, so it is never signaled.
-func (s *Service) identityTree(table *procmem.Table, pid int) []ProcessRef {
-	root, ok := table.Get(pid)
-	if !ok {
-		return nil
+// identityTree records, from one snapshot, the chain from the owning session's
+// root down to pid (anchors, never signaled), pid itself, and its descendants,
+// parents before children. Every entry after the first carries its parent's pid
+// and start time. It returns nil, so nothing can be stopped, when the chain to a
+// session root cannot be walked or an identity on it cannot be read. A
+// descendant whose identity cannot be read is simply left out.
+func (s *Service) identityTree(table *procmem.Table, pid int, roots []int) []ProcessRef {
+	isRoot := make(map[int]bool, len(roots))
+	for _, r := range roots {
+		isRoot[r] = true
 	}
-	rootStart := s.identity(root)
-	if rootStart == "" {
-		return nil
+	// Walk up from the listener to the session root it hangs from.
+	var chain []procmem.Process
+	for cur, steps := pid, 0; ; steps++ {
+		p, ok := table.Get(cur)
+		if !ok || steps > 64 {
+			return nil
+		}
+		chain = append(chain, p)
+		if isRoot[cur] {
+			break
+		}
+		cur = p.PPID
 	}
-	starts := map[int]string{pid: rootStart}
-	out := []ProcessRef{{PID: pid, Start: rootStart}}
+	if len(chain) < 2 {
+		return nil // the listener is itself a session root: nothing ties it to one
+	}
+	// chain is listener-first; the tree is root-first.
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	starts := map[int]string{}
+	out := make([]ProcessRef, 0, len(chain))
+	for i, p := range chain {
+		start := s.identity(p)
+		if start == "" {
+			return nil
+		}
+		ref := ProcessRef{PID: p.PID, Start: start, Anchor: p.PID != pid}
+		if i > 0 {
+			ref.PPID, ref.ParentStart = p.PPID, starts[p.PPID]
+		}
+		starts[p.PID] = start
+		out = append(out, ref)
+	}
 	for _, p := range table.Tree(pid).Processes {
 		if p.PID == pid {
 			continue

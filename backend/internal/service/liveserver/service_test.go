@@ -189,7 +189,7 @@ func TestStopDetectedKillsTreeLeavesFirstAndRefusesStaleKeys(t *testing.T) {
 	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 12, Start: "start-12", PPID: 11, ParentStart: "start-11"}, {PID: 11, Start: "start-11"}}) {
+	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 12, Start: "start-12", PPID: 11, ParentStart: "start-11"}, {PID: 11, Start: "start-11", PPID: 10, ParentStart: "start-10"}}) {
 		t.Fatalf("killed = %v, want child before parent", h.killed)
 	}
 	if err := h.svc.Stop(context.Background(), "p1", "detected:9999"); err == nil {
@@ -319,7 +319,7 @@ func TestStopSkipsADescendantWhoseOwnStartTimeChanged(t *testing.T) {
 	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 11, Start: "start-11"}}) {
+	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 11, Start: "start-11", PPID: 10, ParentStart: "start-10"}}) {
 		t.Fatalf("killed = %v, want only the listener; the reused descendant must be left alone", h.killed)
 	}
 }
@@ -338,7 +338,7 @@ func TestStopSkipsADescendantThatWasReparented(t *testing.T) {
 	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 11, Start: "start-11"}}) {
+	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 11, Start: "start-11", PPID: 10, ParentStart: "start-10"}}) {
 		t.Fatalf("killed = %v, want pid 12 skipped because its parent changed", h.killed)
 	}
 }
@@ -365,5 +365,68 @@ func TestStopSkipsADescendantWhoseParentWasReplaced(t *testing.T) {
 		if ref.PID == 12 {
 			t.Fatalf("killed %v: pid 12 must be skipped when its recorded parent start time no longer matches", h.killed)
 		}
+	}
+}
+
+// psRowsListenerReused is the table after pid 11 was replaced by an unrelated
+// process that hangs from init, not from the session root.
+const psRowsListenerReused = `
+10 1 100 claude
+11 1 100 python unrelated
+`
+
+func TestStopRefusesAListenerPidReusedByAnUnrelatedProcess(t *testing.T) {
+	h := detectedHarness(t)
+	// Unix has no StartTime in table rows, so the identity is read per pid. Here
+	// the very first read already belongs to the replacement, so the start time
+	// alone cannot tell: only the broken link to the session can.
+	h.svc.deps.StartTime = func(pid int) string {
+		if pid == 11 {
+			return "replacement-11"
+		}
+		return "start-" + strconv.Itoa(pid)
+	}
+	calls := 0
+	base := h.svc.deps.Table
+	h.svc.deps.Table = func(ctx context.Context) (*procmem.Table, error) {
+		calls++
+		if calls > 1 { // the fresh snapshot taken to verify before signaling
+			return psTable(t, psRowsListenerReused), nil
+		}
+		return base(ctx)
+	}
+	err := h.svc.Stop(context.Background(), "p1", "detected:5173")
+	if err == nil || !strings.Contains(err.Error(), "prove") {
+		t.Fatalf("Stop = %v, want an identity refusal", err)
+	}
+	if len(h.killed) != 0 {
+		t.Fatalf("killed %v: an unrelated process reusing the listener pid must not be signaled", h.killed)
+	}
+}
+
+func TestStopRefusesWhenTheSessionAncestorWasReplaced(t *testing.T) {
+	h := detectedHarness(t)
+	reads := 0
+	h.svc.deps.StartTime = func(pid int) string {
+		if pid == 10 {
+			reads++
+			if reads > 1 {
+				return "replacement-10"
+			}
+		}
+		return "start-" + strconv.Itoa(pid)
+	}
+	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err == nil || len(h.killed) != 0 {
+		t.Fatalf("Stop = %v killed=%v, want a refusal when the session root changed", err, h.killed)
+	}
+}
+
+func TestListenerWithoutAChainToTheSessionRootIsNotStoppable(t *testing.T) {
+	// The session root is not an ancestor of the listener in the table.
+	h := newHarness(t, []Listener{{PID: 11, Port: 5173, Addr: "127.0.0.1"}}, psRows, []Session{{ID: "s1", RootPIDs: []int{10}}})
+	h.svc.deps.Table = func(context.Context) (*procmem.Table, error) { return psTable(t, psRowsListenerReused), nil }
+	servers, _ := h.svc.List(context.Background(), "p1")
+	if len(servers) != 0 {
+		t.Fatalf("servers = %+v, want a listener outside the session tree not to be detected", servers)
 	}
 }
