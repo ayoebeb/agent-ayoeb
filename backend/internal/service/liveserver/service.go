@@ -65,7 +65,10 @@ type Server struct {
 	// PIDStart is the listener process's start time when it was found; a later
 	// reading that differs means the pid was reused.
 	PIDStart string
-	Logs     []string
+	// Tree is the listener and its descendants with the identity each had in
+	// the snapshot that proved they belong to the project, leaves last.
+	Tree []ProcessRef
+	Logs []string
 	// OutputAvailable is false for detected servers: AO did not start them, so
 	// it holds neither their output nor a terminal.
 	OutputAvailable bool
@@ -88,6 +91,10 @@ type Session struct {
 type ProcessRef struct {
 	PID   int
 	Start string
+	// PPID and ParentStart identify the parent this process had when ownership
+	// was established. They are empty for the listener itself.
+	PPID        int
+	ParentStart string
 }
 
 // Listener is one listening TCP socket.
@@ -268,11 +275,16 @@ func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts m
 		if _, dup := byPort[l.Port]; dup {
 			continue
 		}
+		tree := s.identityTree(table, l.PID)
+		pidStart := ""
+		if len(tree) > 0 {
+			pidStart = tree[0].Start
+		}
 		byPort[l.Port] = Server{
 			Key: "detected:" + strconv.Itoa(l.Port), Source: SourceDetected,
 			Name: name, Command: proc.Command, Port: l.Port, URL: probeURL(l),
 			SessionID: sess.ID, SessionName: sess.Name, State: string(previewserver.StateReady),
-			WorkingDir: sess.WorkspacePath, PID: l.PID, PIDStart: s.startTime(l.PID), Logs: []string{},
+			WorkingDir: sess.WorkspacePath, PID: l.PID, PIDStart: pidStart, Tree: tree, Logs: []string{},
 		}
 	}
 	out := make([]Server, 0, len(byPort))
@@ -286,7 +298,7 @@ func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts m
 // still has the start time it had when it was found and was shown to belong to
 // the project, so a recycled pid is refused rather than killed.
 func (s *Service) Stop(ctx context.Context, project domain.ProjectID, key string) error {
-	sv, table, err := s.find(ctx, project, key)
+	sv, _, err := s.find(ctx, project, key)
 	if err != nil {
 		return err
 	}
@@ -298,19 +310,88 @@ func (s *Service) Stop(ctx context.Context, project domain.ProjectID, key string
 		s.clearPreview(ctx, sv.SessionID, previous)
 		return nil
 	}
-	if table == nil || sv.PIDStart == "" || s.startTime(sv.PID) != sv.PIDStart {
-		return apierr.Conflict("LIVE_SERVER_IDENTITY_UNPROVEN",
-			"AO can no longer prove this process is the server it found, so it was not stopped", nil)
+	if len(sv.Tree) == 0 || sv.PIDStart == "" {
+		return identityUnproven()
 	}
-	procs := []ProcessRef{}
-	for _, pid := range treePIDs(table, sv.PID) {
-		if pid == sv.PID {
-			procs = append(procs, ProcessRef{PID: pid, Start: sv.PIDStart})
-		} else if start := s.startTime(pid); start != "" {
-			procs = append(procs, ProcessRef{PID: pid, Start: start})
+	// Re-read the process table and re-verify every process against the
+	// identity recorded when it was proven to belong to the project: its own
+	// start time, its parent pid, and its parent's start time. A pid reused
+	// since then fails at least one of the three.
+	fresh, err := s.deps.Table(ctx)
+	if err != nil {
+		return err
+	}
+	root := sv.Tree[0]
+	if !s.verified(fresh, root) {
+		return identityUnproven()
+	}
+	procs := make([]ProcessRef, 0, len(sv.Tree))
+	// Leaves first: the recorded tree is parents-before-children, so walk it
+	// backwards.
+	for i := len(sv.Tree) - 1; i >= 0; i-- {
+		if ref := sv.Tree[i]; s.verified(fresh, ref) {
+			procs = append(procs, ref)
 		}
 	}
 	return s.deps.Kill(ctx, procs)
+}
+
+func identityUnproven() error {
+	return apierr.Conflict("LIVE_SERVER_IDENTITY_UNPROVEN",
+		"AO can no longer prove this process is the server it found, so it was not stopped", nil)
+}
+
+// verified reports whether ref still names the process it named when recorded.
+func (s *Service) verified(table *procmem.Table, ref ProcessRef) bool {
+	if ref.Start == "" || s.startTime(ref.PID) != ref.Start {
+		return false
+	}
+	cur, ok := table.Get(ref.PID)
+	if !ok {
+		return false
+	}
+	if ref.PPID == 0 {
+		return true
+	}
+	return cur.PPID == ref.PPID && ref.ParentStart != "" && s.startTime(ref.PPID) == ref.ParentStart
+}
+
+// identity is a process's start time: the one carried by the snapshot row when
+// the table source has it, else read from the system.
+func (s *Service) identity(p procmem.Process) string {
+	if p.StartTime != "" {
+		return p.StartTime
+	}
+	return s.startTime(p.PID)
+}
+
+// identityTree records pid and its descendants with the identity each has in
+// this snapshot, parents before children. A descendant whose identity cannot
+// be read is left out, so it is never signaled.
+func (s *Service) identityTree(table *procmem.Table, pid int) []ProcessRef {
+	root, ok := table.Get(pid)
+	if !ok {
+		return nil
+	}
+	rootStart := s.identity(root)
+	if rootStart == "" {
+		return nil
+	}
+	starts := map[int]string{pid: rootStart}
+	out := []ProcessRef{{PID: pid, Start: rootStart}}
+	for _, p := range table.Tree(pid).Processes {
+		if p.PID == pid {
+			continue
+		}
+		parentStart, known := starts[p.PPID]
+		start := s.identity(p)
+		if !known || parentStart == "" || start == "" {
+			continue
+		}
+		starts[p.PID] = start
+		out = append(out, ProcessRef{PID: p.PID, Start: start, PPID: p.PPID, ParentStart: parentStart})
+	}
+	return out
 }
 
 func (s *Service) startTime(pid int) string {
@@ -401,19 +482,6 @@ func (s *Service) healthOf(ctx context.Context, url string) (Health, int64, stri
 	s.health[url] = c
 	s.mu.Unlock()
 	return c.health, c.ms, c.note
-}
-
-// treePIDs lists pid and its descendants, leaves first.
-func treePIDs(table *procmem.Table, pid int) []int {
-	if _, ok := table.Get(pid); !ok {
-		return nil
-	}
-	procs := table.Tree(pid).Processes
-	out := make([]int, 0, len(procs))
-	for i := len(procs) - 1; i >= 0; i-- {
-		out = append(out, procs[i].PID)
-	}
-	return out
 }
 
 func localAddr(addr string) bool {

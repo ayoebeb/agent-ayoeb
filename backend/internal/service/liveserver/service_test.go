@@ -189,7 +189,7 @@ func TestStopDetectedKillsTreeLeavesFirstAndRefusesStaleKeys(t *testing.T) {
 	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 12, Start: "start-12"}, {PID: 11, Start: "start-11"}}) {
+	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 12, Start: "start-12", PPID: 11, ParentStart: "start-11"}, {PID: 11, Start: "start-11"}}) {
 		t.Fatalf("killed = %v, want child before parent", h.killed)
 	}
 	if err := h.svc.Stop(context.Background(), "p1", "detected:9999"); err == nil {
@@ -290,5 +290,80 @@ func TestParsers(t *testing.T) {
 	ss := "LISTEN 0 511 127.0.0.1:3000 0.0.0.0:* users:((\"node\",pid=77,fd=19))\n"
 	if got := ParseSS(ss); !reflect.DeepEqual(got, []Listener{{PID: 77, Port: 3000, Addr: "127.0.0.1"}}) {
 		t.Fatalf("ss = %+v", got)
+	}
+}
+
+// psRowsReparented is the process table where pid 12 no longer descends from 11.
+const psRowsReparented = `
+10 1 100 claude
+11 10 100 node vite
+12 1 100 node unrelated
+`
+
+func detectedHarness(t *testing.T) *harness {
+	t.Helper()
+	listeners := []Listener{{PID: 11, Port: 5173, Addr: "127.0.0.1"}}
+	return newHarness(t, listeners, psRows, []Session{{ID: "s1", RootPIDs: []int{10}}})
+}
+
+func TestStopSkipsADescendantWhoseOwnStartTimeChanged(t *testing.T) {
+	h := detectedHarness(t)
+	reads := map[int]int{}
+	h.svc.deps.StartTime = func(pid int) string {
+		reads[pid]++
+		if pid == 12 && reads[pid] > 1 {
+			return "replacement-12" // pid 12 was reused after discovery
+		}
+		return "start-" + strconv.Itoa(pid)
+	}
+	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 11, Start: "start-11"}}) {
+		t.Fatalf("killed = %v, want only the listener; the reused descendant must be left alone", h.killed)
+	}
+}
+
+func TestStopSkipsADescendantThatWasReparented(t *testing.T) {
+	h := detectedHarness(t)
+	calls := 0
+	base := h.svc.deps.Table
+	h.svc.deps.Table = func(ctx context.Context) (*procmem.Table, error) {
+		calls++
+		if calls > 1 { // the fresh snapshot taken for verification
+			return psTable(t, psRowsReparented), nil
+		}
+		return base(ctx)
+	}
+	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(h.killed, []ProcessRef{{PID: 11, Start: "start-11"}}) {
+		t.Fatalf("killed = %v, want pid 12 skipped because its parent changed", h.killed)
+	}
+}
+
+func TestStopSkipsADescendantWhoseParentWasReplaced(t *testing.T) {
+	h := detectedHarness(t)
+	reads := map[int]int{}
+	h.svc.deps.StartTime = func(pid int) string {
+		reads[pid]++
+		// Pid 12 keeps its own start time, but the pid 11 it hangs from is now a
+		// different process: the old child entry cannot be trusted.
+		if pid == 11 && reads[pid] == 2 {
+			return "start-11"
+		}
+		if pid == 11 && reads[pid] > 2 {
+			return "replacement-11"
+		}
+		return "start-" + strconv.Itoa(pid)
+	}
+	if err := h.svc.Stop(context.Background(), "p1", "detected:5173"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range h.killed {
+		if ref.PID == 12 {
+			t.Fatalf("killed %v: pid 12 must be skipped when its recorded parent start time no longer matches", h.killed)
+		}
 	}
 }

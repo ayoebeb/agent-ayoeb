@@ -31,6 +31,10 @@ type Process struct {
 	// snapshots apart give a rate; one alone says nothing about now.
 	CPUSeconds float64
 	Command    string
+	// StartTime is the process's creation time as an opaque string, read in the
+	// same pass as the rest of the row so it identifies this exact process. It is
+	// empty where the table source does not carry it (the ps-based path).
+	StartTime string
 }
 
 // Tree is the memory reading for one root and all of its descendants.
