@@ -191,6 +191,7 @@ import { SessionStartup } from "./SessionStartup";
 import { ActivityRun } from "./ActivityRun";
 import { isOrdinaryActivity } from "./activity-action";
 import { isFailedCall } from "./activity-command";
+import { keptReplyIndexes } from "./turn-reply";
 import { TurnPlan } from "./TurnPlan";
 import { ComposerModeItems, TurnSettingsBar, type ApprovalModeLimits } from "./TurnSettingsBar";
 import { ElicitationDock, ElicitationHistory } from "./ElicitationDock";
@@ -5482,9 +5483,13 @@ const TurnGroup = memo(function TurnGroup({
 	const firstWorkIndex = runs.findIndex((run) => !isHumanRun(run.items[0]));
 	const leadingHumanCount = firstWorkIndex < 0 ? runs.length : firstWorkIndex;
 	const humanRuns = runs.slice(0, leadingHumanCount);
+	// The answer the agent wrote before a bookkeeping call (`ao notify-user`, ...) or a
+	// long write-up closed by a short line stays out of the fold with the final text.
+	const keptIndexes = keptReplyIndexes(runs, finalAssistantRunIndex, leadingHumanCount);
 	const workedRuns = runs.filter(
-		(_run, index) => index >= leadingHumanCount && index !== finalAssistantRunIndex,
+		(_run, index) => index >= leadingHumanCount && index !== finalAssistantRunIndex && !keptIndexes.has(index),
 	);
+	const keptRuns = runs.filter((_run, index) => keptIndexes.has(index));
 	const finalRun = finalAssistantRunIndex >= 0 ? runs[finalAssistantRunIndex] : undefined;
 	// Questions, errors, and system warnings stay readable after the turn settles, and
 	// so does anything the user said mid-turn: folding a steer away would leave the
@@ -5715,6 +5720,7 @@ const TurnGroup = memo(function TurnGroup({
 	if (!outcome) body.push(...workedRuns.flatMap(renderWorkerRun));
 	// Settled steers still carry the reports they delivered.
 	if (outcome) body.push(...noticeRuns.flatMap(renderWorkerRun));
+	body.push(...keptRuns.map(renderRun));
 	if (finalRun) body.push(renderRun(finalRun));
 	return (
 		// Positioned, so the live row that popLayout lifts out of the flow as the turn
