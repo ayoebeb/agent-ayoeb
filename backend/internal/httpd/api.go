@@ -67,6 +67,7 @@ type APIDeps struct {
 	CommandRuns   controllers.CommandRunService
 	CommandRunKey string
 	Cues          controllers.CueService
+	LiveServers   controllers.LiveServerService
 	// Conversations is nil until a Chat driver is wired; the controller then
 	// answers 501 rather than panicking, matching the other optional surfaces.
 	Conversations controllers.ConversationService
@@ -173,6 +174,7 @@ type API struct {
 	shellTerms             *controllers.ShellTerminalsController
 	commandRuns            *controllers.CommandRunsController
 	cues                   *controllers.CuesController
+	liveServers            *controllers.LiveServersController
 	conversations          *controllers.ConversationsController
 	settings               *controllers.SettingsController
 	dev                    *controllers.DevController
@@ -247,6 +249,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 			UserClientGate: commandRunGate(cfg.AllowedOrigins, deps.CommandRunKey),
 		},
 		cues:          &controllers.CuesController{Svc: deps.Cues},
+		liveServers:   &controllers.LiveServersController{Svc: deps.LiveServers, UserClientGate: liveServerGate(cfg.AllowedOrigins, deps.CommandRunKey)},
 		conversations: &controllers.ConversationsController{Svc: deps.Conversations, Renders: attachmentstore.New(cfg.DataDir), Search: deps.ConversationSearch, UserMessages: userMessageRecorder(deps.Sessions)},
 		settings:      &controllers.SettingsController{Svc: deps.Settings},
 		dev:           &controllers.DevController{Import: deps.DevImport},
@@ -392,6 +395,7 @@ func (a *API) Register(root chi.Router) {
 			a.shellTerms.Register(r)
 			a.commandRuns.Register(r)
 			a.cues.Register(r)
+			a.liveServers.Register(r)
 			a.conversations.Register(r)
 			a.settings.Register(r)
 			a.dev.Register(r)

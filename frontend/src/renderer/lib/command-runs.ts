@@ -274,7 +274,8 @@ export class CommandRunUnavailableError extends Error {
 
 const COMMAND_RUN_KEY_HEADER = "X-AO-Command-Run-Key";
 
-async function userClientHeaders(hostId: HostId | undefined): Promise<Record<string, string>> {
+/** Proves this app window to the local daemon (empty for a remote host, which authenticates by pairing). */
+export async function userClientHeaders(hostId: HostId | undefined): Promise<Record<string, string>> {
 	// A remote host is reached through the remote proxy, which authenticates
 	// with the pairing credential. The local key belongs to this machine's
 	// daemon only and must never travel to another host.

@@ -80,7 +80,7 @@ export type SettingsModal =
 
 /** Worker detail view toggles — Changes (Git rail) is the default. */
 export type WorkbenchTab = "changes" | "files" | "terminal";
-export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts" | "crew";
+export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts" | "crew" | "live";
 
 /** The tabs of an orchestrator's control room. "session" is the orchestrator's own chat. */
 export type ControlRoomTab = "session" | "changes" | "commits" | "files";
@@ -124,6 +124,8 @@ export type InspectorSessionState = {
 	fileDisplayModes?: Record<string, RememberedFileDisplayMode>;
 	/** The session-entry defaulting (Summary tab, baseline browser reveal) has already run once for this session's lifetime. */
 	initialized?: boolean;
+	/** Live tab: the running server the person picked (a chip click or the tab list). Unset follows the first server. */
+	liveServerKey?: string;
 };
 
 export type FileDisplayMode = "diff" | "file" | "rendered";
@@ -310,6 +312,9 @@ export type UiState = {
 	setInspectorOpen: (sessionId: string, isOpen: boolean) => void;
 	toggleInspector: (sessionId: string) => void;
 	setInspectorView: (sessionId: string, view: InspectorView) => void;
+	/** Open the Live tab on one running server (a chip in the control room info bar). */
+	openLiveServer: (sessionId: string, serverKey: string) => void;
+	setLiveServerKey: (sessionId: string, serverKey: string) => void;
 	/**
 	 * Runs the "entering this session" defaults — Summary tab, baseline browser
 	 * reveal — exactly once per session's lifetime. Backed by persisted store
@@ -695,6 +700,22 @@ export const useUiStore = create<UiState>((set, get) => ({
 			const tab = update.tab ?? current.tab;
 			if (tab === current.tab && scope === current.scope) return state;
 			return { controlRooms: { ...state.controlRooms, [sessionId]: { tab, scope } } };
+		}),
+	openLiveServer: (sessionId, serverKey) =>
+		set((state) => {
+			const current = inspectorState(state.inspectorSessions, sessionId);
+			return {
+				inspectorSessions: {
+					...state.inspectorSessions,
+					[sessionId]: { ...current, isOpen: true, view: "live", liveServerKey: serverKey },
+				},
+			};
+		}),
+	setLiveServerKey: (sessionId, serverKey) =>
+		set((state) => {
+			const current = inspectorState(state.inspectorSessions, sessionId);
+			if (current.liveServerKey === serverKey) return state;
+			return { inspectorSessions: { ...state.inspectorSessions, [sessionId]: { ...current, liveServerKey: serverKey } } };
 		}),
 	initializeInspectorSession: (sessionId, hasBrowserContent, hasInspector, opensOnCrew = false) =>
 		set((state) => {

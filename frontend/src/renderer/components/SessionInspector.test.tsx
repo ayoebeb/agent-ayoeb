@@ -393,14 +393,14 @@ afterEach(() => {
 describe("SessionInspector tabs", () => {
   it("gives an orchestrator Crew, Summary and Browser, with its account but no branch", () => {
     renderWithQuery(<SessionInspector orchestrator session={session([], { kind: "orchestrator" })} />);
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser", "Live"]);
     expect(screen.getByTestId("session-account-summary")).toBeInTheDocument();
     expect(screen.queryByTestId("inspector-branch")).not.toBeInTheDocument();
   });
 
   it("gives a remote orchestrator the same tabs without a local account", () => {
     renderWithQuery(<SessionInspector orchestrator hostId="box-a" session={session([], { kind: "orchestrator", hostId: "box-a" })} />);
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser", "Live"]);
     expect(screen.queryByTestId("session-account-summary")).not.toBeInTheDocument();
   });
 
@@ -450,7 +450,7 @@ describe("SessionInspector tabs", () => {
       ],
     })} />);
 
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Crew", "Summary", "Browser", "Artifacts"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Crew", "Summary", "Browser", "Live", "Artifacts"]);
     expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByRole("tab", { name: "Artifacts" }));
     expect(screen.getByText("direct.html")).toBeInTheDocument();

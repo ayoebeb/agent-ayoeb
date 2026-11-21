@@ -5,6 +5,7 @@ package procmem
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -81,6 +82,7 @@ func Snapshot(ctx context.Context, run Runner) (*Table, error) {
 			var creation, exit, kernel, user windows.Filetime
 			if windows.GetProcessTimes(h, &creation, &exit, &kernel, &user) == nil {
 				p.CPUSeconds = filetimeSeconds(kernel) + filetimeSeconds(user)
+				p.StartTime = strconv.FormatUint(filetimeTicks(creation), 10)
 			}
 			_ = windows.CloseHandle(h)
 		}

@@ -1,8 +1,9 @@
 import { apiErrorException } from "../lib/api-error-exception";
 import { BrowserIcon } from "./icons";
 import { artifactFileIcon } from "./artifact-file-icon";
-import { Chat, CheckWaves, Folder, List, Package, Users } from "@/components/app-icons";
+import { Chat, CheckWaves, Folder, List, Package, Server, Users } from "@/components/app-icons";
 import { CrewRail } from "./crew/CrewRail";
+import { LiveRail } from "./crew/LiveRail";
 import { useCrew } from "../hooks/useCrew";
 import { AppLink } from "./AppLink";
 import { ArtifactThumbnail } from "./ArtifactThumbnail";
@@ -124,7 +125,7 @@ export type { InspectorView } from "@aoagents/product-ui";
 
 const VIEW_DEFS: {
 	id: InspectorView;
-	labelKey: "inspector.summary" | "inspector.reviewTab" | "inspector.browser" | "inspector.sideChat" | "inspector.files" | "artifacts.title" | "crew.title";
+	labelKey: "inspector.summary" | "inspector.reviewTab" | "inspector.browser" | "inspector.sideChat" | "inspector.files" | "artifacts.title" | "crew.title" | "inspector.live";
 	icon: ReactNode;
 }[] = [
 	{ id: "crew", labelKey: "crew.title", icon: <Users /> },
@@ -132,6 +133,7 @@ const VIEW_DEFS: {
 	{ id: "files", labelKey: "inspector.files", icon: <Folder data-testid="files-viewer-icon" /> },
 	{ id: "reviews", labelKey: "inspector.reviewTab", icon: <CheckWaves /> },
 	{ id: "browser", labelKey: "inspector.browser", icon: <BrowserIcon aria-hidden="true" /> },
+	{ id: "live", labelKey: "inspector.live", icon: <Server aria-hidden="true" /> },
 	{ id: "sideChat", labelKey: "inspector.sideChat", icon: <Chat /> },
 	{ id: "artifacts", labelKey: "artifacts.title", icon: <Package /> },
 ];
@@ -249,10 +251,10 @@ export const SessionInspector = memo(function SessionInspector({
 	// and a Cloud orchestrator lists its workers in Summary instead.
 	const hasCrew = orchestrator && session !== undefined && !session.cloud;
 	const availableViewDefs = orchestrator ? VIEW_DEFS.filter((entry) =>
-		entry.id === "summary" || entry.id === "browser" || (entry.id === "crew" && hasCrew)
+		entry.id === "summary" || entry.id === "browser" || (entry.id === "crew" && hasCrew) || (entry.id === "live" && hasCrew)
 			// An orchestrator browses its own checkout in the control room's Files tab.
 			|| (entry.id === "artifacts" && ((session?.artifactFiles?.length ?? 0) > 0 || artifactRequestPending)))
-		: VIEW_DEFS.filter((entry) => entry.id !== "crew" && (!hostId || entry.id !== "browser" || browserView) && (reviewsAvailable || entry.id !== "reviews")
+		: VIEW_DEFS.filter((entry) => entry.id !== "crew" && entry.id !== "live" && (!hostId || entry.id !== "browser" || browserView) && (reviewsAvailable || entry.id !== "reviews")
 			// The host passes a side chat view only where side chats can run.
 			&& (entry.id !== "sideChat" || sideChatView !== undefined)
 			// Artifacts shows whenever the session lists files, or while an artifact
@@ -295,6 +297,7 @@ export const SessionInspector = memo(function SessionInspector({
 				activeView={view}
 				ariaLabel={t("inspector.aria")}
 				crewView={hasCrew && session ? <CrewRail active={isInspectorVisible} orchestrator={session} /> : undefined}
+				liveView={hasCrew && session ? <LiveRail active={isInspectorVisible} orchestrator={session} /> : undefined}
 				artifactsView={
 					session ? (
 						<SessionArtifactsView hostId={hostId} key={sessionUiKey(session.id, hostId)} onRequestConsumed={onArtifactRequestConsumed} request={artifactRequest} session={session} />

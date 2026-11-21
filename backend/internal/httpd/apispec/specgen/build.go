@@ -615,14 +615,19 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersOpenCodexAccountLoginTerminalResponse": "OpenCodexAccountLoginTerminalResponse",
 	"ControllersCodexAccountLoginTerminalResponse":     "CodexAccountLoginTerminalResponse",
 	// httpd/controllers — project cue wire envelopes
-	"ControllersCueIDParam":           "CueIDParam",
-	"ControllersCueProjectIDParam":    "CueProjectIDParam",
-	"ControllersCueDefinitionRequest": "CueDefinitionRequest",
-	"ControllersCueResponse":          "CueResponse",
-	"ControllersListCuesResponse":     "ListCuesResponse",
-	"ControllersInvokeCueRequest":     "InvokeCueRequest",
-	"ControllersInvokeCueResponse":    "InvokeCueResponse",
-	"ControllersCueEnvelope":          "CueEnvelope",
+	"ControllersCueIDParam":               "CueIDParam",
+	"ControllersCueProjectIDParam":        "CueProjectIDParam",
+	"ControllersLiveServerProjectIDParam": "LiveServerProjectIDParam",
+	"ControllersLiveServerResponse":       "LiveServerResponse",
+	"ControllersListLiveServersResponse":  "ListLiveServersResponse",
+	"ControllersLiveServerActionRequest":  "LiveServerActionRequest",
+	"ControllersLiveServerEnvelope":       "LiveServerEnvelope",
+	"ControllersCueDefinitionRequest":     "CueDefinitionRequest",
+	"ControllersCueResponse":              "CueResponse",
+	"ControllersListCuesResponse":         "ListCuesResponse",
+	"ControllersInvokeCueRequest":         "InvokeCueRequest",
+	"ControllersInvokeCueResponse":        "InvokeCueResponse",
+	"ControllersCueEnvelope":              "CueEnvelope",
 	// httpd/controllers — PR wire envelopes
 	"ControllersMergePRRequest":          "MergePRRequest",
 	"ControllersMergePRResponse":         "MergePRResponse",
@@ -834,6 +839,7 @@ func operations() []operation {
 	ops = append(ops, browserOperations()...)
 	ops = append(ops, shellTerminalOperations()...)
 	ops = append(ops, cueOperations()...)
+	ops = append(ops, liveServerOperations()...)
 	ops = append(ops, systemOperations()...)
 	ops = append(ops, computerUseOperations()...)
 	ops = append(ops, identityOperations()...)
@@ -4327,6 +4333,49 @@ func jiraOperations() []operation {
 			summary:    "Send a Jira ticket to the project's orchestrator as a new task",
 			pathParams: []any{controllers.ProjectIDParam{}, controllers.JiraIssueKeyParam{}},
 			resps:      with(respUnit{http.StatusAccepted, jirasvc.StartResult{}}),
+		},
+	}
+}
+
+// liveServerOperations declares the project live-server surface: the dev
+// servers running for a project, with health, plus stop and restart.
+func liveServerOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{projectId}/live-servers", id: "listLiveServers", tag: "liveServers",
+			summary:    "List the dev servers running for a project, with an HTTP health reading each",
+			pathParams: []any{controllers.LiveServerProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLiveServersResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{projectId}/live-servers/stop", id: "stopLiveServer", tag: "liveServers",
+			summary:    "Stop one running dev server",
+			pathParams: []any{controllers.LiveServerProjectIDParam{}},
+			reqBody:    controllers.LiveServerActionRequest{},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{projectId}/live-servers/restart", id: "restartLiveServer", tag: "liveServers",
+			summary:    "Restart a dev server that AO started from .ao/launch.json",
+			pathParams: []any{controllers.LiveServerProjectIDParam{}},
+			reqBody:    controllers.LiveServerActionRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.LiveServerEnvelope{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
 		},
 	}
 }

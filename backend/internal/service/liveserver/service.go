@@ -1,0 +1,569 @@
+// Package liveserver lists the dev servers running for one project: the ones AO
+// started itself (previewserver) and the ones a worker started by hand, found
+// by matching listening TCP ports to the project's session process trees. It
+// adds an HTTP health reading per server. It never scans ports it cannot tie
+// to one of the project's sessions.
+package liveserver
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/previewserver"
+	"github.com/aoagents/agent-orchestrator/backend/internal/procmem"
+)
+
+// Source says who started a server.
+type Source string
+
+const (
+	// SourceManaged servers were started by AO from .ao/launch.json.
+	SourceManaged Source = "managed"
+	// SourceDetected servers were started by a worker on its own.
+	SourceDetected Source = "detected"
+)
+
+// Health is the result of asking a server for one HTTP response.
+type Health string
+
+const (
+	// HealthUp means the server answered an HTTP request in time.
+	HealthUp Health = "up"
+	// HealthDown means the connection was refused or no response came in time.
+	HealthDown Health = "down"
+)
+
+// Server is one running dev server.
+type Server struct {
+	Key         string
+	Source      Source
+	Name        string
+	Command     string
+	Port        int
+	URL         string
+	SessionID   domain.SessionID
+	SessionName string
+	StartedAt   time.Time
+	// State is the managed run's lifecycle state; detected servers are "ready".
+	State      string
+	Health     Health
+	HealthMs   int64
+	HealthNote string
+	TerminalID string
+	// WorkingDir is the owning session's workspace, for "open a terminal here".
+	WorkingDir string
+	PID        int
+	// PIDStart is the listener process's start time when it was found; a later
+	// reading that differs means the pid was reused.
+	PIDStart string
+	// Tree is the listener and its descendants with the identity each had in
+	// the snapshot that proved they belong to the project, leaves last.
+	Tree []ProcessRef
+	Logs []string
+	// OutputAvailable is false for detected servers: AO did not start them, so
+	// it holds neither their output nor a terminal.
+	OutputAvailable bool
+	CanRestart      bool
+	Error           string
+}
+
+// Session is what the service needs to know about one project session.
+type Session struct {
+	ID            domain.SessionID
+	Name          string
+	WorkspacePath string
+	// RootPIDs are the process ids the session's tree starts from.
+	RootPIDs   []int
+	Terminated bool
+}
+
+// ProcessRef names one process by pid and the start time it had when AO
+// established that it belongs to the project.
+type ProcessRef struct {
+	PID   int
+	Start string
+	// PPID and ParentStart identify the parent this process had when ownership
+	// was established. They are empty only for the first anchor (a session root).
+	PPID        int
+	ParentStart string
+	// Anchor marks a process that is verified but never signaled: the session
+	// ancestors that tie the listener back to the session that owns it.
+	Anchor bool
+}
+
+// Listener is one listening TCP socket.
+type Listener struct {
+	PID  int
+	Port int
+	// Addr is the bound address; "" or an unspecified address means all.
+	Addr string
+}
+
+// Managed is the slice of previewserver.Manager the service uses.
+type Managed interface {
+	List() []previewserver.Status
+	Start(ctx context.Context, id domain.SessionID, workspace, configuration string, projectEnv map[string]string) (previewserver.Status, error)
+	Stop(ctx context.Context, id domain.SessionID) (previewserver.Status, error)
+}
+
+// Deps are the service's collaborators; every one is a seam for tests.
+type Deps struct {
+	Managed Managed
+	// Sessions lists a project's sessions with their process roots.
+	Sessions func(ctx context.Context, project domain.ProjectID) ([]Session, error)
+	// ProjectEnv is the project's configured environment for a restart.
+	ProjectEnv func(ctx context.Context, project domain.ProjectID) map[string]string
+	// Listeners lists every listening TCP socket on this computer.
+	Listeners func(ctx context.Context) ([]Listener, error)
+	// Table snapshots the process table.
+	Table func(ctx context.Context) (*procmem.Table, error)
+	// Probe asks url for one HTTP response.
+	Probe func(ctx context.Context, url string) (status int, err error)
+	// StartTime reads a process's kernel start time ("" when unreadable).
+	StartTime func(pid int) string
+	// Kill ends the given processes in order. It must re-check each ref's start
+	// time immediately before signaling and skip a process that no longer matches.
+	Kill func(ctx context.Context, procs []ProcessRef) error
+	// SetPreview points a session's Browser preview at url ("" clears it).
+	SetPreview func(ctx context.Context, id domain.SessionID, url string) error
+	// PreviewURL reads a session's current Browser preview URL.
+	PreviewURL func(ctx context.Context, id domain.SessionID) string
+	Now        func() time.Time
+	// OwnPID is the daemon's process id, never reported as a server.
+	OwnPID int
+	// HealthTTL caches a probe so several polling clients cost one request.
+	HealthTTL time.Duration
+	// ProbeTimeout bounds one health probe.
+	ProbeTimeout time.Duration
+}
+
+// Service lists and controls a project's live servers.
+type Service struct {
+	deps Deps
+
+	mu     sync.Mutex
+	health map[string]cachedHealth
+}
+
+type cachedHealth struct {
+	at     time.Time
+	health Health
+	ms     int64
+	note   string
+}
+
+// New builds the service, filling defaults for unset timing knobs.
+func New(deps Deps) *Service {
+	if deps.Now == nil {
+		deps.Now = time.Now
+	}
+	if deps.HealthTTL == 0 {
+		deps.HealthTTL = 5 * time.Second
+	}
+	if deps.ProbeTimeout == 0 {
+		deps.ProbeTimeout = 3 * time.Second
+	}
+	return &Service{deps: deps, health: map[string]cachedHealth{}}
+}
+
+// List returns the project's running servers, managed first, with health.
+func (s *Service) List(ctx context.Context, project domain.ProjectID) ([]Server, error) {
+	servers, err := s.discover(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	var wg sync.WaitGroup
+	for i := range servers {
+		wg.Add(1)
+		go func(sv *Server) {
+			defer wg.Done()
+			sv.Health, sv.HealthMs, sv.HealthNote = s.healthOf(ctx, sv.URL)
+		}(&servers[i])
+	}
+	wg.Wait()
+	return servers, nil
+}
+
+func (s *Service) discover(ctx context.Context, project domain.ProjectID) ([]Server, error) {
+	sessions, err := s.deps.Sessions(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[domain.SessionID]Session, len(sessions))
+	for _, sess := range sessions {
+		byID[sess.ID] = sess
+	}
+	var out []Server
+	managedPorts := map[int]bool{}
+	for _, st := range s.deps.Managed.List() {
+		sess, ok := byID[st.SessionID]
+		if !ok || st.State == previewserver.StateStopped {
+			continue
+		}
+		managedPorts[st.Port] = true
+		out = append(out, Server{
+			Key: "managed:" + string(st.SessionID), Source: SourceManaged,
+			Name: st.Configuration, Command: st.Command, Port: st.Port, URL: st.URL,
+			SessionID: st.SessionID, SessionName: sess.Name, StartedAt: st.StartedAt,
+			State: string(st.State), TerminalID: st.TerminalID, WorkingDir: sess.WorkspacePath,
+			Logs: st.Logs, OutputAvailable: true, CanRestart: true, Error: st.Error,
+		})
+	}
+	detected, err := s.detect(ctx, sessions, managedPorts)
+	if err == nil {
+		out = append(out, detected...)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Source != out[j].Source {
+			return out[i].Source == SourceManaged
+		}
+		return out[i].Port < out[j].Port
+	})
+	return out, nil
+}
+
+// ignoredProcesses are agent harness and AO executables that open local
+// sockets of their own; they are never dev servers.
+var ignoredProcesses = map[string]bool{
+	"claude": true, "codex": true, "gemini": true, "ao": true, "cursor": true,
+	"opencode": true, "copilot": true, "aider": true, "conhost": true,
+}
+
+func (s *Service) detect(ctx context.Context, sessions []Session, managedPorts map[int]bool) ([]Server, error) {
+	if s.deps.Listeners == nil || s.deps.Table == nil || len(sessions) == 0 {
+		return nil, nil
+	}
+	listeners, err := s.deps.Listeners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	table, err := s.deps.Table(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owner := map[int]Session{}
+	for _, sess := range sessions {
+		if sess.Terminated {
+			continue
+		}
+		for _, p := range table.Tree(sess.RootPIDs...).Processes {
+			if _, taken := owner[p.PID]; !taken {
+				owner[p.PID] = sess
+			}
+		}
+	}
+	byPort := map[int]Server{}
+	for _, l := range listeners {
+		if l.PID <= 0 || l.PID == s.deps.OwnPID || managedPorts[l.Port] || !localAddr(l.Addr) {
+			continue
+		}
+		sess, ok := owner[l.PID]
+		if !ok {
+			continue
+		}
+		proc, _ := table.Get(l.PID)
+		name := serverName(proc.Command)
+		if ignoredProcesses[strings.ToLower(name)] {
+			continue
+		}
+		if _, dup := byPort[l.Port]; dup {
+			continue
+		}
+		tree := s.identityTree(table, l.PID, sess.RootPIDs)
+		pidStart := ""
+		for _, ref := range tree {
+			if ref.PID == l.PID {
+				pidStart = ref.Start
+			}
+		}
+		byPort[l.Port] = Server{
+			Key: "detected:" + strconv.Itoa(l.Port), Source: SourceDetected,
+			Name: name, Command: proc.Command, Port: l.Port, URL: probeURL(l),
+			SessionID: sess.ID, SessionName: sess.Name, State: string(previewserver.StateReady),
+			WorkingDir: sess.WorkspacePath, PID: l.PID, PIDStart: pidStart, Tree: tree, Logs: []string{},
+		}
+	}
+	out := make([]Server, 0, len(byPort))
+	for _, sv := range byPort {
+		out = append(out, sv)
+	}
+	return out, nil
+}
+
+// Stop ends one server. A detected server is only killed while its process
+// still has the start time it had when it was found and was shown to belong to
+// the project, so a recycled pid is refused rather than killed.
+func (s *Service) Stop(ctx context.Context, project domain.ProjectID, key string) error {
+	sv, err := s.find(ctx, project, key)
+	if err != nil {
+		return err
+	}
+	if sv.Source == SourceManaged {
+		previous := sv.URL
+		if _, err := s.deps.Managed.Stop(ctx, sv.SessionID); err != nil {
+			return err
+		}
+		s.clearPreview(ctx, sv.SessionID, previous)
+		return nil
+	}
+	if len(sv.Tree) == 0 || sv.PIDStart == "" {
+		return identityUnproven()
+	}
+	// Re-read the process table and re-verify every process against the
+	// identity recorded when it was proven to belong to the project: its own
+	// start time, its parent pid, and its parent's start time. A pid reused
+	// since then fails at least one of the three.
+	fresh, err := s.deps.Table(ctx)
+	if err != nil {
+		return err
+	}
+	procs := make([]ProcessRef, 0, len(sv.Tree))
+	// The recorded tree is the session ancestry (anchors), the listener, then its
+	// descendants, parents before children. The anchors and the listener must
+	// all still verify: if the chain back to the owning session is broken, the
+	// listener may be a reused pid, so nothing is signaled. A descendant that
+	// fails is just skipped. Signal leaves first.
+	for _, ref := range sv.Tree {
+		ok := s.verified(fresh, ref)
+		if !ok && (ref.Anchor || ref.PID == sv.PID) {
+			return identityUnproven()
+		}
+		if ok && !ref.Anchor {
+			procs = append(procs, ref)
+		}
+	}
+	for i, j := 0, len(procs)-1; i < j; i, j = i+1, j-1 {
+		procs[i], procs[j] = procs[j], procs[i]
+	}
+	return s.deps.Kill(ctx, procs)
+}
+
+func identityUnproven() error {
+	return apierr.Conflict("LIVE_SERVER_IDENTITY_UNPROVEN",
+		"AO can no longer prove this process is the server it found, so it was not stopped", nil)
+}
+
+// verified reports whether ref still names the process it named when recorded.
+func (s *Service) verified(table *procmem.Table, ref ProcessRef) bool {
+	if ref.Start == "" || s.startTime(ref.PID) != ref.Start {
+		return false
+	}
+	cur, ok := table.Get(ref.PID)
+	if !ok {
+		return false
+	}
+	if ref.PPID == 0 {
+		return true
+	}
+	return cur.PPID == ref.PPID && ref.ParentStart != "" && s.startTime(ref.PPID) == ref.ParentStart
+}
+
+// identity is a process's start time: the one carried by the snapshot row when
+// the table source has it, else read from the system.
+func (s *Service) identity(p procmem.Process) string {
+	if p.StartTime != "" {
+		return p.StartTime
+	}
+	return s.startTime(p.PID)
+}
+
+// identityTree records, from one snapshot, the chain from the owning session's
+// root down to pid (anchors, never signaled), pid itself, and its descendants,
+// parents before children. Every entry after the first carries its parent's pid
+// and start time. It returns nil, so nothing can be stopped, when the chain to a
+// session root cannot be walked or an identity on it cannot be read. A
+// descendant whose identity cannot be read is simply left out.
+func (s *Service) identityTree(table *procmem.Table, pid int, roots []int) []ProcessRef {
+	isRoot := make(map[int]bool, len(roots))
+	for _, r := range roots {
+		isRoot[r] = true
+	}
+	// Walk up from the listener to the session root it hangs from.
+	var chain []procmem.Process
+	for cur, steps := pid, 0; ; steps++ {
+		p, ok := table.Get(cur)
+		if !ok || steps > 64 {
+			return nil
+		}
+		chain = append(chain, p)
+		if isRoot[cur] {
+			break
+		}
+		cur = p.PPID
+	}
+	if len(chain) < 2 {
+		return nil // the listener is itself a session root: nothing ties it to one
+	}
+	// chain is listener-first; the tree is root-first.
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	starts := map[int]string{}
+	out := make([]ProcessRef, 0, len(chain))
+	for i, p := range chain {
+		start := s.identity(p)
+		if start == "" {
+			return nil
+		}
+		ref := ProcessRef{PID: p.PID, Start: start, Anchor: p.PID != pid}
+		if i > 0 {
+			ref.PPID, ref.ParentStart = p.PPID, starts[p.PPID]
+		}
+		starts[p.PID] = start
+		out = append(out, ref)
+	}
+	for _, p := range table.Tree(pid).Processes {
+		if p.PID == pid {
+			continue
+		}
+		parentStart, known := starts[p.PPID]
+		start := s.identity(p)
+		if !known || parentStart == "" || start == "" {
+			continue
+		}
+		starts[p.PID] = start
+		out = append(out, ProcessRef{PID: p.PID, Start: start, PPID: p.PPID, ParentStart: parentStart})
+	}
+	return out
+}
+
+func (s *Service) startTime(pid int) string {
+	if s.deps.StartTime == nil {
+		return ""
+	}
+	return s.deps.StartTime(pid)
+}
+
+// Restart stops a managed server and starts it again from its configuration.
+func (s *Service) Restart(ctx context.Context, project domain.ProjectID, key string) (Server, error) {
+	sv, err := s.find(ctx, project, key)
+	if err != nil {
+		return Server{}, err
+	}
+	if sv.Source != SourceManaged {
+		return Server{}, apierr.Invalid("LIVE_SERVER_RESTART_UNSUPPORTED",
+			"AO did not start this server, so it does not know how to start it again", nil)
+	}
+	sessions, err := s.deps.Sessions(ctx, project)
+	if err != nil {
+		return Server{}, err
+	}
+	workspace := ""
+	for _, sess := range sessions {
+		if sess.ID == sv.SessionID {
+			workspace = sess.WorkspacePath
+		}
+	}
+	var env map[string]string
+	if s.deps.ProjectEnv != nil {
+		env = s.deps.ProjectEnv(ctx, project)
+	}
+	previous := sv.URL
+	status, err := s.deps.Managed.Start(ctx, sv.SessionID, workspace, sv.Name, env)
+	if err != nil {
+		s.clearPreview(ctx, sv.SessionID, previous)
+		return Server{}, err
+	}
+	if status.TargetKind == previewserver.TargetApp && s.deps.SetPreview != nil {
+		if err := s.deps.SetPreview(ctx, sv.SessionID, status.URL); err != nil {
+			return Server{}, err
+		}
+	}
+	return Server{Key: sv.Key, Source: SourceManaged, Name: status.Configuration, URL: status.URL, Port: status.Port, SessionID: sv.SessionID, State: string(status.State)}, nil
+}
+
+func (s *Service) find(ctx context.Context, project domain.ProjectID, key string) (Server, error) {
+	servers, err := s.discover(ctx, project)
+	if err != nil {
+		return Server{}, err
+	}
+	for _, sv := range servers {
+		if sv.Key == key {
+			return sv, nil
+		}
+	}
+	return Server{}, apierr.NotFound("LIVE_SERVER_NOT_FOUND", "That server is no longer running")
+}
+
+func (s *Service) clearPreview(ctx context.Context, id domain.SessionID, url string) {
+	if s.deps.SetPreview == nil || s.deps.PreviewURL == nil || url == "" {
+		return
+	}
+	if s.deps.PreviewURL(ctx, id) == url {
+		_ = s.deps.SetPreview(ctx, id, "")
+	}
+}
+
+func (s *Service) healthOf(ctx context.Context, url string) (Health, int64, string) {
+	now := s.deps.Now()
+	s.mu.Lock()
+	if c, ok := s.health[url]; ok && now.Sub(c.at) < s.deps.HealthTTL {
+		s.mu.Unlock()
+		return c.health, c.ms, c.note
+	}
+	s.mu.Unlock()
+	probeCtx, cancel := context.WithTimeout(ctx, s.deps.ProbeTimeout)
+	defer cancel()
+	started := s.deps.Now()
+	status, err := s.deps.Probe(probeCtx, url)
+	ms := s.deps.Now().Sub(started).Milliseconds()
+	c := cachedHealth{at: now, health: HealthUp, ms: ms, note: "HTTP " + strconv.Itoa(status)}
+	if err != nil {
+		c.health, c.note = HealthDown, err.Error()
+	}
+	s.mu.Lock()
+	s.health[url] = c
+	s.mu.Unlock()
+	return c.health, c.ms, c.note
+}
+
+func localAddr(addr string) bool {
+	addr = strings.Trim(addr, "[]")
+	if addr == "" || addr == "*" {
+		return true
+	}
+	ip := net.ParseIP(addr)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+}
+
+func probeURL(l Listener) string {
+	host := "127.0.0.1"
+	if ip := net.ParseIP(strings.Trim(l.Addr, "[]")); ip != nil && ip.To4() == nil {
+		host = "[::1]"
+	} else if ip != nil && ip.IsLoopback() {
+		host = ip.String()
+	}
+	return fmt.Sprintf("http://%s:%d/", host, l.Port)
+}
+
+// knownServers names a dev server by the tool in its command line.
+var knownServers = []string{
+	"vite", "next", "webpack", "nuxt", "astro", "storybook", "expo", "parcel", "remix",
+	"svelte-kit", "uvicorn", "gunicorn", "flask", "django", "rails", "hugo", "jekyll",
+}
+
+// serverName is the short label for a chip: the dev tool when the command
+// names one, else the executable's name.
+func serverName(command string) string {
+	lower := strings.ToLower(command)
+	for _, k := range knownServers {
+		if strings.Contains(lower, k) {
+			return k
+		}
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return "server"
+	}
+	base := filepath.Base(strings.ReplaceAll(fields[0], `\`, "/"))
+	return strings.TrimSuffix(base, filepath.Ext(base))
+}

@@ -88,6 +88,11 @@ type Status struct {
 	StartedAt     time.Time        `json:"startedAt,omitempty"`
 	Error         string           `json:"error,omitempty"`
 	Logs          []string         `json:"logs"`
+	// Command is what the server runs, for display.
+	Command string `json:"command,omitempty"`
+	// TerminalID is the PTY handle the Live tab attaches to; empty when the
+	// server runs on plain pipes.
+	TerminalID string `json:"terminalId,omitempty"`
 }
 
 type launchFile struct {
@@ -123,6 +128,10 @@ type serverRun struct {
 	done      chan struct{}
 	logs      *lineBuffer
 	stopping  bool
+	// terminalID is set when the server runs in a PTY instead of cmd; exited
+	// then marks that PTY's process as gone.
+	terminalID string
+	exited     bool
 }
 
 type sessionOperation struct {
@@ -162,6 +171,9 @@ type Manager struct {
 
 	onExitMu sync.Mutex
 	onExit   OnExitFunc
+
+	// terminals, when set, hosts servers in a PTY (guarded by mu).
+	terminals Terminals
 }
 
 // New creates a managed preview-server supervisor.
@@ -300,6 +312,8 @@ func (m *Manager) Start(
 		done: make(chan struct{}),
 		logs: logs,
 	}
+	run.status.Command = commandLine(executable, args)
+	terminals := m.terminalLauncher()
 	// Arbitrary project servers cannot inherit a generic pre-bound socket. Keep
 	// the selected port reserved through command construction, then release it
 	// at the last possible moment before launch to minimize the bind race.
@@ -307,27 +321,48 @@ func (m *Manager) Start(
 		return stoppedStatus(sessionID), serviceError("PREVIEW_PORT_UNAVAILABLE", fmt.Sprintf("release selected preview port: %v", err))
 	}
 	reservation = nil
-	if err := cmd.Start(); err != nil {
+	if terminals != nil {
+		handleID, openErr := terminals.Open(ctx, TerminalSpec{
+			Argv:  ptyArgv(executable, args),
+			Env:   envMap(cmd.Env),
+			Dir:   workingDir,
+			Title: previewTerminalTitle(cfg.Name, port),
+		})
 		run.cmd = nil
-		run.status.State = StateFailed
-		run.status.Error = agentlaunch.RedactValues(fmt.Sprintf("start preview server: %v", err), projectEnv)
-		return m.statusFor(run), serviceError("PREVIEW_START_FAILED", run.status.Error)
-	}
-	run.startTime = previewProcessStartTime(cmd.Process.Pid)
-	if run.startTime == "" {
-		m.log.Warn("could not capture preview process start time; teardown will only signal the direct child",
-			"session", sessionID, "pid", cmd.Process.Pid)
-	}
+		if openErr != nil {
+			run.status.State = StateFailed
+			run.status.Error = agentlaunch.RedactValues(fmt.Sprintf("start preview server: %v", openErr), projectEnv)
+			return m.statusFor(run), serviceError("PREVIEW_START_FAILED", run.status.Error)
+		}
+		run.terminalID = handleID
+		run.status.TerminalID = handleID
+		m.mu.Lock()
+		m.runs[sessionID] = run
+		m.mu.Unlock()
+		go m.watchTerminal(context.WithoutCancel(ctx), sessionID, run, terminals)
+	} else {
+		if err := cmd.Start(); err != nil {
+			run.cmd = nil
+			run.status.State = StateFailed
+			run.status.Error = agentlaunch.RedactValues(fmt.Sprintf("start preview server: %v", err), projectEnv)
+			return m.statusFor(run), serviceError("PREVIEW_START_FAILED", run.status.Error)
+		}
+		run.startTime = previewProcessStartTime(cmd.Process.Pid)
+		if run.startTime == "" {
+			m.log.Warn("could not capture preview process start time; teardown will only signal the direct child",
+				"session", sessionID, "pid", cmd.Process.Pid)
+		}
 
-	m.mu.Lock()
-	m.runs[sessionID] = run
-	m.persistProcessesLocked()
-	m.mu.Unlock()
-	// Pass the request-scoped context into the wait goroutine so OnExit
-	// callbacks (issue #4500) inherit a context the gosec G118 check accepts.
-	// The wait goroutine detaches cancellation with context.WithoutCancel so a
-	// caller request ending after launch does not cancel the OnExit call.
-	go m.waitForExit(context.WithoutCancel(ctx), sessionID, run)
+		m.mu.Lock()
+		m.runs[sessionID] = run
+		m.persistProcessesLocked()
+		m.mu.Unlock()
+		// Pass the request-scoped context into the wait goroutine so OnExit
+		// callbacks (issue #4500) inherit a context the gosec G118 check accepts.
+		// The wait goroutine detaches cancellation with context.WithoutCancel so a
+		// caller request ending after launch does not cancel the OnExit call.
+		go m.waitForExit(context.WithoutCancel(ctx), sessionID, run)
+	}
 	releaseOperation()
 	operationLocked = false
 
@@ -337,7 +372,7 @@ func (m *Manager) Start(
 		if err := m.probe(ctx, targetURL); err == nil {
 			m.mu.Lock()
 			ready := false
-			if m.runs[sessionID] == run && run.cmd != nil && !run.stopping {
+			if m.runs[sessionID] == run && run.running() && !run.stopping {
 				run.status.State = StateReady
 				run.status.Error = ""
 				ready = true
@@ -399,13 +434,30 @@ func (m *Manager) stop(ctx context.Context, sessionID domain.SessionID) (Status,
 		m.mu.Unlock()
 		return stoppedStatus(sessionID), nil
 	}
+	if run.terminalID != "" && run.running() {
+		run.stopping = true
+		run.status.State = StateStopping
+		terminals := m.terminals
+		m.mu.Unlock()
+		if terminals == nil {
+			return m.Status(sessionID), serviceError("PREVIEW_STOP_FAILED", "preview terminal host is unavailable")
+		}
+		return m.stopTerminalRun(ctx, sessionID, run, terminals)
+	}
 	if run.cmd == nil {
 		run.status.State = StateStopped
 		run.status.Error = ""
 		status := m.statusForLocked(run)
+		terminalID := run.terminalID
+		terminals := m.terminals
 		delete(m.runs, sessionID)
 		m.persistProcessesLocked()
 		m.mu.Unlock()
+		if terminalID != "" && terminals != nil {
+			// The exited server's scrollback outlived it so the failure stayed
+			// readable; stopping is the moment to let go of it.
+			_ = terminals.Close(ctx, terminalID)
+		}
 		return status, nil
 	}
 	run.stopping = true
@@ -492,6 +544,18 @@ func (m *Manager) Status(sessionID domain.SessionID) Status {
 		return stoppedStatus(sessionID)
 	}
 	return m.statusForLocked(run)
+}
+
+// List returns every managed server this daemon is supervising, one per
+// session, in no particular order.
+func (m *Manager) List() []Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Status, 0, len(m.runs))
+	for _, run := range m.runs {
+		out = append(out, m.statusForLocked(run))
+	}
+	return out
 }
 
 // StopSession implements session_manager.PreviewLifecycle without exposing status
@@ -584,7 +648,12 @@ func (m *Manager) failAndStop(
 	}
 	cmd := run.cmd
 	startTime := run.startTime
+	terminals := m.terminals
+	terminalID := run.terminalID
 	m.mu.Unlock()
+	if terminalID != "" && terminals != nil {
+		_ = terminals.Close(context.Background(), terminalID)
+	}
 	if cmd != nil {
 		_ = terminatePreviewProcess(cmd, startTime)
 		select {
@@ -1012,6 +1081,18 @@ func (b *lineBuffer) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
+// Replace swaps the buffered lines for a fresh snapshot (a terminal's
+// scrollback tail, which is re-read rather than streamed).
+func (b *lineBuffer) Replace(lines []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(lines) > b.max {
+		lines = lines[len(lines)-b.max:]
+	}
+	b.lines = append([]string{}, lines...)
+	b.partial = ""
+}
+
 func (b *lineBuffer) Last(limit int) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -1030,4 +1111,23 @@ func (b *lineBuffer) appendLocked(line string) {
 	if len(b.lines) > b.max {
 		b.lines = append([]string{}, b.lines[len(b.lines)-b.max:]...)
 	}
+}
+
+func previewTerminalTitle(name string, port int) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "preview"
+	}
+	return fmt.Sprintf("%s :%d", name, port)
+}
+
+// envMap turns KEY=VALUE pairs into a map.
+func envMap(env []string) map[string]string {
+	out := make(map[string]string, len(env))
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
+			out[k] = v
+		}
+	}
+	return out
 }
