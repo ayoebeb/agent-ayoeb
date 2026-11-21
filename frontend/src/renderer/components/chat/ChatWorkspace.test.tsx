@@ -1159,6 +1159,78 @@ describe("ChatWorkspace timeline", () => {
 		expect(screen.getByText("I found the relevant component.")).toBeVisible();
 	});
 
+	describe("reply kept out of the Worked fold", () => {
+		const turnId = "turn-reply";
+		const at = "2026-08-11T10:01:00Z";
+		const LONG = `${"The full explanation of what was found and why it matters. ".repeat(6)}End of the write-up.`;
+		const prompt = {
+			kind: "message" as const, id: "prompt", turnId, sequence: 1, revision: 0,
+			role: "user" as const, origin: "human" as const, text: "Explain", streaming: false, createdAt: at,
+		};
+		const text = (id: string, sequence: number, body: string) => ({
+			kind: "message" as const, id, turnId, sequence, revision: 0,
+			role: "assistant" as const, origin: "provider" as const, text: body, streaming: false, createdAt: at,
+		});
+		const call = (id: string, sequence: number, command: string) => ({
+			kind: "activity" as const, id, turnId, sequence, revision: 0,
+			activityKind: "command" as const, status: "completed" as const, summary: command,
+			detail: { command }, createdAt: at,
+		});
+		const settled = (items: ConversationSnapshot["items"]): ConversationSnapshot => ({
+			...chatFixtureEmpty,
+			latestSequence: items.length,
+			turns: [{ id: turnId, state: "completed", requestedAt: at, startedAt: at, completedAt: "2026-08-11T10:02:00Z" }],
+			items,
+		});
+
+		it("keeps the answer visible when a bookkeeping call sits before a short closing line", () => {
+			render(
+				<ChatWorkspace
+					snapshot={settled([
+						prompt,
+						text("answer", 2, LONG),
+						call("notify", 3, 'ao notify-user --message "done"'),
+						text("closing", 4, "Your action now: say 10."),
+					])}
+				/>,
+			);
+			expect(screen.getByText(LONG)).toBeVisible();
+			expect(screen.getByText("Your action now: say 10.")).toBeVisible();
+			expect(screen.getByRole("button", { name: /Worked for/ })).toHaveAttribute("aria-expanded", "false");
+		});
+
+		it("folds earlier text and real work as before when the final text follows work tools", () => {
+			render(
+				<ChatWorkspace
+					snapshot={settled([
+						prompt,
+						text("aside", 2, "Let me look at the build."),
+						call("build", 3, "go build ./..."),
+						text("final", 4, "The build passes."),
+					])}
+				/>,
+			);
+			expect(screen.getByText("The build passes.")).toBeVisible();
+			expect(screen.queryByText("Let me look at the build.")).not.toBeInTheDocument();
+		});
+
+		it("keeps a long write-up visible when work tools and a short closing line follow it", () => {
+			render(
+				<ChatWorkspace
+					snapshot={settled([
+						prompt,
+						text("answer", 2, LONG),
+						call("test", 3, "npm test"),
+						text("closing", 4, "Tests pass."),
+					])}
+				/>,
+			);
+			expect(screen.getByText(LONG)).toBeVisible();
+			expect(screen.getByText("Tests pass.")).toBeVisible();
+			expect(screen.queryByText("npm test")).not.toBeInTheDocument();
+		});
+	});
+
 	it("heads a turn with no work to fold with Worked for as plain text", () => {
 		const turnId = "turn-straight-to-answer";
 		const snapshot: ConversationSnapshot = {
