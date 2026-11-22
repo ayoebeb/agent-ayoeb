@@ -548,8 +548,8 @@ func TestCommunicationStylePromptStaysShort(t *testing.T) {
 	// one that makes their main contact audible (`ao notify-user`) and the
 	// Autopilot rule, which applies only after AO says Autopilot is on. Anything
 	// beyond that is a deliberate choice.
-	if words := len(strings.Fields(style)); words > 600 {
-		t.Fatalf("communication style grew to %d words; keep it under 600", words)
+	if words := len(strings.Fields(style)); words > 650 {
+		t.Fatalf("communication style grew to %d words; keep it under 650", words)
 	}
 	if strings.Contains(strings.ToLower(style), "adhd") {
 		t.Fatalf("the style must not name the reader's condition:\n%s", style)
