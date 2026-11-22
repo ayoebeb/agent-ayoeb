@@ -526,6 +526,8 @@ type ResolveAutopilotEventParams struct {
 	ID         string
 }
 
+// A parked item is resolved when the user marks it handled; a decision, when the
+// user asks the agent to undo it.
 func (q *Queries) ResolveAutopilotEvent(ctx context.Context, arg ResolveAutopilotEventParams) (AutopilotEvent, error) {
 	row := q.db.QueryRowContext(ctx, resolveAutopilotEvent, arg.ResolvedAt, arg.ID)
 	var i AutopilotEvent
