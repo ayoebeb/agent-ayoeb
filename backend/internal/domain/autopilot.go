@@ -45,6 +45,7 @@ func (s AutopilotState) Open() bool {
 // AutopilotEndReason says why a run left the running state.
 type AutopilotEndReason string
 
+// The reasons a run leaves the running state.
 const (
 	AutopilotEndNone          AutopilotEndReason = ""
 	AutopilotEndUser          AutopilotEndReason = "user"
@@ -97,6 +98,7 @@ type AutopilotRun struct {
 // AutopilotEventKind is one kind of line in the run log.
 type AutopilotEventKind string
 
+// The kinds of line in the run log.
 const (
 	AutopilotEventStarted          AutopilotEventKind = "started"
 	AutopilotEventIteration        AutopilotEventKind = "iteration"
@@ -131,6 +133,7 @@ type AutopilotEvent struct {
 // parks that single item and carries on with everything else.
 type HardLimit string
 
+// The hard limits.
 const (
 	HardLimitMoney       HardLimit = "money"
 	HardLimitCI          HardLimit = "ci"
@@ -202,9 +205,9 @@ const (
 var ErrAutopilotTaskRequired = errors.New("autopilot: a task is required")
 
 // CleanAutopilotText trims s and drops control characters other than newlines
-// and tabs, then cuts it to max runes. The text ends up in an agent prompt, a
+// and tabs, then cuts it to maxRunes runes. The text ends up in an agent prompt, a
 // notification and the log, so it must not smuggle terminal control sequences.
-func CleanAutopilotText(s string, max int) string {
+func CleanAutopilotText(s string, maxRunes int) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
@@ -219,9 +222,9 @@ func CleanAutopilotText(s string, max int) string {
 		}
 	}
 	out := strings.TrimSpace(b.String())
-	if max > 0 {
-		if runes := []rune(out); len(runes) > max {
-			out = strings.TrimSpace(string(runes[:max-1])) + "…"
+	if maxRunes > 0 {
+		if runes := []rune(out); len(runes) > maxRunes {
+			out = strings.TrimSpace(string(runes[:maxRunes-1])) + "…"
 		}
 	}
 	return out

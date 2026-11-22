@@ -190,7 +190,7 @@ func TestAutopilotStopOneAndAll(t *testing.T) {
 		t.Fatalf("one: %s %s %q %v", stub.method, stub.path, stdout, err)
 	}
 
-	stub = serveAutopilot(t, `{"stopped":false}`)
+	serveAutopilot(t, `{"stopped":false}`)
 	stdout, _, err = executeCLI(t, autopilotAlive, "autopilot", "stop", "--session", "mer-1")
 	if err != nil || !strings.Contains(stdout, "was not running on mer-1") {
 		t.Fatalf("none: %q %v", stdout, err)
@@ -236,7 +236,7 @@ func TestAutopilotAgentCommandsActAsTheCallingSession(t *testing.T) {
 		stub.path != "/api/v1/sessions/mer-orchestrator-1/autopilot/parked" || stub.body["limit"] != "money" || !strings.Contains(stdout, "the user has been told once") {
 		t.Fatalf("park: %s %v %q %v", stub.path, stub.body, stdout, err)
 	}
-	stub = serveAutopilot(t, `{"event":{"id":"ape_2"},"alreadyParked":true}`)
+	serveAutopilot(t, `{"event":{"id":"ape_2"},"alreadyParked":true}`)
 	if stdout, _, err := executeCLI(t, autopilotAlive, "autopilot", "park", "--limit", "money", "--item", "Upgrade the CI plan", "--why", "Ran out"); err != nil ||
 		!strings.Contains(stdout, "already parked; the user was not told again") {
 		t.Fatalf("repeat park: %q %v", stdout, err)

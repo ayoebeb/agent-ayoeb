@@ -141,17 +141,17 @@ func (c *AutopilotController) start(w http.ResponseWriter, r *http.Request) {
 	if !decodeConversationBody(w, r, &req) {
 		return
 	}
-	max := 0
+	maxIterations := 0
 	if req.MaxIterations != nil {
-		max = *req.MaxIterations
-		if max == 0 {
+		maxIterations = *req.MaxIterations
+		if maxIterations == 0 {
 			// An explicit 0 is not "use the default": omit the field for that.
 			envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
 				"AUTOPILOT_MAX_ITERATIONS_INVALID", "maxIterations must be at least 1; omit it to use the default", nil)
 			return
 		}
 	}
-	v, err := c.Svc.Start(r.Context(), sessionParam(r), req.Task, max)
+	v, err := c.Svc.Start(r.Context(), sessionParam(r), req.Task, maxIterations)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

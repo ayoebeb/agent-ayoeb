@@ -340,8 +340,8 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, task string, m
 	if cur, found, _ := s.store.GetAutopilotRun(ctx, run.ID); found && cur.State == domain.AutopilotRunning {
 		cur.LastNudgeAt = s.clock()
 		cur.UpdatedAt = cur.LastNudgeAt
-		if updated, err := s.store.UpdateAutopilotRun(ctx, cur); err == nil {
-			run = updated
+		if _, err := s.store.UpdateAutopilotRun(ctx, cur); err != nil {
+			s.log.Warn("autopilot: record the first nudge", "run", run.ID, "err", err)
 		}
 	}
 	s.mu.Unlock()
@@ -380,6 +380,7 @@ func (s *Service) iterationCap(ctx context.Context, requested int) (int, error) 
 	}
 	n, err := s.store.AutopilotMaxIterations(ctx)
 	if err != nil || n < 1 {
+		//nolint:nilerr // an unreadable setting falls back to the default cap instead of refusing to start
 		return domain.AutopilotDefaultMaxIterations, nil
 	}
 	return n, nil

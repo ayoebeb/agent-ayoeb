@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,9 +37,9 @@ func (f *fakeAutopilot) rec(ctx context.Context, call string) {
 	f.callers = append(f.callers, caller.From(ctx))
 }
 
-func (f *fakeAutopilot) Start(ctx context.Context, id domain.SessionID, task string, max int) (autopilot.View, error) {
+func (f *fakeAutopilot) Start(ctx context.Context, id domain.SessionID, task string, maxIterations int) (autopilot.View, error) {
 	f.rec(ctx, "start "+string(id)+"|"+task)
-	f.maxIter = max
+	f.maxIter = maxIterations
 	return f.view, f.err
 }
 func (f *fakeAutopilot) View(ctx context.Context, id domain.SessionID) (autopilot.View, error) {
@@ -189,7 +190,8 @@ func TestAutopilotForbiddenAndConflictKeepTheirStatus(t *testing.T) {
 			if w.Code != tc.status {
 				t.Fatalf("status = %d, want %d: %s", w.Code, tc.status, w.Body.String())
 			}
-			if !strings.Contains(w.Body.String(), tc.err.(*apierr.Error).Code) {
+			var wantErr *apierr.Error
+			if !errors.As(tc.err, &wantErr) || !strings.Contains(w.Body.String(), wantErr.Code) {
 				t.Fatalf("body %s must carry the error code", w.Body.String())
 			}
 		})

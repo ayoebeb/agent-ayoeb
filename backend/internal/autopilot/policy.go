@@ -314,11 +314,13 @@ var (
 // substitutions returns the commands inside $(...) and `...`, which a shell runs
 // before the command that holds them.
 func substitutions(command string) []string {
-	var out []string
-	for _, m := range dollarSubstitution.FindAllStringSubmatch(command, -1) {
+	dollars := dollarSubstitution.FindAllStringSubmatch(command, -1)
+	ticks := backtickSubst.FindAllStringSubmatch(command, -1)
+	out := make([]string, 0, len(dollars)+len(ticks))
+	for _, m := range dollars {
 		out = append(out, m[1])
 	}
-	for _, m := range backtickSubst.FindAllStringSubmatch(command, -1) {
+	for _, m := range ticks {
 		out = append(out, m[1])
 	}
 	return out
@@ -452,17 +454,6 @@ func hasFlag(tokens []string, flags ...string) bool {
 	for _, t := range tokens {
 		for _, f := range flags {
 			if t == f {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasFlagPrefix(tokens []string, prefixes ...string) bool {
-	for _, t := range tokens {
-		for _, p := range prefixes {
-			if strings.HasPrefix(t, p) {
 				return true
 			}
 		}
