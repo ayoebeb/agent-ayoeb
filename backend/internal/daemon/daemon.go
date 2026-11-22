@@ -859,13 +859,13 @@ func Run(buildVersion string) error {
 	// is raised, and takes an orchestrator's declared wait instead of notifying.
 	autopilotDelivery := reportSemanticDelivery{chat: chatSvc, sessions: reportSessions, store: store}
 	autopilotSvc := autopilot.New(autopilot.Deps{
-		Store:       store,
-		Messenger:   autopilotMessenger{sessions: sessionSvc},
-		Interrupter: autopilotDelivery,
-		Notifier:    notificationWriter,
-		Progress:    autopilot.GitProgress{},
-		Approvals:   chatSvc,
-		Logger:      log,
+		Store:        store,
+		Messenger:    autopilotMessenger{sessions: sessionSvc},
+		Interrupter:  autopilotDelivery,
+		Notifier:     notificationWriter,
+		Progress:     autopilot.GitProgress{},
+		Approvals:    chatSvc,
+		Logger:       log,
 		UsageLimited: autopilotUsageLimited(store, time.Now),
 	})
 	autopilotRef.Store(autopilotSvc)

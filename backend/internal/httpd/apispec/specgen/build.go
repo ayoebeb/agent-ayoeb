@@ -4412,6 +4412,7 @@ func autopilotOperations() []operation {
 		},
 	}
 }
+
 // jiraOperations registers the per-project Jira connection, board and
 // start-from-ticket routes. Upstream Jira failures are 4xx/5xx envelopes with
 // stable JIRA_* codes; a rejected Jira login is 422, never 401.
