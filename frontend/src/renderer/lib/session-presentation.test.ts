@@ -98,6 +98,22 @@ describe("session presentation", () => {
 		}))).toBe(marker);
 	});
 
+	// A worker stopped on the provider's usage limit cannot act on its PR, so the
+	// limit marker outranks the pull request phrases, and a running worker is not limited.
+	it.each([
+		[{ status: "usage_limit", displayStatus: "Usage limit" }, "limit"],
+		[{ status: "usage_limit" }, "limit"],
+		[{ status: "idle", scmStatus: "ci_failed", kanbanColumn: "needs_review", displayStatus: "Usage limit" }, "limit"],
+		[{ status: "needs_input", displayStatus: "Blocked" }, "attention"],
+	] as const)("flags a limit-stopped session %# with marker %s", (overrides, marker) => {
+		expect(getSessionRowMarker(sessionWith({ ...overrides } as Partial<WorkspaceSession>))).toBe(marker);
+	});
+
+	it("does not spin a limit-stopped session and keeps its limit marker", () => {
+		const limited = sessionWith({ status: "usage_limit", displayStatus: "Usage limit", activity: { state: "idle", lastActivityAt: "" } });
+		expect(getSessionRowIndicator(limited)).toBe("limit");
+	});
+
 	it.each([
 		["Needs review", null],
 		["Review failed", "review"],

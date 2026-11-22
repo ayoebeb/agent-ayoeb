@@ -53,8 +53,12 @@ import { useShellMaybe } from "../lib/shell-context";
 import { sessionNavigateTarget } from "../lib/navigate-to-session";
 import { ProjectTerminationFeedback } from "./SessionTopbarActions";
 import { ProjectBoardActions } from "./ProjectBoardActions";
+import { JiraBoardView } from "./JiraBoardView";
+import { BoardViewToggle } from "./BoardViewToggle";
+import { readBoardView, writeBoardView, type BoardView } from "../lib/board-view";
+import { startWorkerFromTicket } from "../lib/jira-new-task";
 import { useDiagnosticsEnabled, usePressureState, useSessionMemory } from "../hooks/useSessionMemory";
-import { AppMemoryIndicator, toSessionFacts } from "./SessionMemoryPanel";
+import { toSessionFacts } from "./SessionMemoryPanel";
 import { Button } from "./ui/button";
 import { recordManualWorkerOpen } from "../lib/session-management-telemetry";
 import {
@@ -181,8 +185,6 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 	// and the window behind them only exist with Diagnostics on in Developer mode.
 	// They read this machine, so another machine's board shows none of them.
 	const diagnostics = useDiagnosticsEnabled();
-	// The light leads the board's actions, before the Task button, not in the archive bar.
-	const memoryLight = diagnostics && !hostId ? <AppMemoryIndicator /> : null;
 	// Per-session readings feed each card's resource chip. Chips are grey
 	// unless the machine is tight and the card is part of the fix (idle, or
 	// the single largest).
@@ -204,6 +206,17 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 	activeScopeRef.current = scopeKey;
 	const [archiveOpen, setArchiveOpen] = useState(false);
 	useEffect(() => setArchiveOpen(false), [scopeKey]);
+	// Agents or Jira: remembered per project, so the board opens where it was left.
+	const [boardView, setBoardView] = useState<BoardView>(() => readBoardView(scopeKey));
+	useEffect(() => setBoardView(readBoardView(scopeKey)), [scopeKey]);
+	const chooseBoardView = (view: BoardView) => {
+		setBoardView(view);
+		writeBoardView(scopeKey, view);
+	};
+	// Jira belongs to a real project the person can start work in: not the
+	// standalone shelf, not a project shared with them, not a host that is offline.
+	const jiraAvailable = Boolean(projectId && workspace) && projectId !== STANDALONE_WORKSPACE_ID && workspace?.kind !== STANDALONE_PROJECT_KIND && !guest && (!hostId || connected);
+	const showJira = jiraAvailable && boardView === "jira";
 	// Cmd+K's "Open archive" asks this project's board to open it, from here or
 	// from a page that navigates here first.
 	const archiveOpenRequest = useUiStore((state) => state.archiveOpenRequest);
@@ -260,10 +273,9 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 	const actions = projectId && (!hostId || connected) ? (
 		<>
 			<ProjectTerminationFeedback projectId={projectId} hostId={hostId} />
-			{memoryLight}
 			{guest ? null : <ProjectBoardActions actions={projectActions} placement="header" quiet={showProjectEmpty} cloud={workspace?.kind === CLOUD_PROJECT_KIND} />}
 		</>
-	) : memoryLight ?? undefined;
+	) : undefined;
 
 	if (projectId && (isProvisioning || projectActions.isSpawning || autoStartPending)) {
 		return <OrchestratorStartingChat
@@ -278,12 +290,13 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 		<div className="relative flex h-full min-h-0 flex-col bg-background text-foreground" data-testid="board" data-host-id={hostId} data-project-id={projectId}>
 			<PageTopbar
 				lead={showWelcome ? undefined : (
-					<PageTopbarTitle
-						data-testid="board-topbar-label"
-					>
-						{boardLabel}
-						{hostId ? <span className="truncate text-muted-foreground">· {labelForHost(hostId) ?? hostId}</span> : null}
-					</PageTopbarTitle>
+					<>
+						<PageTopbarTitle data-testid="board-topbar-label">
+							{boardLabel}
+							{hostId ? <span className="truncate text-muted-foreground">· {labelForHost(hostId) ?? hostId}</span> : null}
+						</PageTopbarTitle>
+						{jiraAvailable ? <BoardViewToggle value={boardView} onChange={chooseBoardView} /> : null}
+					</>
 				)}
 				actions={showWelcome ? undefined : actions}
 			/>
@@ -330,7 +343,17 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 					</span>
 				</div>
 			) : null}
-				{!hostId && (presentation.workspaceStartupState === "error" || localWorkspaceQuery.isError) ? (
+					{showJira && projectId ? (
+						<JiraBoardView
+							projectId={projectId}
+							hostId={hostId}
+							sessions={workspace?.sessions ?? []}
+							onOpenSettings={() => useUiStore.getState().openProjectSettings(projectId, hostId)}
+							onOpenSession={openSession}
+							onOpenOrchestrator={(sessionId) => void navigate(sessionNavigateTarget(projectId, sessionId, hostId))}
+							onStartWorker={(ticket) => startWorkerFromTicket(ticket, projectId, hostId)}
+						/>
+					) : !hostId && (presentation.workspaceStartupState === "error" || localWorkspaceQuery.isError) ? (
 					<p className="py-10 text-center text-xs text-passive">{t("shell.couldNotLoadSessions")}</p>
 				) : hostId && !workspace ? null : showWelcome ? (
 				<BoardWelcome />
@@ -362,7 +385,7 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 				)}
 			</div>
 
-			{hasArchive ? (
+			{hasArchive && !showJira ? (
 				<div className="flex h-9 shrink-0 items-center border-t border-border px-2">
 					<Button
 						aria-haspopup="dialog"

@@ -174,6 +174,8 @@ import {
 import { AutomationMessage, SteeredBrowserFeedback, steeredBrowserFeedback } from "./AutomationMessage";
 import { HumanMessageEditor } from "./HumanMessageEditor";
 import { ChatLinkProvider, ChatOpeningRef } from "./ChatMarkdown";
+import { ChatAnchorNavContext, ChatAnchorStoreContext } from "./chat-anchor-context";
+import { ChatAnchorStore, chatAnchorDomId, normalizeAnchor } from "../../lib/chat-anchors";
 import { ChatEntrance, createChatEntranceGate } from "./chat-entrance";
 import { ChatImageSourceProvider } from "./chat-image-source";
 import type { AgentSwitchProps } from "./AgentSwitchPicker";
@@ -189,6 +191,7 @@ import { SessionStartup } from "./SessionStartup";
 import { ActivityRun } from "./ActivityRun";
 import { isOrdinaryActivity } from "./activity-action";
 import { isFailedCall } from "./activity-command";
+import { keptReplyIndexes } from "./turn-reply";
 import { TurnPlan } from "./TurnPlan";
 import { ComposerModeItems, TurnSettingsBar, type ApprovalModeLimits } from "./TurnSettingsBar";
 import { ElicitationDock, ElicitationHistory } from "./ElicitationDock";
@@ -1647,8 +1650,9 @@ function ChatWorkspaceContent({
 	// Claude Code compacts at the window picked for it, well before its model's full context.
 	const compactsAt = snapshot.harness === "claude-code" ? snapshot.settings?.autoCompactWindow : undefined;
 	const stableUsage = useStableValue(snapshot.usage);
-	// Subscription limits come from this computer's accounts, so only a local session shows them.
-	const usageLimitsSessionId = session && !session.cloud && !activeRemoteHostId ? session.id : undefined;
+	// Subscription limits come from the accounts of the computer the session runs on:
+	// this one's, or a linked computer's, read from its own daemon. Cloud has none.
+	const usageLimitsSessionId = session && !session.cloud ? session.id : undefined;
 	// A reroute describes the model it was recorded against; once the user picks a
 	// different model it no longer says anything about the next turn.
 	const currentModelReroute =
@@ -1667,7 +1671,7 @@ function ChatWorkspaceContent({
 				<TurnSettingsBar
 					agentSwitch={agentSwitch}
 					beforePicker={agentSwitch ? <ContextMeter usage={stableUsage} compactsAt={compactsAt} /> : undefined}
-					afterPicker={usageLimitsSessionId ? <ComposerUsageLimits harness={snapshot.harness} sessionId={usageLimitsSessionId} /> : undefined}
+					afterPicker={usageLimitsSessionId ? <ComposerUsageLimits harness={snapshot.harness} sessionId={usageLimitsSessionId} hostId={activeRemoteHostId} /> : undefined}
 					// While the agent wakes or starts; a chat reads "hibernated" until ready.
 					modelsLoading={settingsLoading}
 					lastModel={lastModel}
@@ -1733,6 +1737,7 @@ function ChatWorkspaceContent({
 			stableSettings,
 			compactsAt,
 			usageLimitsSessionId,
+			activeRemoteHostId,
 			snapshot.harness,
 		],
 	);
@@ -2909,6 +2914,12 @@ const SETTLE_HOLD_MS = 400;
 const SETTLE_SLIDE_MS = 240;
 /** The same ease-out the turn's other settle motion ("Worked for" fading in) uses. */
 const SETTLE_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+/** How long the heading an anchor link scrolled to stays marked (the fade is in styles.css). */
+const ANCHOR_FLASH_MS = 1800;
+/** A link into a session that is still opening is applied when its chat appears, for this long. */
+const ANCHOR_REQUEST_TTL_MS = 15_000;
+/** Where the heading lands in the viewport, measured from its top edge. */
+const anchorLandingOffset = (node: HTMLElement) => Math.min(96, Math.round(node.clientHeight * 0.2));
 /**
  * A reader who nudges the view up a little and then stops has paused, not left.
  * After this long with no further input, while the turn is still live and they are
@@ -4192,6 +4203,124 @@ export function Timeline({
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [annotationTarget, groups, hasOlder, loadingOlder, onLoadOlder, virtualized, virtualizer, virtualRows, activityDisclosureOverrides]);
+
+	// Anchor links: `[Which database?](#which-database)` in any message scrolls here,
+	// to the heading with that anchor, in this or an older message.
+	const renderMath = useUiStore((state) => state.renderMath);
+	const anchorStore = useMemo(() => new ChatAnchorStore(), []);
+	const anchorMessages = useMemo(
+		() => groups.flatMap((group) => group.items).flatMap((item) =>
+			item.kind === "message" && item.role === "assistant" ? [{ id: item.id, text: item.text }] : []),
+		[groups],
+	);
+	useLayoutEffect(() => {
+		anchorStore.update(anchorMessages, renderMath);
+	}, [anchorStore, anchorMessages, renderMath]);
+	const [anchorTarget, setAnchorTarget] = useState<{ anchor: string; nonce: number }>();
+	const anchorNonce = useRef(0);
+	const anchorRetryCount = useRef(0);
+	const anchorSettleCount = useRef(0);
+	// Group count when the search last asked for older history (see annotationOlderRequestGroups).
+	const anchorOlderRequestGroups = useRef<number | undefined>(undefined);
+	const anchorFlashTimer = useRef<number | undefined>(undefined);
+	const anchorFlashElement = useRef<HTMLElement | null>(null);
+	const clearAnchorFlash = useCallback(() => {
+		window.clearTimeout(anchorFlashTimer.current);
+		anchorFlashElement.current?.removeAttribute("data-anchor-flash");
+		anchorFlashElement.current = null;
+	}, []);
+	useEffect(() => clearAnchorFlash, [clearAnchorFlash]);
+	const goToAnchor = useCallback((anchor: string) => {
+		anchorRetryCount.current = 0;
+		anchorSettleCount.current = 0;
+		anchorOlderRequestGroups.current = undefined;
+		setAnchorTarget({ anchor, nonce: ++anchorNonce.current });
+	}, []);
+	useEffect(() => {
+		if (!anchorTarget) return;
+		const giveUp = () => {
+			useUiStore.getState().showGlobalToast("That part of the conversation could not be found.", undefined, {
+				placement: "top-center",
+				dismissible: true,
+				durationMs: 4_000,
+				dedupeKey: "chat-anchor:missing",
+			});
+			setAnchorTarget(undefined);
+		};
+		// A chat that is still loading has no headings yet; the target waits for it.
+		if (groups.length === 0) return;
+		const anchor = normalizeAnchor(anchorTarget.anchor);
+		const messageId = anchorStore.messageFor(anchor);
+		const index = messageId ? groups.findIndex((group) => group.items.some((item) => item.id === messageId)) : -1;
+		if (index < 0) {
+			// The heading may be in an older page: fetch pages one at a time until it
+			// appears or there are no more, as the annotation search does.
+			if (loadingOlder) return;
+			if (hasOlder && onLoadOlder && anchorOlderRequestGroups.current !== groups.length) {
+				anchorOlderRequestGroups.current = groups.length;
+				onLoadOlder();
+				return;
+			}
+			giveUp();
+			return;
+		}
+		const domId = chatAnchorDomId(anchor);
+		const rows = Array.from(scrollContent.current?.querySelectorAll<HTMLElement>("[data-chat-turn]") ?? []);
+		const heading = Array.from(scrollContent.current?.querySelectorAll<HTMLElement>("[id^='chat-anchor-']") ?? [])
+			.find((element) => element.id === domId);
+		if (!heading) {
+			// Not drawn yet: either its row is outside the virtual window, or the answer
+			// sits in a closed "Worked for" fold. Bring the row in, or open the fold.
+			if (anchorRetryCount.current++ >= 20) {
+				giveUp();
+				return;
+			}
+			const group = groups[index]!;
+			if (rows.some((row) => row.dataset.chatTurn === group.key)) {
+				const disclosureKey = `${group.key}:worked`;
+				if (!activityDisclosureOverrides[disclosureKey]) {
+					setActivityDisclosureOverrides((current) => ({ ...current, [disclosureKey]: true }));
+				}
+			} else if (virtualized) {
+				virtualizer.scrollToIndex(index, { align: "start" });
+			}
+			const retryTimer = window.setTimeout(() => setAnchorTarget((current) => current ? { ...current } : current), 80);
+			return () => window.clearTimeout(retryTimer);
+		}
+		const frame = requestAnimationFrame(() => {
+			const node = scroller.current;
+			if (!node) return;
+			releaseFollow();
+			const wanted = heading.getBoundingClientRect().top - node.getBoundingClientRect().top - anchorLandingOffset(node);
+			const before = node.scrollTop;
+			if (Math.abs(wanted) > 2 && anchorSettleCount.current++ < 8) {
+				node.scrollTop = before + wanted;
+				// Rows measured on the way here shift the heading: look again next frame,
+				// unless the view could not move (the heading is already as high as it goes).
+				if (node.scrollTop !== before) {
+					setAnchorTarget((current) => current ? { ...current } : current);
+					return;
+				}
+			}
+			clearAnchorFlash();
+			// Restart the fade when the same heading is chosen twice in a row.
+			heading.removeAttribute("data-anchor-flash");
+			void heading.offsetWidth;
+			heading.setAttribute("data-anchor-flash", "");
+			anchorFlashElement.current = heading;
+			anchorFlashTimer.current = window.setTimeout(clearAnchorFlash, ANCHOR_FLASH_MS);
+			setAnchorTarget(undefined);
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [anchorTarget, anchorStore, groups, hasOlder, loadingOlder, onLoadOlder, virtualized, virtualizer, virtualRows, activityDisclosureOverrides, releaseFollow, clearAnchorFlash]);
+	// A link into this session from elsewhere (`ao://sessions/{project}/{session}#{anchor}`)
+	// is held in the store until the chat it names is on screen. Side chats never take it.
+	const anchorRequest = useUiStore((state) => state.chatAnchorRequest);
+	useEffect(() => {
+		if (sideChat || !anchorRequest || anchorRequest.sessionId !== uiSessionId) return;
+		useUiStore.getState().clearChatAnchorRequest(anchorRequest.nonce);
+		if (Date.now() - anchorRequest.at <= ANCHOR_REQUEST_TTL_MS) goToAnchor(anchorRequest.anchor);
+	}, [anchorRequest, goToAnchor, sideChat, uiSessionId]);
 	useEffect(() => {
 		const node = scroller.current;
 		const content = virtualized ? virtualContent.current
@@ -4823,6 +4952,8 @@ export function Timeline({
 		<ChatOpeningRef.Provider value={chatOpening}>
 		<ChatEntrance.Provider value={entranceGate}>
 		<LiveStepChoices.Provider value={liveStepChoices}>
+		<ChatAnchorStoreContext.Provider value={anchorStore}>
+		<ChatAnchorNavContext.Provider value={goToAnchor}>
 		<div
 			ref={findSurface}
 			data-chat-find-surface=""
@@ -5131,6 +5262,8 @@ export function Timeline({
 				</Button>
 			) : null}
 		</div>
+		</ChatAnchorNavContext.Provider>
+		</ChatAnchorStoreContext.Provider>
 		</LiveStepChoices.Provider>
 		</ChatEntrance.Provider>
 		</ChatOpeningRef.Provider>
@@ -5350,9 +5483,13 @@ const TurnGroup = memo(function TurnGroup({
 	const firstWorkIndex = runs.findIndex((run) => !isHumanRun(run.items[0]));
 	const leadingHumanCount = firstWorkIndex < 0 ? runs.length : firstWorkIndex;
 	const humanRuns = runs.slice(0, leadingHumanCount);
+	// The answer the agent wrote before a bookkeeping call (`ao notify-user`, ...) or a
+	// long write-up closed by a short line stays out of the fold with the final text.
+	const keptIndexes = keptReplyIndexes(runs, finalAssistantRunIndex, leadingHumanCount);
 	const workedRuns = runs.filter(
-		(_run, index) => index >= leadingHumanCount && index !== finalAssistantRunIndex,
+		(_run, index) => index >= leadingHumanCount && index !== finalAssistantRunIndex && !keptIndexes.has(index),
 	);
+	const keptRuns = runs.filter((_run, index) => keptIndexes.has(index));
 	const finalRun = finalAssistantRunIndex >= 0 ? runs[finalAssistantRunIndex] : undefined;
 	// Questions, errors, and system warnings stay readable after the turn settles, and
 	// so does anything the user said mid-turn: folding a steer away would leave the
@@ -5583,6 +5720,7 @@ const TurnGroup = memo(function TurnGroup({
 	if (!outcome) body.push(...workedRuns.flatMap(renderWorkerRun));
 	// Settled steers still carry the reports they delivered.
 	if (outcome) body.push(...noticeRuns.flatMap(renderWorkerRun));
+	body.push(...keptRuns.map(renderRun));
 	if (finalRun) body.push(renderRun(finalRun));
 	return (
 		// Positioned, so the live row that popLayout lifts out of the flow as the turn

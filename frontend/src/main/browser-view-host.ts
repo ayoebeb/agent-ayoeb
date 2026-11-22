@@ -57,6 +57,9 @@ import type { BrowserDownloadManager } from "./browser-download-manager";
 import type { BrowserDownloadActionInput } from "../shared/browser-downloads";
 import { matchInstruction } from "./browser-act-matcher";
 import { trustPreviewCertificate } from "./preview-certificate";
+import type { CertificateTrustStore } from "./browser-certificate-trust";
+import type { LoopbackRoutes } from "./loopback-routes";
+import type { BrowserCertificateError, BrowserTrustedCertificate } from "../shared/browser-certificate";
 import { REMOTE_TAB_REPORT, parseRemoteTabReport, type RemoteTabReport } from "../shared/remote-tab";
 import type { ActCandidate } from "./browser-act-matcher";
 import { BrowserScreencast } from "./browser-screencast";
@@ -136,6 +139,8 @@ export type BrowserNavState = {
   canGoForward: boolean;
   isLoading: boolean;
   error?: string;
+  // Set when the page failed on a certificate error the person can trust.
+  certificateError?: BrowserCertificateError;
 };
 
 export type BrowserTabState = {
@@ -507,10 +512,14 @@ export type BrowserViewHostOptions = {
   isCloseShellTerminalShortcutEnabled?: () => boolean;
   browserProfileStore?: BrowserProfileStore;
   browserHistoryStore?: BrowserHistoryStore;
+  // Certificates the person trusted in the Browser panel (host + fingerprint).
+  certificateTrust?: CertificateTrustStore;
   browserDownloadManager?: BrowserDownloadManager;
   clearBrowserProfileData?: (partition: string) => Promise<void>;
   // Configures a browser partition's session before its first page exists.
   prepareBrowserPartition?: (partition: string) => void;
+  // Sends a remote session's loopback traffic through its computer (loopback-routes.ts).
+  loopbackRoutes?: Pick<LoopbackRoutes, "claim" | "release">;
   // Electron 44 removed clipboard.writeImage; main.ts adapts the async
   // ClipboardItem API to this narrow image-only writer.
   clipboard?: { writeImage(image: Electron.NativeImage): void | Promise<void> };
@@ -635,6 +644,10 @@ type BrowserEntry = {
   documentGeneration: number;
   navigationGeneration: number;
   blockedNavigationGeneration: number;
+  // The rejected certificate behind the page's last main-frame load failure,
+  // kept until the next load starts so the panel can offer "Trust this
+  // certificate" instead of a blank page.
+  certificateFailure?: BrowserCertificateError;
   networkCapture?: BrowserNetworkCapture;
   favicon?: string;
   // URL of the favicon currently applied to `favicon` (fetch succeeded).
@@ -986,6 +999,41 @@ export function createBrowserViewHost(
       return defaultProfileId;
     return null;
   };
+  // The computer each session runs on (null: this PC), as its panel reports it.
+  // A remote session's loopback traffic goes through that computer, per
+  // partition (loopback-routes.ts); every session claims its partition, a
+  // local one too, so a shared profile never routes a local session remotely.
+  const hostIdBySessionId = new Map<string, string | null>();
+  const claimedPartitions = new Map<string, string>();
+  const syncLoopbackClaim = (
+    session: BrowserSessionEntry,
+  ): Promise<{ routed: boolean }> => {
+    const routes = options.loopbackRoutes;
+    if (!routes) return Promise.resolve({ routed: false });
+    const previous = claimedPartitions.get(session.sessionId);
+    if (previous && previous !== session.profilePartition)
+      void routes.release(previous, session.sessionId).catch(() => undefined);
+    claimedPartitions.set(session.sessionId, session.profilePartition);
+    return routes
+      .claim(
+        session.profilePartition,
+        session.sessionId,
+        hostIdBySessionId.get(session.sessionId) ?? null,
+      )
+      .catch((error: unknown) => {
+        console.warn("[browser] loopback routing unavailable", error);
+        return { routed: false };
+      });
+  };
+  const releaseLoopbackClaim = (session: BrowserSessionEntry): void => {
+    hostIdBySessionId.delete(session.sessionId);
+    const partition = claimedPartitions.get(session.sessionId);
+    claimedPartitions.delete(session.sessionId);
+    if (partition)
+      void options.loopbackRoutes
+        ?.release(partition, session.sessionId)
+        .catch(() => undefined);
+  };
   const ipcDisposers: Array<() => void> = [];
   let disposePromise: Promise<void> | null = null;
   // viewId of the panel that most recently held native focus; cleared when the
@@ -1166,6 +1214,7 @@ export function createBrowserViewHost(
       sandbox: true,
     };
     options.prepareBrowserPartition?.(session.profilePartition);
+    void syncLoopbackClaim(session);
     const view = new options.WebContentsView({
       webPreferences,
       ...(popupOptions?.webContents ? { webContents: popupOptions.webContents } : {}),
@@ -1199,7 +1248,8 @@ export function createBrowserViewHost(
     // Remote app previews are HTTPS on loopback with AO's own certificate,
     // so Chromium speaks HTTP/2 to them (preview-certificate.ts).
     const viewSession = view.webContents.session;
-    if (viewSession?.setCertificateVerifyProc) trustPreviewCertificate(viewSession);
+    if (viewSession?.setCertificateVerifyProc)
+      trustPreviewCertificate(viewSession, options.certificateTrust);
     options.browserDownloadManager?.attach(view.webContents.session);
     let scrollbarStyleKey: string | undefined;
     let scrollbarStyleUpdate = Promise.resolve();
@@ -2707,10 +2757,16 @@ export function createBrowserViewHost(
       applyBrowserViewBounds(entry.view, session.bounds, false);
       return;
     }
+    // While a certificate failure is shown, the renderer's "Trust this
+    // certificate" card must stay visible and clickable. Chromium's blank error
+    // page in the native view would paint over it, so keep the view hidden on
+    // every bounds sync until the next load clears the failure.
     applyBrowserViewBounds(
       entry.view,
       session.bounds,
-      session.bounds.width > 0 && session.bounds.height > 0,
+      !entry.certificateFailure &&
+        session.bounds.width > 0 &&
+        session.bounds.height > 0,
     );
   }
 
@@ -3011,6 +3067,7 @@ export function createBrowserViewHost(
     void options.agentBrowserRuntime?.closeSession(session.sessionId);
     entries.delete(viewId);
     viewIdsBySessionId.delete(session.sessionId);
+    releaseLoopbackClaim(session);
     rendererOwnersByViewId.delete(viewId);
     forgetNativeFocus(viewId);
     forgetBrowserShortcutTarget(viewId);
@@ -3272,6 +3329,7 @@ export function createBrowserViewHost(
       session.profilePartition = normalizedRequestedProfileId
         ? browserProfilePartition(normalizedRequestedProfileId)
         : temporaryBrowserPartition();
+      void syncLoopbackClaim(session);
       await rebuildSessionTabs(
         session,
         savedTabs,
@@ -3308,6 +3366,7 @@ export function createBrowserViewHost(
       }
       session.profileId = previousProfileId;
       session.profilePartition = previousPartition;
+      if (sessionIsCurrent) void syncLoopbackClaim(session);
       if (sessionIsCurrent && didTearDown) {
         try {
           await rebuildSessionTabs(
@@ -3647,6 +3706,21 @@ export function createBrowserViewHost(
     pushProfileState(session);
     return session.tabs.size ? pushNavState(options, activeEntry(session)) : emptyNavState(session.viewId);
   });
+  // The panel of a session that runs on another computer says so, so that
+  // computer's localhost dev servers open in this session's tabs. Answers
+  // whether the session's partition is routed (a profile shared with a session
+  // on another computer is not: see loopback-routes.ts).
+  handle(
+    "browser:setSessionHost",
+    async (_event, sessionId: unknown, hostId: unknown): Promise<{ routed: boolean }> => {
+      if (typeof sessionId !== "string" || sessionId === "" || sessionId.length > 256) return { routed: false };
+      if (hostId !== null && (typeof hostId !== "string" || hostId === "" || hostId.length > 256)) return { routed: false };
+      hostIdBySessionId.set(sessionId, hostId);
+      const viewId = viewIdsBySessionId.get(sessionId);
+      const session = viewId ? entries.get(viewId) : undefined;
+      return session ? syncLoopbackClaim(session) : { routed: false };
+    },
+  );
   on("browser:setBounds", (event, input: BrowserBoundsInput) => {
     if (!input || !isRendererOwned(event, input.viewId)) return;
     const applied = setBounds(input, event.sender.getZoomFactor());
@@ -3727,6 +3801,33 @@ export function createBrowserViewHost(
     isRendererOwned(event, viewId)
       ? invokeNav(viewId, "reload", false, true)
       : emptyNavState(viewId),
+  );
+  // "Trust this certificate": remembers exactly the (host, fingerprint) pair the
+  // main process recorded for the failed page, never one the renderer names.
+  handle("browser:trustCertificate", (event, viewId: string) => {
+    if (!isRendererOwned(event, viewId)) return emptyNavState(viewId);
+    const browserSession = entries.get(viewId);
+    if (!browserSession || !browserSession.tabs.size || !options.certificateTrust)
+      return emptyNavState(viewId);
+    const failure = activeEntry(browserSession).certificateFailure;
+    if (!failure) return invokeNav(viewId, "reload", false, true);
+    options.certificateTrust.trust(
+      failure.host,
+      failure.fingerprint,
+      failure.issuer,
+    );
+    return invokeNav(viewId, "reload", false, true);
+  });
+  handle("browser:certificates:list", (): BrowserTrustedCertificate[] =>
+    options.certificateTrust?.list() ?? [],
+  );
+  handle(
+    "browser:certificates:remove",
+    (_event, host: unknown, fingerprint: unknown): BrowserTrustedCertificate[] => {
+      if (typeof host === "string" && typeof fingerprint === "string")
+        options.certificateTrust?.remove(host, fingerprint);
+      return options.certificateTrust?.list() ?? [];
+    },
   );
   handle("browser:stop", (event, viewId: string) =>
     isRendererOwned(event, viewId)
@@ -5043,7 +5144,12 @@ export function createBrowserViewHost(
       setTimeout(() => {
         const current = entries.get(targetViewId);
         if (!current || !current.visible || !current.tabs.size) return;
-        applyBrowserViewBounds(activeEntry(current).view, current.bounds, true);
+        const currentEntry = activeEntry(current);
+        applyBrowserViewBounds(
+          currentEntry.view,
+          current.bounds,
+          !currentEntry.certificateFailure,
+        );
       }, 0);
     },
   };
@@ -5786,6 +5892,11 @@ function wireNavEvents(
   });
   contents.on("page-title-updated", update);
   contents.on("did-start-loading", () => {
+    const hadCertificateFailure = entry.certificateFailure !== undefined;
+    entry.certificateFailure = undefined;
+    // Trusting the certificate (reload) or navigating away ends the failure:
+    // show the native view again.
+    if (hadCertificateFailure && isActive()) syncActiveBounds();
     update();
   });
   contents.on("did-stop-loading", () => {
@@ -5802,13 +5913,18 @@ function wireNavEvents(
   });
   contents.on(
     "did-fail-load",
-    (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (errorCode === -3) return;
       // A page can contain third-party images, frames, or scripts that fail
       // independently. Only a main-frame failure means the browser page itself
       // should be replaced with AO's error state.
       if (isMainFrame === false) return;
       cancelAnnotation(options, entry, "navigation");
+      entry.certificateFailure = certificateFailureFor(
+        options.certificateTrust,
+        errorCode,
+        validatedURL,
+      );
       if (isActive()) entry.view.setVisible?.(false);
       entry.state = {
         ...readNavState(entry),
@@ -5818,6 +5934,23 @@ function wireNavEvents(
         shellContents(options).send("browser:navState", entry.state);
     },
   );
+}
+
+// Chromium's certificate failures are net error codes -200 to -299
+// (ERR_CERT_AUTHORITY_INVALID is -202). The rejected certificate itself was
+// recorded by the session's verify proc for that host.
+function certificateFailureFor(
+  trust: CertificateTrustStore | undefined,
+  errorCode: number,
+  url: string,
+): BrowserCertificateError | undefined {
+  if (!trust || errorCode > -200 || errorCode < -299) return undefined;
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" ? trust.failureFor(hostname) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // A same-tab navigation to a different site (search result, link, address bar)
@@ -6104,6 +6237,14 @@ function readNavState(entry: BrowserEntry): BrowserNavState {
     // the panel renders its "enter a URL" empty state and the address bar is
     // blank rather than showing "about:blank".
     url: page.url === "about:blank" ? "" : page.url,
+    // The load failure itself clears with the next load; the certificate that
+    // caused it must stay on screen until then (did-stop-loading follows it).
+    ...(entry.certificateFailure
+      ? {
+          certificateError: entry.certificateFailure,
+          error: `Certificate error: ${entry.certificateFailure.error}`,
+        }
+      : {}),
   };
 }
 

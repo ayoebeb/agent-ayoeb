@@ -1,3 +1,4 @@
+import { DailyUpdateNotice } from "./DailyUpdateNotice";
 import { useQueryClient } from "@tanstack/react-query";
 import { useProjectAvatars } from "../hooks/useProjectAvatars";
 import { paidPlanBadge, useCloudBilling } from "../hooks/useCloudBilling";
@@ -28,6 +29,7 @@ import {
 	GitPullRequest,
 	LoaderCircle,
 	Download,
+	LayoutDashboard,
 	LayoutGrid,
 	Package,
 	Folder,
@@ -75,6 +77,7 @@ import {
 	hasConfiguredOrchestratorAgent,
 	newestActiveOrchestrator,
 	openPRs,
+	type SessionUsageLimit,
 	type WorkspaceSession,
 	type WorkspaceSummary,
 	sortedWorkerSessions,
@@ -91,6 +94,7 @@ import {
 	sessionNeedsInput,
 	type SessionRowMarker,
 } from "../lib/session-presentation";
+import { formatUsageLimitReset } from "../lib/usage-limit";
 import { useCopyToClipboard, useSessionMenuEntries } from "./SessionContextMenuItems";
 import { dropdownMenuKit, MenuEntries, MenuKitContext, type MenuEntry } from "./menu-model";
 import { isArchivedSession } from "../lib/standalone-archive";
@@ -161,6 +165,7 @@ import { captureRendererException } from "../lib/telemetry";
 import { AwakeControl } from "./AwakeControl";
 import { SettingsSaveStatus, useSettingsPage } from "./SettingsDialog";
 import { useUiStore } from "../stores/ui-store";
+import { AppMemoryIndicator } from "./SessionMemoryPanel";
 import { isNewSidebarDesign } from "../lib/new-sidebar-design";
 import { useSidebarOrderStore } from "../stores/sidebar-order-store";
 import { useSessionImportStore } from "../stores/session-import-store";
@@ -178,7 +183,7 @@ import { useCloudSession } from "../lib/cloud-session";
 import type { RemoteHost } from "../hooks/useRemoteHosts";
 import { sessionNavigateTarget } from "../lib/navigate-to-session";
 import { LOCAL_HOST, sessionUiKey } from "../lib/hosts";
-import { useProjectOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
+import { useOrchestratorWaiting, useProjectOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
 import { useProjectAutopilot } from "../hooks/useAutopilot";
 import { autopilotTone } from "../lib/autopilot";
 import { RemoteHostsSection } from "./RemoteHostsSection";
@@ -550,6 +555,7 @@ function useSelection() {
 	const goAutomations = useCallback(() => void navigate({ to: "/automations" }), [navigate]);
 	const goArtifacts = useCallback(() => void navigate({ to: "/artifacts" }), [navigate]);
 	const goUsage = useCallback(() => void navigate({ to: "/usage" }), [navigate]);
+	const goProjects = useCallback(() => void navigate({ to: "/projects" }), [navigate]);
 	const goStandaloneBoard = useCallback(() => void navigate({ to: "/sessions" }), [navigate]);
 	const goGlobalSettings = useCallback(() => openGlobalSettings(), [openGlobalSettings]);
 	// Asking to connect a phone is the consent to turn Connect Mobile on, so the code starts preparing at once.
@@ -577,6 +583,7 @@ function useSelection() {
 		isAutomations: pathname === "/automations",
 		isArtifacts: pathname === "/artifacts",
 		isUsage: pathname === "/usage",
+		isProjects: pathname === "/projects",
 		activeRemoteHostId: params.hostId,
 		activeRemoteProjectId: params.hostId ? params.projectId : undefined,
 		activeRemoteSessionId: params.hostId ? params.sessionId : undefined,
@@ -586,6 +593,7 @@ function useSelection() {
 		goAutomations,
 		goArtifacts,
 		goUsage,
+		goProjects,
 		goStandaloneBoard,
 		// Settings is a modal — open it in place so the current page (session
 		// terminal, board, etc.) stays underneath.
@@ -594,7 +602,7 @@ function useSelection() {
 		goSettings,
 		goProject,
 		goSession,
-	}), [goArtifacts, goAutomations, goUsage, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
+	}), [goArtifacts, goAutomations, goUsage, goProjects, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
 }
 
 /*
@@ -701,7 +709,9 @@ function SessionRowMenuEntries({ session, splitRef, onArchive, onRename }: {
 	const entries = useSessionMenuEntries(session, { onArchive, onRename });
 	const getWorkspaces = useContext(SidebarWorkspacesContext);
 	const { open, addBeside } = useSessionSplitActions(getWorkspaces);
-	const routedSessionId = useParams({ strict: false, select: (params) => ((params as { hostId?: string }).hostId ? undefined : (params as { sessionId?: string }).sessionId) });
+	const routedSessionId = useParams({ strict: false, select: (params) => (params as { sessionId?: string }).sessionId });
+	const routedHostId = useParams({ strict: false, select: (params) => (params as { hostId?: string }).hostId });
+	const routedSession = useMemo(() => ({ sessionId: routedSessionId, hostId: routedHostId }), [routedHostId, routedSessionId]);
 	const selection = useSidebarSelectionStore((state) => state.selection);
 	const split = useSessionSplitStore((state) => state.split);
 	let onSelect: (() => void) | undefined;
@@ -710,7 +720,7 @@ function SessionRowMenuEntries({ session, splitRef, onArchive, onRename }: {
 		if (selection?.kind === "session" && selection.keys.length >= 2 && selection.keys.includes(key)) {
 			onSelect = () => void open(selectedPaneRefs(useSidebarSelectionStore.getState()));
 		} else {
-			const anchor = paneOnScreen(split, getWorkspaces(), routedSessionId);
+			const anchor = paneOnScreen(split, getWorkspaces(), routedSession);
 			const shown = anchor && split?.panes[sessionPaneKey(anchor)] ? split : null;
 			if (anchor && sessionPaneKey(anchor) !== key && !shown?.panes[key]) onSelect = () => void addBeside(anchor, splitRef, "right");
 		}
@@ -814,7 +824,20 @@ const SESSION_MARKER_ICONS = {
 	review: { Icon: CircleAlert, tone: "text-status-in-review" },
 	// Done, so it sits a step below the colours that ask something of you.
 	merged: { Icon: GitMerge, tone: "text-status-merged opacity-70" },
+	// Paused, not failed: the caution tone DESIGN.md gives review/caution states.
+	limit: { Icon: Gauge, tone: "text-status-in-review" },
 } as const satisfies Record<SessionRowMarker, { Icon: unknown; tone: string }>;
+
+// A limit-stopped session says when it can run again, next to its title.
+function UsageLimitRowLabel({ usageLimit }: { usageLimit: SessionUsageLimit }) {
+	const { t } = useTranslation();
+	const time = formatUsageLimitReset(usageLimit.resetsAt);
+	return (
+		<span className="shrink-0 text-2xs text-status-in-review" data-session-usage-limit="">
+			{time ? t("sidebar.usageLimit.resets", { time }) : t("sidebar.usageLimit.resetUnknown")}
+		</span>
+	);
+}
 
 function SessionMarkerIcon({ marker, popped, onPopEnd, ...rest }: {
 	marker: SessionRowMarker;
@@ -966,12 +989,15 @@ export function Sidebar({
 	// Daemon status for the smoke suite's sr-only mirror in the footer. Null when
 	// rendered outside the shell (unit tests) — the mirror simply doesn't render.
 	const daemonStatus = useShellMaybe()?.daemonStatus ?? null;
+	const resourceStatusEnabled = useUiStore((state) => state.resourceStatus);
 	const commandPaletteEnabled = useCommandPaletteEnabled();
 	const settingsPage = useSettingsPage();
 	const setCommandPaletteOpen = useUiStore((s) => s.setCommandPaletteOpen);
 	const developerMode = useUiStore((s) => s.developerMode);
 	// Cloud projects count only while the control plane keeps artifacts, as on the Artifacts page.
 	const cloudArtifacts = useCloudOffering().artifacts;
+	// Orchestrators waiting for the user, on this computer and every connected one.
+	const waitingTotal = useOrchestratorWaiting().waiting.length;
 	const artifactTotal = useMemo(
 		() => artifactCount(groupArtifactsByProject(cloudArtifacts ? workspaces : workspaces.filter((workspace) => workspace.kind !== "cloud"))),
 		[cloudArtifacts, workspaces],
@@ -1291,7 +1317,9 @@ export function Sidebar({
 
 	// Rows read the list when an action runs, so a streamed update re-renders none of them.
 	const sidebarWorkspacesRef = useRef(workspaces);
-	sidebarWorkspacesRef.current = workspaces;
+	// A pane can come from any linked computer, so the split reads both lists.
+	const splitWorkspaces = useMemo(() => (remoteWorkspaces.length ? [...workspaces, ...remoteWorkspaces] : workspaces), [remoteWorkspaces, workspaces]);
+	sidebarWorkspacesRef.current = splitWorkspaces;
 	const getSidebarWorkspaces = useCallback(() => sidebarWorkspacesRef.current, []);
 
 	return (
@@ -1377,6 +1405,16 @@ export function Sidebar({
 					</SidebarGroup>
 				) : null}
 				<SidebarMenu className="mb-3 gap-0.5 group-data-[collapsible=icon]:gap-1">
+					<SidebarMenuItem>
+						<SidebarTopNavRow
+							active={selection.isProjects}
+							icon={<LayoutDashboard aria-hidden="true" />}
+							label={t("projects.navOverview")}
+							onClick={selection.goProjects}
+							tooltip={isCollapsed ? t("projects.navOverview") : undefined}
+							trailing={waitingTotal > 0 ? String(waitingTotal) : undefined}
+						/>
+					</SidebarMenuItem>
 					<SidebarMenuItem>
 						<SidebarTopNavRow
 							active={selection.isAutomations}
@@ -1543,6 +1581,7 @@ export function Sidebar({
 												/>;
 											}}
 											onRetry={onRetryRemoteHosts}
+											onOpenComputers={() => void remoteNavigate({ to: "/machines" })}
 										/>
 										{isIconRail && <CreateProjectListItem />}
 										<div
@@ -1635,12 +1674,14 @@ export function Sidebar({
 					hidden={isIconRail}
 					className="sidebar-expanded-chrome relative flex w-full min-w-46.5 flex-col gap-0.5"
 				>
+					<DailyUpdateNotice tabIndex={isCollapsed ? -1 : 0} />
 					<UpdateStatusRow
 						availableDismissed={updateDismissal.dismissed}
 						onDismissAvailable={updateDismissal.dismiss}
 						status={updateStatus}
 						tabIndex={isCollapsed ? -1 : 0}
 					/>
+					{resourceStatusEnabled && daemonStatus?.state === "ready" && !isCollapsed ? <AppMemoryIndicator /> : null}
 					<CloudSignInRow tabIndex={isCollapsed ? -1 : 0} />
 					<CloudAccountRow tabIndex={isCollapsed ? -1 : 0} />
 					<UpdateInstallSlide
@@ -1853,9 +1894,9 @@ const ProjectItem = memo(function ProjectItem({
 	const requestNewTask = useUiStore((state) => state.requestNewTask);
 	const showGlobalToast = useUiStore((state) => state.showGlobalToast);
 	const projectIsDragging = isDragged;
-	// Projects on this computer can be selected to open their orchestrators side by side.
+	// Projects on any linked computer can be selected to open their orchestrators side by side.
 	const splitRef = useMemo<SessionPaneRef | undefined>(
-		() => (isStandalone || workspace.hostId ? undefined : { kind: "orchestrator", projectId: workspace.id }),
+		() => (isStandalone ? undefined : { kind: "orchestrator", projectId: workspace.id, ...(workspace.hostId ? { hostId: workspace.hostId } : {}) }),
 		[isStandalone, workspace.hostId, workspace.id],
 	);
 	const splitSelected = useSplitSelected("project", splitRef);
@@ -3095,9 +3136,9 @@ const SessionRow = memo(function SessionRow({
 	}, [rename.begin, renamable]);
 	// Owned here so both the hover Archive button and the context menu open the same confirm.
 	const [archiveOpen, setArchiveOpen] = useState(false);
-	// Sessions on this computer can be selected and opened side by side.
+	// Sessions on any linked computer can be selected and opened side by side.
 	const splitRef = useMemo<SessionPaneRef | undefined>(
-		() => (session.hostId ? undefined : { kind: "session", sessionId: session.id, projectId: session.workspaceId }),
+		() => ({ kind: "session", sessionId: session.id, projectId: session.workspaceId, ...(session.hostId ? { hostId: session.hostId } : {}) }),
 		[session.hostId, session.id, session.workspaceId],
 	);
 	const splitSelected = useSplitSelected("session", splitRef);
@@ -3256,6 +3297,7 @@ const SessionRow = memo(function SessionRow({
 								>
 									{session.title}
 								</span>
+								{session.usageLimit ? <UsageLimitRowLabel usageLimit={session.usageLimit} /> : null}
 								{hostLabel ? <Badge variant="outline" className="h-4 min-w-0 max-w-1/2 shrink justify-start px-1.5 text-2xs"><span className="truncate">{hostLabel}</span></Badge> : null}
 							</span>
 						</Pressable>

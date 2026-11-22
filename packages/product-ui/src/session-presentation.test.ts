@@ -44,6 +44,7 @@ describe("session presentation", () => {
 		["review_pending", "pending"],
 		["working", "working"],
 		["terminated", "done"],
+		["usage_limit", "working"],
 	] as const)("maps %s to the %s attention zone", (status, zone) => {
 		expect(attentionZone(status)).toBe(zone);
 	});
@@ -54,6 +55,7 @@ describe("session presentation", () => {
 		["needs_input", "text-status-needs-you", "bg-status-needs-you"],
 		["exited", "text-status-exited", "bg-status-exited"],
 		["no_signal", "text-status-unknown", "bg-status-unknown"],
+		["usage_limit", "text-status-in-review", "bg-status-in-review"],
 		["ci_failed", "text-status-exited", "bg-status-exited"],
 		["changes_requested", "text-status-needs-you", "bg-status-needs-you"],
 		["review_pending", "text-status-in-review", "bg-status-in-review"],

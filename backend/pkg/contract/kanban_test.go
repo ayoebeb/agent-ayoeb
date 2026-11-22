@@ -351,6 +351,45 @@ func TestDeriveKanbanPresentationInterruptedArtifactSession(t *testing.T) {
 	}
 }
 
+// A worker stopped on the provider's usage limit says so in every column a live
+// worker can sit in, ahead of the pull request phrases it cannot act on.
+func TestDeriveKanbanPresentationUsageLimit(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(3600, 0)
+	limited := func(activity contract.ActivityState) contract.KanbanSessionFacts {
+		session := sessionAt(activity)
+		session.UsageLimited = true
+		return session
+	}
+	failingCI := []contract.KanbanPRFacts{{CI: contract.CIFailing}}
+	draft := []contract.KanbanPRFacts{{Draft: true}}
+	open := []contract.KanbanPRFacts{{}}
+	for _, tc := range []struct {
+		name    string
+		session contract.KanbanSessionFacts
+		prs     []contract.KanbanPRFacts
+	}{
+		{"building", limited(contract.ActivityIdle), nil},
+		{"validating a draft", limited(contract.ActivityIdle), draft},
+		{"in review with failing CI", limited(contract.ActivityIdle), failingCI},
+		{"in review", limited(contract.ActivityIdle), open},
+	} {
+		got := contract.DeriveKanbanPresentation(tc.session, tc.prs, now, testGrace)
+		if got.DisplayStatus != contract.DisplayUsageLimit {
+			t.Errorf("%s: display status = %q, want %q", tc.name, got.DisplayStatus, contract.DisplayUsageLimit)
+		}
+	}
+	artifact := limited(contract.ActivityIdle)
+	artifact.HasArtifactOutput = true
+	if got := contract.DeriveKanbanPresentation(artifact, nil, now, testGrace); got.DisplayStatus != contract.DisplayUsageLimit {
+		t.Errorf("artifact worker: display status = %q", got.DisplayStatus)
+	}
+	// A new turn supersedes the stop: a running worker is just working.
+	if got := contract.DeriveKanbanPresentation(limited(contract.ActivityActive), nil, now, testGrace); got.DisplayStatus != contract.DisplayWorking {
+		t.Errorf("running worker: display status = %q", got.DisplayStatus)
+	}
+}
+
 func TestDeriveKanbanPresentationBuilding(t *testing.T) {
 	t.Parallel()
 	silent := contract.SessionFacts{

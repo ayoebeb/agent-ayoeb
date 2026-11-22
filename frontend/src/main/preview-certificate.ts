@@ -1,5 +1,6 @@
 import { generateKeyPairSync, randomBytes, sign, X509Certificate } from "node:crypto";
 import type { Session } from "electron";
+import type { CertificateTrustStore } from "./browser-certificate-trust";
 
 // Remote previews reach the browser panel over HTTPS on loopback so Chromium
 // speaks HTTP/2 to them. Over HTTP/1.1 it opens at most six connections per
@@ -26,13 +27,25 @@ const trusted = new WeakSet<CertificateVerifier>();
 
 // Trusts the preview certificate in one browser session. Every other host and
 // certificate keeps Chromium's own verification (-3).
-export function trustPreviewCertificate(session: CertificateVerifier): void {
+// `userTrust` holds the certificates the person chose to trust in the Browser
+// panel: it accepts exactly one (host, fingerprint) pair each and records why
+// every other certificate was rejected so the panel can say so.
+export function trustPreviewCertificate(
+	session: CertificateVerifier,
+	userTrust?: Pick<CertificateTrustStore, "decide">,
+): void {
 	if (trusted.has(session)) return;
 	trusted.add(session);
 	session.setCertificateVerifyProc((request, callback) => {
 		const preview = PREVIEW_HOST.test(request.hostname) && certificate !== undefined &&
 			pemBody(request.certificate.data) === pemBody(certificate.cert);
-		callback(preview ? 0 : -3);
+		if (preview) return callback(0);
+		const decision = userTrust?.decide({
+			hostname: request.hostname,
+			certificateData: request.certificate.data,
+			verificationResult: request.verificationResult,
+		});
+		callback(decision?.result ?? -3);
 	});
 }
 

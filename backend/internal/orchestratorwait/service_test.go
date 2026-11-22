@@ -358,8 +358,8 @@ func TestNormalizeQuestion(t *testing.T) {
 	for _, tt := range []struct{ name, in, want string }{
 		{"collapses whitespace and breaks", "  Ship\n\nit \t now?  ", "Ship it now?"},
 		{"turns control characters into spaces", "a\x00b\x1b[31mc", "a b [31mc"},
-		{"drops bidirectional controls", "pay‮txt.exe", "pay txt.exe"},
-		{"line separators", "a b c", "a b c"},
+		{"drops bidirectional controls", "pay\u202etxt.exe", "pay txt.exe"},
+		{"line separators", "a\u2028b\u2029c", "a b c"},
 		{"empty", " \n ", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

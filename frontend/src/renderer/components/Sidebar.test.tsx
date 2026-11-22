@@ -33,6 +33,7 @@ import { sessionInterfaceTransitionStatus } from "../test/interface-transition-f
 import { useUiStore } from "../stores/ui-store";
 import { aoBridge } from "../lib/bridge";
 import { useSidebarOrderStore } from "../stores/sidebar-order-store";
+import { useSidebarSelectionStore } from "../stores/sidebar-selection-store";
 import { useSessionImportStore } from "../stores/session-import-store";
 import { sessionInterfaceTransitionQueryKey } from "../hooks/useSessionInterfaceTransition";
 import { resetSessionPreviewWarmth } from "../hooks/useSessionPreviewHover";
@@ -193,7 +194,10 @@ vi.mock("../hooks/useSettings", () => ({
 // Which orchestrators are waiting for the user comes from the daemon; these tests
 // decide it per project instead.
 const { orchestratorWaitingMock } = vi.hoisted(() => ({ orchestratorWaitingMock: vi.fn() }));
-vi.mock("../hooks/useOrchestratorWaiting", () => ({ useProjectOrchestratorWaiting: orchestratorWaitingMock }));
+vi.mock("../hooks/useOrchestratorWaiting", () => ({
+	useProjectOrchestratorWaiting: orchestratorWaitingMock,
+	useOrchestratorWaiting: () => ({ waiting: [] }),
+}));
 
 // Autopilot runs come from the daemon too; these tests decide them per project.
 const { autopilotMock } = vi.hoisted(() => ({ autopilotMock: vi.fn() }));
@@ -682,6 +686,32 @@ describe("Sidebar", () => {
 			to: "/host/$hostId/project/$projectId/session/$sessionId",
 			params: { hostId: "box-a", projectId: "proj-1", sessionId: "proj-1-1" },
 		});
+	});
+
+	it("Ctrl/Cmd-clicking sessions on different computers selects them for one split instead of opening them", () => {
+		mockParams.hostId = "box-b";
+		mockParams.projectId = "proj-1";
+		mockParams.sessionId = "proj-1-1";
+		renderSidebar({
+			workspaces: [{ ...workspace, sessions: [session] }],
+			remoteHosts: [
+				{ hostId: "box-a", label: "Host A", url: "http://box-a:3001", status: "connected" },
+				{ hostId: "box-b", label: "Host B", url: "http://box-b:3001", status: "connected" },
+			],
+			remoteWorkspaces: [
+				{ ...workspace, hostId: "box-a", sessions: [{ ...session, hostId: "box-a", title: "Task on A" }] },
+				{ ...workspace, hostId: "box-b", sessions: [{ ...session, hostId: "box-b", title: "Task on B" }] },
+			],
+		});
+		navigateMock.mockClear();
+		const remoteRows = within(screen.getByTestId("sidebar-projects-scroller")).getAllByTestId("remote-session-row");
+		// The open session (on box-b) seeds the selection; Ctrl-click adds the one on box-a.
+		fireEvent.click(remoteRows[0], { metaKey: true }); // this suite mocks macOS: Cmd is the modifier
+		expect(navigateMock).not.toHaveBeenCalled();
+		const selection = useSidebarSelectionStore.getState().selection;
+		expect(selection?.keys).toEqual(["session:remote:box-b:proj-1-1", "session:remote:box-a:proj-1-1"]);
+		expect(useSidebarSelectionStore.getState().refs["session:remote:box-a:proj-1-1"]).toMatchObject({ kind: "session", hostId: "box-a", sessionId: "proj-1-1" });
+		useSidebarSelectionStore.getState().clear();
 	});
 
 	it("shows the cloud sign-in entry point while signed out", () => {

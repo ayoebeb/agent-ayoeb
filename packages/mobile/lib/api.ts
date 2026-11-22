@@ -1016,7 +1016,8 @@ export type NotificationType =
 	| "pr_merged"
 	| "pr_closed_unmerged"
 	| "review_completed"
-	| "review_changes_requested";
+	| "review_changes_requested"
+	| "usage_limit";
 
 export type NotificationRecord = {
 	id: string;

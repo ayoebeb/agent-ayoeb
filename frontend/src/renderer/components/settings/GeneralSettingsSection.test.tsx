@@ -3,10 +3,12 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../../hooks/useSettings";
+import { useUiStore } from "../../stores/ui-store";
 
-const { settingsMock, updateRetentionMock, updateOrchestratorWaitingMock, updateAutopilotMock, setSoundMock } = vi.hoisted(() => ({
+const { settingsMock, updateRetentionMock, updateUsageLimitResumeMock, updateOrchestratorWaitingMock, updateAutopilotMock, setSoundMock } = vi.hoisted(() => ({
 	settingsMock: vi.fn(),
 	updateRetentionMock: vi.fn(),
+	updateUsageLimitResumeMock: vi.fn(),
 	updateOrchestratorWaitingMock: vi.fn(),
 	updateAutopilotMock: vi.fn(),
 	setSoundMock: vi.fn(),
@@ -18,6 +20,7 @@ vi.mock("../../hooks/useSettings", () => ({
 	useUpdateSessionInterface: () => idle,
 	useUpdateVersionRefresh: () => idle,
 	useUpdateSessionRetention: () => ({ update: updateRetentionMock, saving: false, error: undefined }),
+	useUpdateUsageLimitResume: () => ({ update: updateUsageLimitResumeMock, saving: false, error: undefined }),
 	useUpdateOrchestratorWaiting: () => ({ update: updateOrchestratorWaitingMock, saving: false, error: undefined }),
 	useUpdateAutopilotMaxIterations: () => ({ update: updateAutopilotMock, saving: false, error: undefined }),
 }));
@@ -76,6 +79,7 @@ function settings(overrides: Partial<Settings>): Settings {
 beforeEach(() => {
 	settingsMock.mockReset();
 	updateRetentionMock.mockReset();
+	updateUsageLimitResumeMock.mockReset();
 	updateOrchestratorWaitingMock.mockReset();
 	updateAutopilotMock.mockReset();
 	setSoundMock.mockReset().mockResolvedValue({});
@@ -205,5 +209,57 @@ describe("archived session retention", () => {
 		renderSection();
 
 		expect(screen.queryByRole("button", { name: "Delete archived sessions" })).not.toBeInTheDocument();
+	});
+});
+
+describe("continuing sessions after a usage limit", () => {
+	it("turns the automatic resume off and keeps the cap", async () => {
+		settingsMock.mockReturnValue(settings({ usageLimitAutoResume: true, usageLimitMaxResumes: 3 }));
+		renderSection();
+
+		await userEvent.click(screen.getByRole("switch", { name: "Continue after a usage limit" }));
+
+		expect(updateUsageLimitResumeMock).toHaveBeenCalledWith({ enabled: false, maxConcurrent: 3 });
+	});
+
+	it("saves the most sessions that continue at once", async () => {
+		settingsMock.mockReturnValue(settings({ usageLimitAutoResume: true, usageLimitMaxResumes: 3 }));
+		renderSection();
+
+		const menu = screen.getByRole("button", { name: "Most that continue at once" });
+		expect(menu).toHaveTextContent("3");
+		await userEvent.click(menu);
+		await userEvent.click(await screen.findByRole("menuitem", { name: "2" }));
+
+		expect(updateUsageLimitResumeMock).toHaveBeenCalledWith({ enabled: true, maxConcurrent: 2 });
+	});
+
+	it("hides the cap while the setting is off", () => {
+		settingsMock.mockReturnValue(settings({ usageLimitAutoResume: false, usageLimitMaxResumes: 3 }));
+		renderSection();
+
+		expect(screen.getByRole("switch", { name: "Continue after a usage limit" })).not.toBeChecked();
+		expect(screen.queryByRole("button", { name: "Most that continue at once" })).not.toBeInTheDocument();
+	});
+
+	it("hides the control on a daemon that cannot apply it", () => {
+		settingsMock.mockReturnValue(settings({}));
+		renderSection();
+
+		expect(screen.queryByRole("switch", { name: "Continue after a usage limit" })).not.toBeInTheDocument();
+	});
+});
+
+describe("RAM and CPU status setting", () => {
+	it("is on by default and hides the corner status when switched off", async () => {
+		settingsMock.mockReturnValue(settings({}));
+		useUiStore.setState({ resourceStatus: true });
+		renderSection();
+
+		const toggle = screen.getByRole("switch", { name: "Show RAM and CPU status" });
+		expect(toggle).toBeChecked();
+		await userEvent.click(toggle);
+		expect(useUiStore.getState().resourceStatus).toBe(false);
+		expect(toggle).not.toBeChecked();
 	});
 });

@@ -108,7 +108,10 @@ func TestEmbeddedSessionGuidanceDocumentsCanonicalInAppLinks(t *testing.T) {
 		"ao://sessions/{project-id}/{session-id}",
 		"Never use display names as identity",
 		"Encode either ID with URL percent encoding",
-		"Do not append query strings, fragments, action names, credentials, authorities, or extra path segments",
+		// A session link may end in one heading anchor; nothing else may be appended.
+		"append `#{anchor}` to the session link: `ao://sessions/{project-id}/{session-id}#{anchor}`",
+		"heading in lowercase, punctuation removed, spaces turned into hyphens",
+		"Do not append query strings, other fragments, action names, credentials, authorities, or extra path segments",
 		"only inside a currently running Orchestrator desktop app",
 		"never sends a message, executes a command, or performs another action",
 	} {

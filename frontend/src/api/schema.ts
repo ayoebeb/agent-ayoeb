@@ -843,6 +843,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/autopilot/items/{eventId}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the agent to undo one of its recorded Autopilot decisions */
+        post: operations["undoAutopilotDecision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/autopilot/stop": {
         parameters: {
             query?: never;
@@ -1994,6 +2011,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/jira": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report whether a project is connected to Jira (never returns the token) */
+        get: operations["getProjectJira"];
+        /** Verify and store a project's Jira connection */
+        put: operations["connectProjectJira"];
+        post?: never;
+        /** Remove a project's Jira connection, token and ticket links */
+        delete: operations["disconnectProjectJira"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/jira/board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the project's Jira tickets grouped into its board columns */
+        get: operations["getProjectJiraBoard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/jira/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Jira credentials, project and query without saving them */
+        post: operations["testProjectJira"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/jira/tickets/{issueKey}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send a Jira ticket to the project's orchestrator as a new task */
+        post: operations["startProjectJiraTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/permission-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the tool permissions users chose "Always allow" for in this project */
+        get: operations["listProjectPermissionRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/permission-rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a remembered permission rule for future sessions and live Claude Code sessions of the project */
+        delete: operations["revokeProjectPermissionRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/permissions": {
         parameters: {
             query?: never;
@@ -2041,6 +2162,57 @@ export interface paths {
         put?: never;
         /** Create a cue for a project */
         post: operations["createCue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/live-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the dev servers running for a project, with an HTTP health reading each */
+        get: operations["listLiveServers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/live-servers/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restart a dev server that AO started from .ao/launch.json */
+        post: operations["restartLiveServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/live-servers/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop one running dev server */
+        post: operations["stopLiveServer"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4623,6 +4795,23 @@ export interface paths {
         patch: operations["updateSessionRetention"];
         trace?: never;
     };
+    "/api/v1/settings/usage-limit-resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Choose whether AO continues sessions after a usage limit resets, and how many at once */
+        patch: operations["updateUsageLimitResume"];
+        trace?: never;
+    };
     "/api/v1/settings/version-refresh": {
         parameters: {
             query?: never;
@@ -4895,6 +5084,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/usage/account-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the accounts' limits and a session's accounts, read-only, for another computer's desktop */
+        get: operations["getUsageAccountLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage/limit-history": {
         parameters: {
             query?: never;
@@ -5029,6 +5235,10 @@ export interface components {
             /** @enum {string} */
             reporting_owner?: "http";
             requestId?: string;
+        };
+        AccountLimitsResponse: {
+            accounts: components["schemas"]["AgentAccountResponse"][];
+            session?: components["schemas"]["SessionAgentAccountsResponse"];
         };
         AcknowledgeSessionInterfaceTransitionNoticeResponse: {
             ok: boolean;
@@ -6224,6 +6434,19 @@ export interface components {
             callerSessionId?: string;
             deleteArtifacts?: boolean;
         };
+        ControllersListProjectPermissionRulesResponse: {
+            rules: components["schemas"]["ControllersProjectPermissionRuleResponse"][];
+        };
+        ControllersProjectPermissionRuleResponse: {
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            /** @enum {string} */
+            kind: "exact" | "command" | "tool" | "server";
+            label: string;
+            sourceSessionId?: string;
+            tool: string;
+        };
         ControllersRemoteHostAccountTokenResponse: {
             hostId: string;
             hostKey: string;
@@ -6276,7 +6499,7 @@ export interface components {
             createdAt: string;
             displayName?: string;
             /** @enum {string} */
-            displayStatus: "Working" | "Blocked" | "Exited" | "No signal" | "Interrupted" | "Awaiting PR" | "Fixing CI failures" | "Addressing comments" | "Needs review" | "Review scheduled" | "Reviewing" | "Review failed" | "Review pending" | "Draft" | "CI failing" | "Commented" | "Changes requested" | "Needs human review" | "Mergeable" | "Approved" | "Merged" | "Closed without merge" | "Terminated";
+            displayStatus: "Working" | "Blocked" | "Exited" | "No signal" | "Interrupted" | "Usage limit" | "Awaiting PR" | "Fixing CI failures" | "Addressing comments" | "Needs review" | "Review scheduled" | "Reviewing" | "Review failed" | "Review pending" | "Draft" | "CI failing" | "Commented" | "Changes requested" | "Needs human review" | "Mergeable" | "Approved" | "Merged" | "Closed without merge" | "Terminated";
             harness?: string;
             /** Format: date-time */
             hibernatedAt?: null | string;
@@ -6319,7 +6542,7 @@ export interface components {
             scmStatus?: "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "commented" | "approved" | "mergeable" | "merged";
             staleBinary?: components["schemas"]["SessionStaleBinary"];
             /** @enum {string} */
-            status: "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "commented" | "approved" | "mergeable" | "merged" | "needs_input" | "exited" | "idle" | "terminated" | "no_signal";
+            status: "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "commented" | "approved" | "mergeable" | "merged" | "needs_input" | "exited" | "idle" | "terminated" | "no_signal" | "usage_limit";
             /** @enum {string} */
             statusReadiness: "checking" | "ready" | "unavailable";
             terminalGeneration?: string;
@@ -6328,6 +6551,7 @@ export interface components {
             terminateOnPrMerge: boolean;
             /** Format: date-time */
             updatedAt: string;
+            usageLimit?: components["schemas"]["SessionUsageLimit"];
             /** @enum {string} */
             workspaceCleanup?: "pending" | "removed" | "preserved_dirty" | "failed" | "not_applicable";
             workspaceCleanupReportOnly?: boolean;
@@ -7094,6 +7318,89 @@ export interface components {
             /** @description For command cues, the normal shell terminal that received the command. */
             shellTerminal?: components["schemas"]["ShellTerminalResponse"];
         };
+        JiraBoard: {
+            accountId?: string;
+            boardName?: string;
+            columns: components["schemas"]["JiraBoardColumn"][];
+            /** Format: date-time */
+            fetchedAt: string;
+            jql: string;
+            projectKey?: string;
+            siteUrl: string;
+            total: number;
+            truncated?: boolean;
+        };
+        JiraBoardColumn: {
+            name: string;
+            other?: boolean;
+            tickets: components["schemas"]["JiraTicket"][];
+        };
+        JiraConnectRequest: {
+            /** @description Atlassian API token. Write-only: it is stored locally and never returned. Empty keeps the stored token. */
+            apiToken?: string;
+            /** @description Jira board id. Omit to use the project's first board. */
+            boardId?: number;
+            /** @description Email address of the Atlassian account that owns the API token. */
+            email: string;
+            /** @description Optional JQL that chooses the tickets. Overrides the project key's default query. */
+            jql?: string;
+            /** @description Jira project key, for example YIA. Optional, empty shows every ticket assigned to you in any Jira project. */
+            projectKey?: string;
+            /** @description Jira Cloud site, for example yourcompany.atlassian.net. */
+            siteUrl: string;
+        };
+        JiraConnection: {
+            accountName?: string;
+            boardId?: number;
+            connected: boolean;
+            /** Format: date-time */
+            connectedAt?: null | string;
+            email?: string;
+            jql?: string;
+            projectKey?: string;
+            siteUrl?: string;
+        };
+        JiraStartResult: {
+            duplicate?: boolean;
+            issueKey: string;
+            orchestratorId: string;
+            spawned?: boolean;
+        };
+        JiraTestResult: {
+            accountName: string;
+            jql: string;
+            projectName?: string;
+            ticketCount: number;
+        };
+        JiraTicket: {
+            acceptanceCriteria?: string;
+            assignee?: components["schemas"]["JiraTicketUser"];
+            description?: string;
+            issueType?: string;
+            key: string;
+            labels?: string[];
+            priority?: string;
+            sessions?: components["schemas"]["JiraTicketSession"][];
+            status: components["schemas"]["JiraTicketStatus"];
+            summary: string;
+            /** Format: date-time */
+            updatedAt?: null | string;
+            url: string;
+        };
+        JiraTicketSession: {
+            sessionId: string;
+            /** Format: date-time */
+            startedAt: string;
+        };
+        JiraTicketStatus: {
+            category: string;
+            id: string;
+            name: string;
+        };
+        JiraTicketUser: {
+            accountId: string;
+            displayName: string;
+        };
         KillReviewResponse: {
             reviewerHandleId: string;
             reviewerHarness?: string;
@@ -7158,6 +7465,9 @@ export interface components {
             path: string;
             /** @description True when the listing hit the entry cap and more subdirectories exist. */
             truncated?: boolean;
+        };
+        ListLiveServersResponse: {
+            servers: components["schemas"]["LiveServerResponse"][];
         };
         ListNotificationsResponse: {
             nextCursor?: string;
@@ -7237,6 +7547,48 @@ export interface components {
             /** @description True only when the tree was read from the requested immutable snapshot. */
             snapshot?: boolean;
             truncated: boolean;
+        };
+        LiveServerActionRequest: {
+            /** @description The key of a server from the list. */
+            key: string;
+        };
+        LiveServerEnvelope: {
+            server: components["schemas"]["LiveServerResponse"];
+        };
+        LiveServerResponse: {
+            canRestart: boolean;
+            command?: string;
+            error?: string;
+            /**
+             * @description up when the server answered an HTTP request within a few seconds.
+             * @enum {string}
+             */
+            health: "up" | "down";
+            /** Format: int64 */
+            healthMs: number;
+            healthNote?: string;
+            /** @description Stable identifier within the project: managed:<sessionId> or detected:<port>. */
+            key: string;
+            logs: string[];
+            name: string;
+            outputAvailable: boolean;
+            pid?: number;
+            port: number;
+            sessionId: string;
+            sessionName?: string;
+            /**
+             * @description managed servers were started by AO from .ao/launch.json; detected ones by a worker on its own.
+             * @enum {string}
+             */
+            source: "managed" | "detected";
+            /** Format: date-time */
+            startedAt?: null | string;
+            /** @description Lifecycle state: starting, ready, stopping or failed. */
+            state: string;
+            /** @description PTY handle the terminal mux attaches to; present only for managed servers. */
+            terminalId?: string;
+            url: string;
+            workingDir?: string;
         };
         MarkAllNotificationsReadRequest: {
             /** @description Acknowledge exactly these notifications. Omit to acknowledge every unread notification; paginating clients should send the ids they actually rendered so later pages stay unread. */
@@ -7861,7 +8213,11 @@ export interface components {
             agentResponse: string;
             /** Format: date-time */
             at: string;
+            /** @description Why a failed turn failed, such as a usage-limit message. */
+            error?: string;
             harness?: string;
+            /** @description The turn's state when it did not complete: failed, interrupted or running. */
+            state?: string;
             userRequest: string;
         };
         SessionImportCandidate: {
@@ -8110,6 +8466,34 @@ export interface components {
             startedAt: string;
             tool: string;
         };
+        SessionUsageLimit: {
+            /** @description The provider's message for the stop. */
+            message: string;
+            /**
+             * Format: date-time
+             * @description When the limit window resets; absent when unknown.
+             */
+            resetsAt?: null | string;
+            /**
+             * @description What AO will do: continue after the reset (scheduled), wait for a free resume slot (waiting), or leave it alone (off).
+             * @enum {string}
+             */
+            resume: "scheduled" | "waiting" | "off";
+            /**
+             * @description Why AO will not continue the session by itself.
+             * @enum {string}
+             */
+            resumeOffReason?: "disabled" | "unknown_reset" | "cancelled" | "retry_scheduled" | "repeated" | "unavailable";
+            /**
+             * Format: date-time
+             * @description When the turn stopped.
+             */
+            stoppedAt: string;
+            /** @description The turn that stopped on the limit. */
+            turnId: string;
+            /** @description The limit that was hit, in the provider's words, such as 5-hour or weekly. */
+            window?: string;
+        };
         SessionWait: {
             /** @enum {string} */
             reason: "working" | "command" | "approval" | "starting" | "reviewer" | "resume";
@@ -8283,6 +8667,10 @@ export interface components {
             /** @description Days an archived session whose worktree is released is kept before the daemon deletes it permanently; 0 keeps it. */
             sessionRetentionDays: number;
             trackerIntakeEnabled: boolean;
+            /** @description When a session stops on the provider's usage limit, AO continues it after the limit resets. */
+            usageLimitAutoResume: boolean;
+            /** @description How many sessions AO continues at once after a usage limit resets, so they do not all spend the next window together. */
+            usageLimitMaxResumes: number;
             /** @description After a harness update, idle open sessions restart on the new release instead of running the old one until they happen to restart. */
             versionRefresh: boolean;
         };
@@ -8840,6 +9228,12 @@ export interface components {
         UpdateShellTerminalRequest: {
             /** @description New tab title for the shell terminal. Trimmed; must be non-empty. */
             title: string;
+        };
+        UpdateUsageLimitResumeRequest: {
+            /** @description Continue sessions stopped on a usage limit once it resets. */
+            enabled: null | boolean;
+            /** @description Most continued turns that run at once. */
+            maxConcurrent: null | number;
         };
         UpdateVersionRefreshRequest: {
             enabled: null | boolean;
@@ -11996,6 +12390,74 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    undoAutopilotDecision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Parked item identifier, e.g. ape_1. */
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolveAutopilotItemResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15876,6 +16338,625 @@ export interface operations {
             };
         };
     };
+    getProjectJira: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraConnection"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    connectProjectJira: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JiraConnectRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraConnection"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    disconnectProjectJira: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getProjectJiraBoard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraBoard"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    testProjectJira: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JiraConnectRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraTestResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startProjectJiraTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+                /** @description Jira ticket key, for example YIA-123. */
+                issueKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraStartResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listProjectPermissionRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListProjectPermissionRulesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    revokeProjectPermissionRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+                /** @description Remembered permission rule identifier. */
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     forgetProjectPermissions: {
         parameters: {
             query?: never;
@@ -16134,6 +17215,171 @@ export interface operations {
             };
             /** @description Request Entity Too Large */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLiveServers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project whose running dev servers are listed. */
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListLiveServersResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    restartLiveServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project whose running dev servers are listed. */
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveServerActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveServerEnvelope"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopLiveServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project whose running dev servers are listed. */
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveServerActionRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26498,6 +27744,57 @@ export interface operations {
             };
         };
     };
+    updateUsageLimitResume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUsageLimitResumeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     updateVersionRefresh: {
         parameters: {
             query?: never;
@@ -27419,6 +28716,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TerminalShellCheckResponse"];
+                };
+            };
+        };
+    };
+    getUsageAccountLimits: {
+        parameters: {
+            query?: {
+                /** @description Also return the account this session runs under. */
+                sessionId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLimitsResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };

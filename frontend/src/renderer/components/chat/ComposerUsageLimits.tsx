@@ -8,6 +8,8 @@
  * carries the reset countdowns and the pace line in the Limits tab's words.
  *
  * It follows the account the session runs under, else the default login. A
+ * session on another computer shows that computer's limits, read from its own
+ * daemon and named in the tooltip. A
  * failed refresh keeps the last numbers and says how old they are, as the
  * Limits tab does. The wrapper only takes the room left in the row, so a narrow
  * composer drops the bars and then the whole readout before the model or the
@@ -18,6 +20,8 @@ import { Fragment } from "react";
 import { TriangleAlert } from "@/components/app-icons";
 import { useTranslation } from "react-i18next";
 import { agentAccountName, useAgentAccounts, useSessionAgentAccounts, type AgentAccount, type AgentAccountLimitWindow } from "../../hooks/useAgentAccounts";
+import { useHostAccountLimits } from "../../hooks/useHostAccountLimits";
+import { useHostConnection } from "../../hooks/useHostConnection";
 import { useNow } from "../../hooks/useNow";
 import { agentTone } from "../../lib/agent-tone";
 import { formatRelativeTime } from "../../lib/usage-format";
@@ -46,16 +50,58 @@ export function sessionClaudeAccount(accounts: readonly AgentAccount[], boundId:
 	return claude.find((account) => account.id === boundId) ?? claude[0];
 }
 
-export function ComposerUsageLimits({ harness, sessionId }: { harness?: string; sessionId?: string }) {
-	const shown = harness === CLAUDE_HARNESS;
-	const accounts = useAgentAccounts(shown);
-	const boundSessionId = shown ? sessionId : undefined;
-	const binding = useSessionAgentAccounts(boundSessionId);
-	if (!shown) return null;
+export function ComposerUsageLimits({ harness, sessionId, hostId }: { harness?: string; sessionId?: string; hostId?: string }) {
+	if (harness !== CLAUDE_HARNESS) return null;
+	// A session on another computer reads that computer's daemon; the accounts
+	// routes are not reachable there, so it has its own read-only query.
+	return hostId ? <RemoteComposerUsageLimits hostId={hostId} sessionId={sessionId} /> : <LocalComposerUsageLimits sessionId={sessionId} />;
+}
+
+function LocalComposerUsageLimits({ sessionId }: { sessionId?: string }) {
+	const accounts = useAgentAccounts();
+	const binding = useSessionAgentAccounts(sessionId);
 
 	// Wait for the session's own account rather than flash the default one's numbers.
-	const loading = (!accounts.data && accounts.isPending) || (Boolean(boundSessionId) && binding.isPending);
-	const account = accounts.data ? sessionClaudeAccount(accounts.data, binding.data?.claude) : undefined;
+	const loading = (!accounts.data && accounts.isPending) || (Boolean(sessionId) && binding.isPending);
+	return (
+		<ComposerLimits
+			loading={loading}
+			accounts={accounts.data}
+			boundAccountId={binding.data?.claude}
+			// The query keeps its last data when a refetch fails; say the numbers are old.
+			refreshFailed={Boolean(accounts.error)}
+		/>
+	);
+}
+
+/**
+ * The limits of the Claude account the session's computer uses. They only show
+ * while that computer is connected and its last read succeeded, so an offline
+ * computer shows nothing rather than numbers that may be hours old.
+ */
+function RemoteComposerUsageLimits({ hostId, sessionId }: { hostId: string; sessionId?: string }) {
+	const limits = useHostAccountLimits(hostId, sessionId);
+	const { label } = useHostConnection(hostId);
+	if (!limits.connected || (!limits.data && !limits.isPending)) return null;
+	return (
+		<ComposerLimits
+			loading={limits.isPending}
+			accounts={limits.data?.accounts}
+			boundAccountId={limits.data?.session?.claude}
+			refreshFailed={false}
+			computerName={label}
+		/>
+	);
+}
+
+function ComposerLimits({ loading, accounts, boundAccountId, refreshFailed, computerName }: {
+	loading: boolean;
+	accounts: readonly AgentAccount[] | undefined;
+	boundAccountId: string | undefined;
+	refreshFailed: boolean;
+	computerName?: string;
+}) {
+	const account = accounts ? sessionClaudeAccount(accounts, boundAccountId) : undefined;
 	const windows = account?.limits?.windows ?? [];
 	const shownWindows = WINDOWS.flatMap((entry) => {
 		const window = windows.find((candidate) => candidate.id === entry.id);
@@ -71,9 +117,9 @@ export function ComposerUsageLimits({ harness, sessionId }: { harness?: string; 
 				<UsageReadout
 					account={account}
 					windows={shownWindows}
-					// The query keeps its last data when a refetch fails; say the numbers are old.
-					refreshFailed={Boolean(accounts.error)}
-					namesAccount={(accounts.data ?? []).filter((candidate) => candidate.provider === "claude").length > 1}
+					refreshFailed={refreshFailed}
+					namesAccount={(accounts ?? []).filter((candidate) => candidate.provider === "claude").length > 1}
+					computerName={computerName}
 				/>
 			)}
 		</div>
@@ -82,11 +128,12 @@ export function ComposerUsageLimits({ harness, sessionId }: { harness?: string; 
 
 type ShownWindow = (typeof WINDOWS)[number] & { window: AgentAccountLimitWindow };
 
-function UsageReadout({ account, windows, refreshFailed, namesAccount }: {
+function UsageReadout({ account, windows, refreshFailed, namesAccount, computerName }: {
 	account: AgentAccount;
 	windows: ShownWindow[];
 	refreshFailed: boolean;
 	namesAccount: boolean;
+	computerName?: string;
 }) {
 	const { t, i18n } = useTranslation();
 	const now = useNow(30_000);
@@ -153,6 +200,7 @@ function UsageReadout({ account, windows, refreshFailed, namesAccount }: {
 					</div>
 				</TooltipTrigger>
 				<TooltipContent side="top" className={cn(TOOLTIP_SURFACE, "max-w-80")}>
+					{computerName ? <p className="mb-1.5 truncate font-medium">{t("usage.composer.onComputer", { name: computerName })}</p> : null}
 					{namesAccount ? <p className="mb-1.5 truncate text-muted-foreground">{agentAccountName(account, t)}</p> : null}
 					<div className="grid grid-cols-[auto_auto_auto] items-baseline gap-x-3 gap-y-1">
 						{readings.map((reading) => (

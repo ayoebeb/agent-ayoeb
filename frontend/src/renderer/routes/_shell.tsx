@@ -94,8 +94,7 @@ import { useAppMenuAvailable } from "../hooks/useAppMenuCommand";
 import { useAppShortcut } from "../hooks/useAppShortcut";
 import { recordManualWorkerOpen, recordSessionSurface } from "../lib/session-management-telemetry";
 import { SessionSplitView, useSessionRowDropTarget, type SessionPaneViewProps } from "../components/SessionSplitView";
-import { findLocalSession } from "../hooks/useSessionSplitActions";
-import { paneKeyForSession, sessionPaneKey } from "../lib/session-split";
+import { routedPaneKeyOf, useSplitWorkspaces } from "../hooks/useSplitWorkspaces";
 import { useSessionSplitStore } from "../stores/session-split-store";
 
 const SHELL_LOADER_STALE_MS = 2_000;
@@ -208,43 +207,59 @@ function LocalSessionHost() {
 		shouldThrow: false,
 		select: (match) => match.params,
 	});
+	// A session on another computer can be a pane too; its own route renders
+	// only when it is not in the split.
+	const hostProjectSession = useMatch({
+		from: "/_shell/host/$hostId/project/$projectId_/session/$sessionId",
+		shouldThrow: false,
+		select: (match) => match.params,
+	});
+	const hostScratchSession = useMatch({
+		from: "/_shell/host/$hostId/session/$sessionId",
+		shouldThrow: false,
+		select: (match) => match.params,
+	});
+	const remoteRoute = hostProjectSession ?? hostScratchSession;
 	const { org } = useCloudOrg();
 	const cloudOrgId = org?.id;
-	const liveSessionId = projectSession?.sessionId ?? scratchpadSessionId;
+	const localSessionId = projectSession?.sessionId ?? scratchpadSessionId;
+	const liveSessionId = remoteRoute?.sessionId ?? localSessionId;
 	const liveProjectId = projectSession?.projectId;
-	const held = useHeldSession(liveSessionId, liveProjectId);
+	const held = useHeldSession(localSessionId, liveProjectId);
 	// Sessions side by side show while the route points at one of them; any
 	// other session shows on its own and the split waits until one returns.
 	const split = useSessionSplitStore((state) => state.split);
-	const workspaceQuery = useWorkspaceQuery();
-	const splitPaneOf = useCallback((id: string | undefined) => {
-		if (!split || !id) return undefined;
-		const own = sessionPaneKey({ kind: "session", sessionId: id, projectId: STANDALONE_WORKSPACE_ID });
-		return split.panes[own] ? own : paneKeyForSession(split, findLocalSession(workspaceQuery.data, id)?.session);
-	}, [split, workspaceQuery.data]);
-	const routedPaneKey = useMemo(() => splitPaneOf(liveSessionId), [liveSessionId, splitPaneOf]);
+	const splitWorkspaces = useSplitWorkspaces();
+	const routedHostId = remoteRoute?.hostId;
+	const splitPaneOf = useCallback(
+		(id: string | undefined, hostId?: string) => routedPaneKeyOf(split, splitWorkspaces, { sessionId: id, hostId }),
+		[split, splitWorkspaces],
+	);
+	const routedPaneKey = useMemo(() => splitPaneOf(liveSessionId, routedHostId), [liveSessionId, routedHostId, splitPaneOf]);
 	// Leaving the split, the session held on screen is one of its panes, not
 	// the single view: show the destination at once instead of mounting it alone.
 	const leavingSplit = held.switching && Boolean(splitPaneOf(held.sessionId));
-	const sessionId = leavingSplit ? liveSessionId : held.sessionId;
+	const sessionId = leavingSplit ? localSessionId : held.sessionId;
 	const projectId = leavingSplit ? liveProjectId : held.projectId;
 	const view = useMemo(
 		() => (sessionId ? <SessionView cloudOrgId={cloudOrgId} projectId={projectId} sessionId={sessionId} /> : null),
 		[cloudOrgId, projectId, sessionId],
 	);
-	useSessionRowDropTarget(liveSessionId, Boolean(liveSessionId));
+	useSessionRowDropTarget(liveSessionId, Boolean(liveSessionId), routedHostId);
 	if (split && routedPaneKey && liveSessionId) {
 		return (
 			<SessionSplitView
 				cloudOrgId={cloudOrgId}
 				renderSession={renderPaneSession}
+				routedHostId={routedHostId}
 				routedPaneKey={routedPaneKey}
 				routedSessionId={liveSessionId}
 				split={split}
 			/>
 		);
 	}
-	if (!sessionId) return null;
+	// A remote route outside the split renders itself through the outlet.
+	if (remoteRoute || !sessionId) return null;
 	return (
 		<CatchBoundary errorComponent={LazyChunkErrorPanel} getResetKey={() => sessionId} onCatch={captureSessionViewCrash}>
 			<Suspense fallback={null}>{view}</Suspense>
@@ -393,6 +408,7 @@ function ShellLayout() {
 	const remoteWorkspacesRef = useRef(remoteWorkspaces);
 	remoteWorkspacesRef.current = remoteWorkspaces;
 	const daemonStatus = useDaemonStatus(queryClient);
+	// The RAM and CPU status in the corner: on by default, hidden by a General setting.
 	const daemonIsReady = daemonStatus.state === "ready";
 	// Warm the lazy chunks the first session open needs once the app is idle, so
 	// moving them off the startup path does not add a wait on first use.
@@ -1480,6 +1496,8 @@ const replacementErrorCount = Object.keys(orchestratorReplacementErrors).length;
 			openRemoteProjectSettings: (hostId: string, projectId: string) => openProjectSettings(projectId, hostId),
 			openProject,
 			validateImport,
+			remoteHosts,
+			refreshRemoteHosts,
 		}),
 		[
 			cloneProject,
@@ -1488,6 +1506,8 @@ const replacementErrorCount = Object.keys(orchestratorReplacementErrors).length;
 			initializeProjectRepository,
 			openProjectSettings,
 			openProject,
+			refreshRemoteHosts,
+			remoteHosts,
 			validateImport,
 			workspaceStartupState,
 		],

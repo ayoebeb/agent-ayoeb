@@ -98,6 +98,14 @@ vi.mock("../lib/api-client", () => ({
 
 // Only the Cloud reviews suite swaps in a ready control-plane client; other
 // suites exercise the real hook through the desktop bridge.
+// The crew has its own suites (components/crew): here it only has to appear as the
+// orchestrator's first tab, carrying the number of workers waiting on the person.
+const crewMockState = vi.hoisted(() => ({ needsYouCount: 0 }));
+vi.mock("../hooks/useCrew", () => ({
+  useCrew: () => ({ model: { needsYouCount: crewMockState.needsYouCount }, sessions: [], now: new Date(0) }),
+}));
+vi.mock("./crew/CrewRail", () => ({ CrewRail: () => <div data-testid="crew-rail" /> }));
+
 const cloudCpMockState = vi.hoisted(() => ({ enabled: false }));
 vi.mock("../hooks/useCloudCp", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useCloudCp")>();
@@ -383,17 +391,37 @@ afterEach(() => {
 });
 
 describe("SessionInspector tabs", () => {
-  it("gives an orchestrator Summary, Files and Browser, with its account but no branch", () => {
+  it("gives an orchestrator Crew, Summary and Browser, with its account but no branch", () => {
     renderWithQuery(<SessionInspector orchestrator session={session([], { kind: "orchestrator" })} />);
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Summary", "Files", "Browser"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser", "Live"]);
     expect(screen.getByTestId("session-account-summary")).toBeInTheDocument();
     expect(screen.queryByTestId("inspector-branch")).not.toBeInTheDocument();
   });
 
   it("gives a remote orchestrator the same tabs without a local account", () => {
     renderWithQuery(<SessionInspector orchestrator hostId="box-a" session={session([], { kind: "orchestrator", hostId: "box-a" })} />);
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Summary", "Files", "Browser"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Crew", "Summary", "Browser", "Live"]);
     expect(screen.queryByTestId("session-account-summary")).not.toBeInTheDocument();
+  });
+
+  it("shows the crew on its own tab and counts the workers waiting on the person", () => {
+    crewMockState.needsYouCount = 2;
+    try {
+      renderWithQuery(<SessionInspector orchestrator session={session([], { kind: "orchestrator" })} view="crew" />);
+      expect(screen.getByRole("tab", { name: "Crew" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: "Crew" })).toHaveTextContent("2");
+      expect(screen.getByTestId("crew-rail")).toBeInTheDocument();
+    } finally {
+      crewMockState.needsYouCount = 0;
+    }
+  });
+
+  it("leaves the Crew tab off a Cloud orchestrator and off every worker", () => {
+    const { unmount } = renderWithQuery(<SessionInspector orchestrator session={session([], { kind: "orchestrator", cloud: { orgId: "org-1" } })} />);
+    expect(screen.queryByRole("tab", { name: "Crew" })).not.toBeInTheDocument();
+    unmount();
+    renderWithQuery(<SessionInspector session={session([])} />);
+    expect(screen.queryByRole("tab", { name: "Crew" })).not.toBeInTheDocument();
   });
 
   it("keeps a Cloud orchestrator on Summary and Browser", () => {
@@ -402,16 +430,13 @@ describe("SessionInspector tabs", () => {
     expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens an orchestrator's Files tab through the host", async () => {
-    const onOpenFiles = vi.fn();
-    const onViewChange = vi.fn();
-    renderWithQuery(<SessionInspector orchestrator onOpenFiles={onOpenFiles} onViewChange={onViewChange} session={session([], { kind: "orchestrator" })} />);
-    await userEvent.click(screen.getByRole("tab", { name: "Files" }));
-    expect(onViewChange).toHaveBeenCalledWith("files");
-    expect(onOpenFiles).toHaveBeenCalledTimes(1);
+  it("has no Files tab for an orchestrator, and falls back from a stored Files view", () => {
+    renderWithQuery(<SessionInspector orchestrator session={session([], { kind: "orchestrator" })} view="files" />);
+    expect(screen.queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("shows an orchestrator's direct and rendered HTML artifacts beside Summary, Files and Browser", async () => {
+  it("shows an orchestrator's direct and rendered HTML artifacts beside Summary and Browser", async () => {
     vi.stubGlobal("IntersectionObserver", class {
       observe() {}
       unobserve() {}
@@ -425,7 +450,7 @@ describe("SessionInspector tabs", () => {
       ],
     })} />);
 
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Summary", "Files", "Browser", "Artifacts"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Crew", "Summary", "Browser", "Live", "Artifacts"]);
     expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByRole("tab", { name: "Artifacts" }));
     expect(screen.getByText("direct.html")).toBeInTheDocument();

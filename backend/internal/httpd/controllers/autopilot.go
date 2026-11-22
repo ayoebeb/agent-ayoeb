@@ -26,6 +26,7 @@ type AutopilotService interface {
 	Park(ctx context.Context, id domain.SessionID, limit domain.HardLimit, item, why string) (domain.AutopilotEvent, bool, error)
 	Done(ctx context.Context, id domain.SessionID, evidence, ciCannotRun string) (autopilot.DoneResult, error)
 	ResolveParked(ctx context.Context, eventID string) (domain.AutopilotEvent, error)
+	UndoDecision(ctx context.Context, eventID string) (domain.AutopilotEvent, error)
 }
 
 // AutopilotController owns the routes that start, stop and read Autopilot runs
@@ -45,6 +46,7 @@ func (c *AutopilotController) Register(r chi.Router) {
 	r.Get("/autopilot", c.list)
 	r.Post("/autopilot/stop", c.stopAll)
 	r.Post("/autopilot/items/{eventId}/resolve", c.resolveItem)
+	r.Post("/autopilot/items/{eventId}/undo", c.undoDecision)
 	r.Get("/sessions/{sessionId}/autopilot", c.view)
 	r.Post("/sessions/{sessionId}/autopilot", c.start)
 	r.Post("/sessions/{sessionId}/autopilot/stop", c.stop)
@@ -100,6 +102,18 @@ func (c *AutopilotController) resolveItem(w http.ResponseWriter, r *http.Request
 		return
 	}
 	ev, err := c.Svc.ResolveParked(r.Context(), chi.URLParam(r, "eventId"))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, ResolveAutopilotItemResponse{Event: autopilotEventResponse(ev)})
+}
+
+func (c *AutopilotController) undoDecision(w http.ResponseWriter, r *http.Request) {
+	if !c.ready(w, r, "POST", "/api/v1/autopilot/items/{eventId}/undo") {
+		return
+	}
+	ev, err := c.Svc.UndoDecision(r.Context(), chi.URLParam(r, "eventId"))
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

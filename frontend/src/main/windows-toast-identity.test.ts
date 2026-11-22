@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ensureWindowsToastIdentity, parseRegSz, TOAST_IDENTITY_KEY_ROOT, type RunReg } from "./windows-toast-identity";
 
@@ -84,6 +86,15 @@ describe("ensureWindowsToastIdentity", () => {
 				},
 			}),
 		).resolves.toBe("failed");
+	});
+});
+
+// AGENTS.md and CLAUDE.md authorize this write outside ~/.ao, so the key they name
+// must be exactly the one the code writes. A shell once ate the backslashes there.
+describe("the repo rules name the exact registry key", () => {
+	it.each(["AGENTS.md", "CLAUDE.md"])("%s", (file) => {
+		const text = readFileSync(fileURLToPath(new URL(`../../../${file}`, import.meta.url)), "utf8");
+		expect(text).toContain(`\`${KEY}\``);
 	});
 });
 

@@ -106,12 +106,23 @@ export function useAutopilotActions(hostId: HostId, sessionId: string) {
 		},
 		onSuccess: done,
 	});
+	const undoDecision = useMutation({
+		mutationFn: async (eventId: string) => {
+			const { data, error } = await clientFor(hostId).POST("/api/v1/autopilot/items/{eventId}/undo", {
+				params: { path: { eventId } },
+			});
+			if (error || !data) throw new Error(apiErrorMessage(error));
+			return data;
+		},
+		onSuccess: done,
+	});
 
 	return {
 		start,
 		stop,
 		resume,
 		resolveItem,
-		error: [start, stop, resume, resolveItem].map((m) => m.error).find(Boolean)?.message,
+		undoDecision,
+		error: [start, stop, resume, resolveItem, undoDecision].map((m) => m.error).find(Boolean)?.message,
 	};
 }

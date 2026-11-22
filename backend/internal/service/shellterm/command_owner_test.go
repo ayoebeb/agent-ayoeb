@@ -22,3 +22,21 @@ func TestCommandTerminalHandlesReconcilesOwnership(t *testing.T) {
 		t.Fatalf("retained command handles = %v, %v; want codex and legacy", handles, err)
 	}
 }
+
+func TestCommandTerminalHandlesOwnedByIsStrict(t *testing.T) {
+	store := &fakeShellTerminalStore{records: []ShellTerminalRecord{
+		{HandleID: "preview", AppRunID: testAppRunID, Transient: true, CommandOwner: "preview-server"},
+		{HandleID: "legacy", AppRunID: testAppRunID, Transient: true},
+		{HandleID: "auth", AppRunID: testAppRunID, Transient: true, CommandOwner: "github-auth"},
+		{HandleID: "user-shell", AppRunID: testAppRunID, CommandOwner: "preview-server"},
+		{HandleID: "old-preview", AppRunID: "previous-app", Transient: true, CommandOwner: "preview-server"},
+	}}
+	svc := newTestService(newFakeShellRuntime(), store, nil)
+	handles, err := svc.CommandTerminalHandlesOwnedBy(t.Context(), "preview-server")
+	if err != nil || !reflect.DeepEqual(handles, []string{"preview"}) {
+		t.Fatalf("owned handles = %v, %v; want only the exact preview-server command terminal", handles, err)
+	}
+	if got, _ := svc.CommandTerminalHandlesOwnedBy(t.Context(), ""); got != nil {
+		t.Fatalf("empty owner matched %v", got)
+	}
+}

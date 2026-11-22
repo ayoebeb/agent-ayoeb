@@ -67,6 +67,9 @@ vi.mock("../hooks/useWorkspaceQuery", () => ({
 }));
 
 vi.mock("./ProjectImportOffer", () => ({ ProjectImportOffer: () => null }));
+vi.mock("./JiraBoardView", () => ({
+	JiraBoardView: (props: { projectId: string; onOpenSettings: () => void }) => <div data-testid="jira-board-stub" data-project-id={props.projectId}><button type="button" onClick={props.onOpenSettings}>stub-connect</button></div>,
+}));
 
 vi.mock("./SessionTopbarActions", async (importOriginal) => ({ ...(await importOriginal<typeof import("./SessionTopbarActions")>()), SessionTopbarActions: () => null }));
 
@@ -336,15 +339,10 @@ describe("SessionsBoard", () => {
 		expect(screen.queryByTestId("app-memory-indicator")).not.toBeInTheDocument();
 	});
 
-	it("shows AO memory pressure before the Task button, and no archive bar with nothing archived", async () => {
-		const GIB = 1024 ** 3;
+	it("leaves the memory status to the window's corner, and shows no archive bar with nothing archived", () => {
 		appMemoryMock.mockReturnValue({
 			isError: false,
-			data: {
-				app: { rssBytes: 12 * GIB, processCount: 20, cpuPercent: 40 },
-				system: { totalBytes: 32 * GIB, availableBytes: 2 * GIB, swapTotalBytes: 0, swapUsedBytes: 0, swapBytesPerSec: 0, cpuCount: 8, load1: 1, cpuPercent: 0, pressureRaw: 35, pressureSource: "psi" },
-				liveCount: 1,
-			},
+			data: { app: { rssBytes: 12 * 1024 ** 3, processCount: 20, cpuPercent: 40 }, liveCount: 1 },
 		});
 		workspaceQueryMock.mockReturnValue({
 			data: [workspaceWithSessions([boardSession({ id: "live", title: "Live task", status: "working" })])],
@@ -352,16 +350,8 @@ describe("SessionsBoard", () => {
 		});
 		renderBoard("p1");
 		expect(screen.queryByRole("button", { name: /^Archive, \d+ sessions?$/ })).not.toBeInTheDocument();
-		const indicator = screen.getByTestId("app-memory-indicator");
-		// In the board's action row, ahead of the Task button.
-		expect(indicator.closest(".workspace-topbar-actions")).not.toBeNull();
-		const task = screen.getByRole("button", { name: "New task" });
-		expect(indicator.compareDocumentPosition(task) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-		expect(indicator).toHaveTextContent("12.0 GB");
-		expect(indicator).toHaveAttribute("data-memory-state", "tight");
-		expect(indicator).toHaveAttribute("aria-label", "Tight · 2.0 GB free of 32.0 GB · Ayo holds 12.0 GB · pressure 35.0");
-		await userEvent.click(indicator);
-		expect(await screen.findByTestId("session-memory-stacked")).toBeInTheDocument();
+		// The status lives above the sidebar's user row now, not in the board's action row.
+		expect(screen.queryByTestId("app-memory-indicator")).not.toBeInTheDocument();
 	});
 
 	it.each(["single_repo", "multi_repo", "cloud", "standalone", undefined] as const)("hides the cue runner for %s projects", (kind) => {
@@ -1984,3 +1974,67 @@ function terminatedSession(overrides: Partial<WorkspaceSession> = {}): Workspace
 		...overrides,
 	};
 }
+
+describe("SessionsBoard Jira toggle", () => {
+	const worker = () => boardSession({ id: "s1", title: "Fix login", status: "working" });
+	const openProject = () => workspaceQueryMock.mockReturnValue({ data: [workspaceWithSessions([worker()])], isSuccess: true, isError: false });
+
+	beforeEach(() => window.localStorage.clear());
+
+	it("offers an Agents and a Jira view on a project's board, opening on Agents", () => {
+		openProject();
+		renderBoard("p1");
+
+		expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute("aria-selected", "true");
+		expect(screen.getByRole("tab", { name: "Jira" })).toHaveAttribute("aria-selected", "false");
+		expect(screen.getByText("Fix login")).toBeInTheDocument();
+		expect(screen.queryByTestId("jira-board-stub")).not.toBeInTheDocument();
+	});
+
+	it("switches to the Jira board and back without losing the agents", async () => {
+		openProject();
+		renderBoard("p1");
+
+		await userEvent.click(screen.getByRole("tab", { name: "Jira" }));
+		expect(screen.getByTestId("jira-board-stub")).toHaveAttribute("data-project-id", "p1");
+		expect(screen.queryByText("Fix login")).not.toBeInTheDocument();
+		expect(screen.getByRole("tab", { name: "Jira" })).toHaveAttribute("aria-selected", "true");
+
+		await userEvent.click(screen.getByRole("tab", { name: "Agents" }));
+		expect(screen.queryByTestId("jira-board-stub")).not.toBeInTheDocument();
+		expect(screen.getByText("Fix login")).toBeInTheDocument();
+	});
+
+	it("remembers the choice for the project", async () => {
+		openProject();
+		renderBoard("p1");
+		await userEvent.click(screen.getByRole("tab", { name: "Jira" }));
+		cleanup();
+
+		renderBoard("p1");
+		expect(screen.getByTestId("jira-board-stub")).toBeInTheDocument();
+	});
+
+	it("opens project settings from the Jira view's connect action", async () => {
+		openProject();
+		const openProjectSettings = vi.spyOn(useUiStore.getState(), "openProjectSettings").mockImplementation(() => undefined);
+		renderBoard("p1");
+		await userEvent.click(screen.getByRole("tab", { name: "Jira" }));
+		await userEvent.click(screen.getByRole("button", { name: "stub-connect" }));
+
+		expect(openProjectSettings).toHaveBeenCalledWith("p1", undefined);
+		openProjectSettings.mockRestore();
+	});
+
+	it("shows no toggle on the all-projects board or for a guest of a shared project", () => {
+		openProject();
+		renderBoard();
+		expect(screen.queryByRole("tab", { name: "Jira" })).not.toBeInTheDocument();
+		cleanup();
+
+		const shared = boardSession({ id: "s2", title: "Shared work", status: "working", cloud: { orgId: "org-elsewhere", shared: true } });
+		workspaceQueryMock.mockReturnValue({ data: [{ ...workspaceWithSessions([shared]), kind: "cloud", cloudOrgId: "org-elsewhere", shared: { byName: "Asha" } }], isSuccess: true });
+		renderBoard("p1");
+		expect(screen.queryByRole("tab", { name: "Jira" })).not.toBeInTheDocument();
+	});
+});

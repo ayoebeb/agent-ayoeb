@@ -62,7 +62,8 @@ CREATE TABLE autopilot_events (
     summary TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL,
-    -- A parked item is open until the user marks it handled.
+    -- A parked item is open until the user marks it handled; a decision is
+    -- stamped when the user asks the agent to undo it.
     resolved_at TIMESTAMP
 );
 

@@ -1,4 +1,5 @@
 import { insertBeside, leafKeys, parseNode, removeLeaf, setRatioAt, type SplitNode, type SplitSide } from "./pane-split";
+import { isLocal, sessionUiKey, type HostId } from "./hosts";
 import { isOrchestratorSession, sessionIsActive, type WorkspaceSession, type WorkspaceSummary } from "../types/workspace";
 
 /**
@@ -9,8 +10,16 @@ import { isOrchestratorSession, sessionIsActive, type WorkspaceSession, type Wor
  * split uses (lib/pane-split), with one pane key in each leaf.
  */
 export type SessionPaneRef =
-	| { kind: "session"; sessionId: string; projectId: string }
-	| { kind: "orchestrator"; projectId: string };
+	| { kind: "session"; sessionId: string; projectId: string; hostId?: HostId }
+	| { kind: "orchestrator"; projectId: string; hostId?: HostId };
+
+/** The computer a pane's daemon runs on; absent or "local" is this computer. */
+export function paneHost(ref: Pick<SessionPaneRef, "hostId">): HostId | undefined {
+	return ref.hostId && !isLocal(ref.hostId) ? ref.hostId : undefined;
+}
+
+/** A session the route names: on this computer unless it carries a host. */
+export type RoutedSession = { sessionId: string; hostId?: HostId };
 
 export type SessionSplit = {
 	root: SplitNode;
@@ -23,7 +32,9 @@ export const MIN_SPLIT_PANES = 2;
 export const MAX_SPLIT_PANES = 4;
 
 export function sessionPaneKey(ref: SessionPaneRef): string {
-	return ref.kind === "session" ? `session:${ref.sessionId}` : `orchestrator:${ref.projectId}`;
+	// Local keys stay as they were, so a remembered split still resolves.
+	const host = paneHost(ref);
+	return ref.kind === "session" ? `session:${sessionUiKey(ref.sessionId, host)}` : `orchestrator:${sessionUiKey(ref.projectId, host)}`;
 }
 
 /** Side by side for two or three, a two-by-two grid for four. */
@@ -130,13 +141,13 @@ export function focusSplitPane(split: SessionSplit, key: string): SessionSplit {
  */
 export function paneKeyForSession(
 	split: SessionSplit | null,
-	session: Pick<WorkspaceSession, "id" | "kind" | "workspaceId"> | undefined,
+	session: Pick<WorkspaceSession, "id" | "kind" | "workspaceId" | "hostId"> | undefined,
 ): string | undefined {
 	if (!split || !session) return undefined;
-	const own = sessionPaneKey({ kind: "session", sessionId: session.id, projectId: session.workspaceId });
+	const own = sessionPaneKey({ kind: "session", sessionId: session.id, projectId: session.workspaceId, hostId: session.hostId });
 	if (split.panes[own]) return own;
 	if (!isOrchestratorSession(session)) return undefined;
-	const orchestrator = sessionPaneKey({ kind: "orchestrator", projectId: session.workspaceId });
+	const orchestrator = sessionPaneKey({ kind: "orchestrator", projectId: session.workspaceId, hostId: session.hostId });
 	return split.panes[orchestrator] ? orchestrator : undefined;
 }
 
@@ -173,6 +184,10 @@ export type ResolvedPane =
 	| { kind: "session"; session: WorkspaceSession; workspace: WorkspaceSummary }
 	| { kind: "ended"; session: WorkspaceSession; workspace: WorkspaceSummary }
 	| { kind: "missing" }
+	/** A session on another computer that its host's list does not show (yet): the session view resolves it, or says the host is offline. */
+	| { kind: "remote"; sessionId: string; projectId: string; hostId: HostId }
+	/** An orchestrator pane whose computer's projects are not loaded: it is offline or still connecting. */
+	| { kind: "host-unavailable"; hostId: HostId }
 	| { kind: "no-orchestrator"; workspace: WorkspaceSummary };
 
 /**
@@ -185,13 +200,15 @@ export function resolvePane(
 	routedSessionId?: string,
 ): ResolvedPane {
 	if (!workspaces) return { kind: "loading" };
-	const workspace = workspaces.find((candidate) => !candidate.hostId && candidate.id === ref.projectId);
+	const host = paneHost(ref);
+	const workspace = workspaces.find((candidate) => (candidate.hostId || undefined) === host && candidate.id === ref.projectId);
 	if (ref.kind === "session") {
 		const session = workspace?.sessions.find((candidate) => candidate.id === ref.sessionId);
+		if (host && (!workspace || !session)) return { kind: "remote", sessionId: ref.sessionId, projectId: ref.projectId, hostId: host };
 		if (!workspace || !session) return { kind: "missing" };
 		return sessionIsActive(session) ? { kind: "session", session, workspace } : { kind: "ended", session, workspace };
 	}
-	if (!workspace) return { kind: "missing" };
+	if (!workspace) return host ? { kind: "host-unavailable", hostId: host } : { kind: "missing" };
 	const routed = workspace.sessions.find(
 		(candidate) => candidate.id === routedSessionId && isOrchestratorSession(candidate) && sessionIsActive(candidate),
 	);
@@ -203,9 +220,10 @@ function parseRef(value: unknown): SessionPaneRef | null {
 	if (!value || typeof value !== "object") return null;
 	const ref = value as Record<string, unknown>;
 	if (typeof ref.projectId !== "string" || !ref.projectId) return null;
-	if (ref.kind === "orchestrator") return { kind: "orchestrator", projectId: ref.projectId };
+	const hostId = typeof ref.hostId === "string" && ref.hostId && !isLocal(ref.hostId) ? { hostId: ref.hostId } : {};
+	if (ref.kind === "orchestrator") return { kind: "orchestrator", projectId: ref.projectId, ...hostId };
 	if (ref.kind === "session" && typeof ref.sessionId === "string" && ref.sessionId) {
-		return { kind: "session", sessionId: ref.sessionId, projectId: ref.projectId };
+		return { kind: "session", sessionId: ref.sessionId, projectId: ref.projectId, ...hostId };
 	}
 	return null;
 }

@@ -3,9 +3,12 @@ import { ScrollArea } from "radix-ui";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAgentAccountActions, useAgentAccounts } from "../../hooks/useAgentAccounts";
+import { useHostAccountLimits } from "../../hooks/useHostAccountLimits";
 import { useNow } from "../../hooks/useNow";
+import type { RemoteHost } from "../../hooks/useRemoteHosts";
 import { useUsageLimitWindows, useUsageReport } from "../../hooks/useUsageReport";
 import { useWorkspaceQuery } from "../../hooks/useWorkspaceQuery";
+import { useShellMaybe } from "../../lib/shell-context";
 import { formatRange } from "../../lib/usage-format";
 import type { UsageUnit } from "../../lib/usage-report";
 import { cn } from "../../lib/utils";
@@ -25,6 +28,7 @@ import { UsageWindows } from "./UsageWindows";
 
 type UsageTab = "spend" | "limits" | "windows";
 const ALL_PROJECTS = "all";
+const THIS_COMPUTER = "";
 const PERIODS = [
 	{ days: 1, label: "usage.period.day" },
 	{ days: 7, label: "usage.period.week" },
@@ -41,23 +45,39 @@ export function UsageView() {
 	const [unit, setUnit] = useState<UsageUnit>("cost");
 	const [days, setDays] = useState(7);
 	const [offset, setOffset] = useState(0);
-	const [projectFilter, setProjectFilter] = useState(ALL_PROJECTS);
+		const [projectFilter, setProjectFilter] = useState(ALL_PROJECTS);
+	const [chosenComputer, setComputer] = useState(THIS_COMPUTER);
+
 	const [refreshingLimits, setRefreshingLimits] = useState(false);
 	const now = useNow(30_000);
 
+		// Another linked computer's usage is read from its own daemon; a computer
+	// that went away since it was chosen falls back to this one.
+	const linkedComputers = useShellMaybe()?.remoteHosts;
+	const host = linkedComputers?.find((candidate) => candidate.hostId === chosenComputer);
+	const hostId = host?.hostId;
+	const hostReady = !host || host.status === "connected";
 	const workspaces = useWorkspaceQuery({ includeCloud: false }).data;
 	const projects = useMemo(
-		() => (workspaces ?? []).filter((workspace) => !workspace.hostId && workspace.kind !== CLOUD_PROJECT_KIND),
-		[workspaces],
+		() => (workspaces ?? []).filter((workspace) => workspace.hostId === hostId && workspace.kind !== CLOUD_PROJECT_KIND),
+		[workspaces, hostId],
 	);
 	const projectNames = useMemo(
 		() => new Map(projects.map((project) => [project.id, project.id === STANDALONE_WORKSPACE_ID ? t("standalone.workspaceName") : project.name])),
 		[projects, t],
 	);
 	const filterProjects = useMemo(() => projects.filter((project) => project.id !== STANDALONE_WORKSPACE_ID), [projects]);
-	const report = useUsageReport(days, offset, projectFilter === ALL_PROJECTS ? undefined : projectFilter);
-	const accounts = useAgentAccounts(tab === "limits");
-	const limitWindows = useUsageLimitWindows(7, tab === "windows");
+		const report = useUsageReport(days, offset, projectFilter === ALL_PROJECTS ? undefined : projectFilter, hostId, hostReady);
+	const localAccounts = useAgentAccounts(tab === "limits" && !host);
+	const hostLimits = useHostAccountLimits(hostId, undefined, tab === "limits" && hostReady);
+	const limitWindows = useUsageLimitWindows(7, tab === "windows" && hostReady, hostId);
+	// A computer's last reading is not kept on screen once its read fails.
+	const settled = <T,>(data: T | undefined, error: Error | null) => (host && error ? undefined : data);
+	const accounts = host
+		? { data: settled(hostLimits.data?.accounts, hostLimits.error), error: hostLimits.error, isLoading: hostLimits.isPending, isFetching: hostLimits.isFetching }
+		: localAccounts;
+	const reportData = settled(report.data, report.error);
+	const windowsData = settled(limitWindows.data, limitWindows.error);
 	const accountActions = useAgentAccountActions();
 	const isLimits = tab === "limits";
 	const isWindows = tab === "windows";
@@ -67,8 +87,12 @@ export function UsageView() {
 			await limitWindows.refetch();
 			return;
 		}
-		if (!isLimits) {
+				if (!isLimits) {
 			await report.refetch();
+			return;
+		}
+		if (host) {
+			await hostLimits.refetch();
 			return;
 		}
 		setRefreshingLimits(true);
@@ -84,7 +108,8 @@ export function UsageView() {
 	const loading = <UsageSkeleton view={tab} />;
 	const failed = (error: Error) => <p role="alert" className="py-16 text-center text-sm text-destructive">{error.message}</p>;
 	const staleError = (error: Error | null) => (error ? <p role="alert" className="mb-4 text-xs text-destructive">{error.message}</p> : null);
-	const range = report.data ? formatRange(report.data.since, report.data.until, i18n.language) : null;
+		const range = reportData ? formatRange(reportData.since, reportData.until, i18n.language) : null;
+	const computerOptions = [{ value: THIS_COMPUTER, label: t("machines.thisComputer") }, ...(linkedComputers ?? []).map((candidate) => ({ value: candidate.hostId, label: candidate.label }))];
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -92,7 +117,22 @@ export function UsageView() {
 				lead={<PageTopbarTitle as="h1" icon={<Gauge className="size-icon-md" aria-hidden="true" />}>{t("usage.title")}</PageTopbarTitle>}
 				actions={
 					<>
-						{tab === "spend" && filterProjects.length > 0 ? (
+						{linkedComputers && linkedComputers.length > 0 ? (
+								<SettingsOptionMenu
+									aria-label={t("usage.computer")}
+									value={host ? host.hostId : THIS_COMPUTER}
+									options={computerOptions}
+									onChange={(value) => {
+										setComputer(value);
+										setProjectFilter(ALL_PROJECTS);
+										setOffset(0);
+									}}
+									menuAlign="end"
+									menuClassName="max-h-72"
+									triggerClassName="h-(--size-control-md)! text-xs!"
+								/>
+							) : null}
+							{tab === "spend" && filterProjects.length > 0 ? (
 							<SettingsOptionMenu
 								aria-label={t("usage.projectFilter")}
 								value={projectFilter}
@@ -161,12 +201,14 @@ export function UsageView() {
 				<main className="relative min-h-0 flex-1 overflow-hidden">
 					<ScrollArea.Viewport className="h-full w-full overscroll-contain focus-visible:outline-none">
 						<div className="mx-auto w-full max-w-6xl px-6 py-6">
-							{isWindows ? (
-								limitWindows.data ? (
-									<>
-										{staleError(limitWindows.error)}
-										<UsageWindows history={limitWindows.data} now={now} />
-									</>
+															{host && !hostReady ? (
+									<ComputerUnavailable host={host} />
+								) : isWindows ? (
+									windowsData ? (
+										<>
+											{staleError(limitWindows.error)}
+											<UsageWindows history={windowsData} now={now} />
+										</>
 								) : limitWindows.isLoading ? (
 									loading
 								) : limitWindows.error ? (
@@ -176,20 +218,20 @@ export function UsageView() {
 								accounts.data ? (
 									<>
 										{staleError(accounts.error)}
-										<UsageLimits accounts={accounts.data} now={now} />
+																					<UsageLimits accounts={accounts.data} now={now} computerName={host?.label} />
 									</>
 								) : accounts.isLoading ? (
 									loading
 								) : accounts.error ? (
 									failed(accounts.error)
 								) : (
-									<UsageLimits accounts={[]} now={now} />
+																			<UsageLimits accounts={[]} now={now} computerName={host?.label} />
 								)
-							) : report.data && report.data.rows.length > 0 ? (
+															) : reportData && reportData.rows.length > 0 ? (
 								<>
 									{staleError(report.error)}
 									<div className={cn("transition-opacity", report.isPlaceholderData && "opacity-60")}>
-										<UsageSpend report={report.data} unit={unit} onUnitChange={setUnit} projectNames={projectNames} />
+										<UsageSpend report={reportData} unit={unit} onUnitChange={setUnit} projectNames={projectNames} />
 									</div>
 								</>
 							) : report.isLoading ? (
@@ -209,6 +251,25 @@ export function UsageView() {
 					</ScrollArea.Scrollbar>
 				</main>
 			</ScrollArea.Root>
+		</div>
+	);
+}
+
+/** A linked computer that cannot be read: no earlier numbers stand in for its usage. */
+function ComputerUnavailable({ host }: { host: RemoteHost }) {
+	const { t } = useTranslation();
+	const connecting = host.status === "connecting";
+	const body = connecting
+		? t("usage.computer.connecting", { name: host.label })
+		: host.failureReason === "unauthorized"
+			? t("remote.passwordRejected")
+			: host.failureReason === "incompatible"
+				? t("machines.status.incompatible")
+				: t("usage.computer.offlineBody");
+	return (
+		<div role="status" className="flex flex-col items-center gap-1 py-16 text-center">
+			{connecting ? null : <p className="text-control font-medium text-foreground">{t("usage.computer.offlineTitle", { name: host.label })}</p>}
+			<p className="max-w-sm text-xs text-muted-foreground">{body}</p>
 		</div>
 	);
 }

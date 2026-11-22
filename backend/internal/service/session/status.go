@@ -17,8 +17,14 @@ import (
 const noSignalGrace = 90 * time.Second
 
 func deriveStatus(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable bool) domain.SessionStatus {
+	return deriveStatusWithLimit(rec, prs, now, signalCapable, false)
+}
+
+// deriveStatusWithLimit is deriveStatus for a session whose latest turn may
+// have stopped on the provider's usage limit.
+func deriveStatusWithLimit(rec domain.SessionRecord, prs []domain.PRFacts, now time.Time, signalCapable, usageLimited bool) domain.SessionStatus {
 	status := contract.DeriveStatus(
-		toContractSessionFacts(rec, signalCapable),
+		toContractSessionFacts(rec, signalCapable, usageLimited),
 		toContractPRFacts(prs),
 		now,
 		noSignalGrace,
@@ -30,8 +36,9 @@ func deriveSCMStatus(prs []domain.PRFacts) domain.SessionStatus {
 	return domain.SessionStatus(contract.DeriveSCMStatus(toContractPRFacts(prs)))
 }
 
-func toContractSessionFacts(rec domain.SessionRecord, signalCapable bool) contract.SessionFacts {
+func toContractSessionFacts(rec domain.SessionRecord, signalCapable, usageLimited bool) contract.SessionFacts {
 	return contract.SessionFacts{
+		UsageLimited:   usageLimited,
 		Activity:       contract.ActivityState(rec.Activity.State),
 		LastActivityAt: rec.Activity.LastActivityAt,
 		HasSignal:      !rec.FirstSignalAt.IsZero(),

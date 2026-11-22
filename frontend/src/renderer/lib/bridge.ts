@@ -218,6 +218,7 @@ export const aoBridge: AoBridge =
 				canGoForward: false,
 				isLoading: false,
 			}),
+			setSessionHost: async () => ({ routed: false }),
 			setBounds: () => undefined,
 			onBoundsApplied: () => () => undefined,
 			setOverlayOpen: () => undefined,
@@ -271,6 +272,18 @@ export const aoBridge: AoBridge =
 				canGoForward: false,
 				isLoading: false,
 			}),
+			trustCertificate: async (viewId: string) => ({
+				viewId,
+				url: "",
+				title: "",
+				canGoBack: false,
+				canGoForward: false,
+				isLoading: false,
+			}),
+			certificates: {
+				list: async () => [],
+				remove: async () => [],
+			},
 			getFindState: async (viewId: string) => ({
 				viewId,
 				tabId: "t1",
@@ -418,6 +431,10 @@ export const aoBridge: AoBridge =
 			relaunch: async () => undefined,
 			onStatus: () => () => undefined,
 			onTelemetry: () => () => undefined,
+		},
+		dailyUpdate: {
+			get: async () => ({ state: "hidden" }),
+			apply: async () => ({ state: "hidden" }),
 		},
 		featureBuilds: {
 			list: async () => [],

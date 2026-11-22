@@ -3,12 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AutopilotEvent, AutopilotRun, AutopilotView } from "../lib/autopilot";
 
-const { viewMock, startMock, stopMock, resumeMock, resolveMock, settingsMock } = vi.hoisted(() => ({
+const { viewMock, startMock, stopMock, resumeMock, resolveMock, undoMock, settingsMock } = vi.hoisted(() => ({
 	viewMock: vi.fn(),
 	startMock: vi.fn(),
 	stopMock: vi.fn(),
 	resumeMock: vi.fn(),
 	resolveMock: vi.fn(),
+	undoMock: vi.fn(),
 	settingsMock: vi.fn(),
 }));
 
@@ -20,6 +21,7 @@ vi.mock("../hooks/useAutopilot", () => ({
 		stop: idle(stopMock),
 		resume: idle(resumeMock),
 		resolveItem: idle(resolveMock),
+		undoDecision: idle(undoMock),
 		error: undefined,
 	}),
 }));
@@ -74,7 +76,7 @@ function renderControl(props: { sessionTerminated?: boolean } = {}) {
 }
 
 beforeEach(() => {
-	for (const mock of [viewMock, startMock, stopMock, resumeMock, resolveMock, settingsMock]) mock.mockReset();
+	for (const mock of [viewMock, startMock, stopMock, resumeMock, resolveMock, undoMock, settingsMock]) mock.mockReset();
 	viewMock.mockReturnValue(view());
 	settingsMock.mockReturnValue({ autopilotMaxIterations: 30 });
 	window.localStorage.clear();
@@ -251,6 +253,28 @@ describe("a parked run", () => {
 		const decisions = await screen.findByTestId("autopilot-decisions");
 		expect(decisions).toHaveTextContent("Patch or refactor? → Patch");
 		expect(decisions).toHaveTextContent("Smaller risk");
+	});
+
+	it("lets the user undo a decision, and shows an undone one as undone without a button", async () => {
+		viewMock.mockReturnValue(parkedView());
+		renderControl();
+		await userEvent.click(screen.getByRole("button", { name: "Autopilot parked · needs you" }));
+
+		const decision = await screen.findByTestId("autopilot-decision");
+		await userEvent.click(within(decision).getByRole("button", { name: "Undo" }));
+		expect(undoMock).toHaveBeenCalledWith("ape_3");
+	});
+
+	it("marks a decision the user already undid", async () => {
+		const parked = parkedView();
+		parked.report!.decisions = [{ ...parked.report!.decisions[0], resolvedAt: "2026-11-17T11:00:00Z" }];
+		viewMock.mockReturnValue(parked);
+		renderControl();
+		await userEvent.click(screen.getByRole("button", { name: "Autopilot parked · needs you" }));
+
+		const decision = await screen.findByTestId("autopilot-decision");
+		expect(decision).toHaveTextContent("Undone");
+		expect(within(decision).queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
 	});
 
 	it("shows an item the user already handled as handled, without a button", async () => {

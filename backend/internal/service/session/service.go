@@ -1639,6 +1639,7 @@ func (s *Service) sessionsFromRecords(ctx context.Context, filtered []domain.Ses
 	if err != nil {
 		return nil, fmt.Errorf("list interrupted sessions: %w", err)
 	}
+	limits := s.usageLimits(ctx, ids)
 	var cleanupBySession map[domain.SessionID]domain.SessionCleanupRecord
 	if len(archived) > 0 {
 		if cleanupBySession, err = s.store.ListSessionCleanupFactsForSessions(ctx, archived); err != nil {
@@ -1649,7 +1650,7 @@ func (s *Service) sessionsFromRecords(ctx context.Context, filtered []domain.Ses
 	out := make([]domain.Session, 0, len(filtered))
 	for _, rec := range filtered {
 		facts, found := cleanupBySession[rec.ID]
-		sess, err := s.toSessionWithFacts(ctx, rec, prsBySession[rec.ID], runsBySession[rec.ID], interrupted[rec.ID], currentWorkspaceCleanup(rec, facts, found))
+		sess, err := s.toSessionWithFacts(ctx, rec, prsBySession[rec.ID], runsBySession[rec.ID], interrupted[rec.ID], limits[rec.ID], currentWorkspaceCleanup(rec, facts, found))
 		if err != nil {
 			return nil, err
 		}
@@ -1662,6 +1663,38 @@ func (s *Service) sessionsFromRecords(ctx context.Context, filtered []domain.Ses
 		}
 	}
 	return out, nil
+}
+
+// failedTurnReader is the optional read of each session's latest failed turn,
+// from which a usage-limit stop is derived.
+type failedTurnReader interface {
+	ListLatestFailedTurns(ctx context.Context, ids []domain.SessionID) ([]domain.LimitStopTurn, error)
+}
+
+// usageLimits derives which of the sessions stopped on a provider usage limit
+// at their latest turn, and what AO will do about it. The facts are cosmetic
+// for a board read, so a failed read leaves the sessions unlabelled instead of
+// failing the list.
+func (s *Service) usageLimits(ctx context.Context, ids []domain.SessionID) map[domain.SessionID]*domain.SessionUsageLimit {
+	reader, ok := s.store.(failedTurnReader)
+	if !ok || len(ids) == 0 {
+		return nil
+	}
+	turns, err := reader.ListLatestFailedTurns(ctx, ids)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("read usage-limit stops", "err", err)
+		}
+		return nil
+	}
+	now := s.now()
+	out := make(map[domain.SessionID]*domain.SessionUsageLimit)
+	for _, turn := range turns {
+		if limit := domain.BuildSessionUsageLimit(turn, now); limit != nil {
+			out[turn.SessionID] = limit
+		}
+	}
+	return out
 }
 
 func (s *Service) statusRecoveryRevision() uint64 {
@@ -1751,7 +1784,7 @@ func (s *Service) Get(ctx context.Context, id domain.SessionID) (domain.Session,
 	return sess, nil
 }
 
-func (s *Service) toSessionWithFacts(ctx context.Context, rec domain.SessionRecord, prs []domain.PRFacts, runs []domain.CurrentHeadReviewRun, interrupted bool, cleanup domain.SessionCleanupRecord) (domain.Session, error) { //nolint:unparam // Every read-model caller propagates this error.
+func (s *Service) toSessionWithFacts(ctx context.Context, rec domain.SessionRecord, prs []domain.PRFacts, runs []domain.CurrentHeadReviewRun, interrupted bool, usageLimit *domain.SessionUsageLimit, cleanup domain.SessionCleanupRecord) (domain.Session, error) { //nolint:unparam // Every read-model caller propagates this error.
 	// A row created before artifact_dir existed carries it as '' (the
 	// migration's default) even though session_manager always prompts the
 	// agent to write into the deterministic dataDir/artifacts/<id> path.
@@ -1807,7 +1840,10 @@ func (s *Service) toSessionWithFacts(ctx context.Context, rec domain.SessionReco
 	// ReconcileSessionOutputType is the sole writer); it is deliberately not
 	// recomputed here so the API and Kanban see the same durable
 	// classification rather than a value that can differ read to read.
-	presentation := deriveKanbanPresentation(rec, prs, runs, interrupted, now, s.harnessSignals(rec.Harness))
+	if rec.IsTerminated {
+		usageLimit = nil
+	}
+	presentation := deriveKanbanPresentation(rec, prs, runs, interrupted, usageLimit != nil, now, s.harnessSignals(rec.Harness))
 	readiness := "ready"
 	if recovery, ok := s.manager.(interface {
 		SessionStatusReadiness(domain.SessionRecord) string
@@ -1823,7 +1859,8 @@ func (s *Service) toSessionWithFacts(ctx context.Context, rec domain.SessionReco
 		NeedsResume:                rec.NeedsImportResume(),
 		ChatProviderPreserved: rec.Mode == domain.SessionModeChat && !rec.IsTerminated &&
 			s.chatProviderPreserved != nil && s.chatProviderPreserved(rec.ID),
-		Status:           deriveStatus(rec, prs, now, s.harnessSignals(rec.Harness)),
+		Status:           deriveStatusWithLimit(rec, prs, now, s.harnessSignals(rec.Harness), usageLimit != nil),
+		UsageLimit:       usageLimit,
 		SCMStatus:        deriveSCMStatus(prs),
 		KanbanColumn:     presentation.Column,
 		DisplayStatus:    presentation.DisplayStatus,
@@ -2147,7 +2184,7 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("interrupted turn %s: %w", rec.ID, err)
 	}
-	sess, err := s.toSessionWithFacts(ctx, rec, prs, runs, interrupted[rec.ID], cleanup)
+	sess, err := s.toSessionWithFacts(ctx, rec, prs, runs, interrupted[rec.ID], s.usageLimits(ctx, []domain.SessionID{rec.ID})[rec.ID], cleanup)
 	if err != nil {
 		return domain.Session{}, err
 	}

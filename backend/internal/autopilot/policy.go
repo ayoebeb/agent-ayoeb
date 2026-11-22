@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"path"
 	"regexp"
@@ -252,6 +253,15 @@ var segmentSplit = regexp.MustCompile(`\s*(?:&&|\|\||;|\||\r?\n)\s*`)
 // evaluateCommand reads every command of a pipeline or list, so a forbidden step
 // hidden behind `&&` or `;` is still found.
 func evaluateCommand(command, workspace string) Verdict {
+	return evaluateCommandDepth(command, workspace, 0)
+}
+
+// maxNesting bounds how deep a command inside a command (a shell -c string, an
+// eval, a $(...) substitution) is read. Past it the command is refused as
+// unreadable rather than waved through.
+const maxNesting = 4
+
+func evaluateCommandDepth(command, workspace string, depth int) Verdict {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return allow("An empty command.")
@@ -262,6 +272,7 @@ func evaluateCommand(command, workspace string) Verdict {
 	if limit, ok := messagingEndpoint(command); ok {
 		return deny(limit, "The command sends a message through an outside service.")
 	}
+	nested := substitutions(command)
 	var merge Verdict
 	for _, segment := range segmentSplit.Split(command, -1) {
 		tokens := tokenize(segment)
@@ -269,6 +280,7 @@ func evaluateCommand(command, workspace string) Verdict {
 		if len(tokens) == 0 {
 			continue
 		}
+		nested = append(nested, innerCommands(tokens)...)
 		v := classifySegment(tokens, workspace)
 		if v.Merge {
 			merge = v
@@ -278,10 +290,89 @@ func evaluateCommand(command, workspace string) Verdict {
 			return v
 		}
 	}
+	if len(nested) > 0 && depth >= maxNesting {
+		return Verdict{Reason: "The command nests other commands too deeply to read."}
+	}
+	for _, inner := range nested {
+		if v := evaluateCommandDepth(inner, workspace, depth+1); !v.Allow && !v.Merge {
+			return v
+		} else if v.Merge {
+			merge = v
+		}
+	}
 	if merge.Merge {
 		return merge
 	}
 	return allow("A command with no hard-limit effect.")
+}
+
+var (
+	dollarSubstitution = regexp.MustCompile(`\$\(([^()]*)\)`)
+	backtickSubst      = regexp.MustCompile("`([^`]*)`")
+)
+
+// substitutions returns the commands inside $(...) and `...`, which a shell runs
+// before the command that holds them.
+func substitutions(command string) []string {
+	var out []string
+	for _, m := range dollarSubstitution.FindAllStringSubmatch(command, -1) {
+		out = append(out, m[1])
+	}
+	for _, m := range backtickSubst.FindAllStringSubmatch(command, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// innerCommands returns the command string a shell, PowerShell, cmd or eval is
+// asked to run, so `bash -c "gh pr merge 1"` is judged as `gh pr merge 1`.
+func innerCommands(tokens []string) []string {
+	prog := baseProgram(tokens[0])
+	args := tokens[1:]
+	switch prog {
+	case "bash", "sh", "zsh", "dash", "ksh", "fish", "ash":
+		for i, a := range args {
+			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c") && i+1 < len(args) {
+				return []string{args[i+1]}
+			}
+		}
+	case "powershell", "pwsh":
+		for i, a := range args {
+			switch strings.ToLower(a) {
+			case "-command", "-c":
+				return []string{strings.Join(args[i+1:], " ")}
+			case "-encodedcommand", "-e", "-ec":
+				if i+1 < len(args) {
+					if decoded, ok := decodePowerShell(args[i+1]); ok {
+						return []string{decoded}
+					}
+					return []string{"__undecodable__ " + args[i+1]}
+				}
+			}
+		}
+	case "cmd":
+		for i, a := range args {
+			if la := strings.ToLower(a); la == "/c" || la == "/k" || la == "/r" {
+				return []string{strings.Join(args[i+1:], " ")}
+			}
+		}
+	case "eval":
+		return []string{strings.Join(args, " ")}
+	}
+	return nil
+}
+
+// decodePowerShell reads a -EncodedCommand argument: base64 of UTF-16LE text.
+func decodePowerShell(encoded string) (string, bool) {
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(raw)%2 != 0 || len(raw) == 0 {
+		return "", false
+	}
+	runes := make([]rune, 0, len(raw)/2)
+	for i := 0; i+1 < len(raw); i += 2 {
+		runes = append(runes, rune(uint16(raw[i])|uint16(raw[i+1])<<8))
+	}
+	return string(runes), true
 }
 
 // tokenize splits a command on whitespace, keeping quoted text together and
@@ -404,6 +495,8 @@ func classifySegment(tokens []string, workspace string) Verdict {
 		lowerArgs[i] = strings.ToLower(a)
 	}
 	switch prog {
+	case "__undecodable__":
+		return Verdict{Reason: "The command runs an encoded script AO cannot read."}
 	case "__skip_hooks__":
 		return deny(domain.HardLimitCI, "The command switches repository hooks or CI checks off.")
 	case "sudo", "doas", "su", "runas", "gsudo", "pkexec":

@@ -122,6 +122,14 @@ export function toWorkspaceSession(
 		scmStatus,
 		kanbanColumn,
 		displayStatus: session.displayStatus || undefined,
+		usageLimit: session.usageLimit
+			? {
+					window: session.usageLimit.window || undefined,
+					resetsAt: session.usageLimit.resetsAt ?? undefined,
+					resume: session.usageLimit.resume,
+					resumeOffReason: session.usageLimit.resumeOffReason || undefined,
+				}
+			: undefined,
 		statusReadiness,
 		provisionState: session.provisionState,
 		...(typeof session.workspacePublished === "boolean" ? { workspacePublished: session.workspacePublished } : {}),
@@ -147,6 +155,8 @@ export function toWorkspaceSession(
 		updatedAt: session.updatedAt,
 		lastUserMessageAt: session.lastUserMessageAt ?? undefined,
 		lastInteractionAt: session.lastInteractionAt ?? undefined,
+		lastEventAt: session.lastEventAt || undefined,
+		model: session.model || undefined,
 		activity,
 		previewUrl: session.previewUrl,
 		previewRevision: session.previewRevision,
@@ -232,6 +242,14 @@ function toLocalWorkspaceSession(
 		scmStatus,
 		kanbanColumn,
 		displayStatus: session.displayStatus || undefined,
+		usageLimit: session.usageLimit
+			? {
+					window: session.usageLimit.window || undefined,
+					resetsAt: session.usageLimit.resetsAt ?? undefined,
+					resume: session.usageLimit.resume,
+					resumeOffReason: session.usageLimit.resumeOffReason || undefined,
+				}
+			: undefined,
 		provisionState: session.provisionState,
 		...(typeof session.workspacePublished === "boolean" ? { workspacePublished: session.workspacePublished } : {}),
 		provisionError: session.provisionError || undefined,
@@ -255,6 +273,8 @@ function toLocalWorkspaceSession(
 		updatedAt: session.updatedAt,
 		lastUserMessageAt: session.lastUserMessageAt ?? undefined,
 		lastInteractionAt: session.lastInteractionAt ?? undefined,
+		lastEventAt: session.lastEventAt || undefined,
+		model: session.model || undefined,
 		activity,
 		previewUrl: session.previewUrl,
 		previewRevision: session.previewRevision,

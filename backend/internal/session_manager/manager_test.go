@@ -12363,3 +12363,23 @@ func TestSystemPrompt_CommunicationStyleIsOrchestratorOnly(t *testing.T) {
 		})
 	}
 }
+
+// A stale reviewer pane (pty-host pid that cannot be confirmed gone) must not
+// keep the worker alive: Kill warns and finishes.
+func TestKill_ReviewerPaneTeardownFailureContinues(t *testing.T) {
+	m, st, rt, ws := newManager()
+	m.SetReviewerTerminator(&fakeReviewerTerminator{
+		err: fmt.Errorf("%w: review-mer-1: pty-host still alive after teardown", ErrReviewerPaneTeardown),
+	})
+	st.sessions["mer-1"] = mkLive("mer-1")
+
+	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+		t.Fatalf("Kill = %v, want success despite reviewer pane teardown failure", err)
+	}
+	if rt.destroyed != 1 || ws.destroyed != 1 {
+		t.Fatalf("runtime=%d workspace=%d destroy calls, want one each", rt.destroyed, ws.destroyed)
+	}
+	if !st.sessions["mer-1"].IsTerminated {
+		t.Fatal("session must be terminated")
+	}
+}

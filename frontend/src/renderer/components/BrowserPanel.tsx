@@ -71,6 +71,7 @@ import { useBrowserRuntimeState } from "../hooks/useBrowserRuntimeState";
 import { useTabScrollEdges } from "../hooks/useTabScrollEdges";
 import { formatBrowserAnnotationMessage, type BrowserAnnotationSubmitPayload } from "../../shared/browser-annotations";
 import type { BrowserProfile } from "../../shared/browser-profiles";
+import { urlRoutesThroughHost } from "../../shared/loopback-routing";
 import type { WorkspaceSession } from "../types/workspace";
 import { Button } from "./ui/button";
 import {
@@ -422,6 +423,7 @@ export function BrowserPanelView({
 	const prefersReducedMotion = useReducedMotion();
 	const browserUnavailable = sessionBrowserUnavailable(session);
 	const {
+		loopbackVia = null,
 		viewId,
 		navState,
 		slotRef,
@@ -430,6 +432,7 @@ export function BrowserPanelView({
 		goForward,
 		reload,
 		stop,
+		trustCertificate = async () => undefined,
 		findState = { viewId: "", tabId: "", query: "", activeMatchOrdinal: 0, matches: 0, finalUpdate: true },
 		findOpenRequest = 0,
 		findInPage = async () => undefined,
@@ -973,6 +976,15 @@ export function BrowserPanelView({
 			}}
 			onSubmit={submit}
 		>
+			{loopbackVia && urlRoutesThroughHost(session.hostId, navState.url) ? (
+				<span
+					className="max-w-32 shrink-0 truncate pr-1.5 text-caption text-muted-foreground"
+					data-testid="browser-via-computer"
+					title={t("browser.viaComputer", { name: loopbackVia })}
+				>
+					{t("browser.viaComputer", { name: loopbackVia })}
+				</span>
+			) : null}
 			<Popover
 				onOpenChange={(open) => {
 					if (!open && suggestionsOpen) {
@@ -1792,7 +1804,32 @@ export function BrowserPanelView({
 							<p>{browserUnavailable ? t("browser.sessionEnded") : t("browser.emptyUrl")}</p>
 						</div>
 					) : null}
-					{navState.error ? (
+					{navState.certificateError ? (
+						<div
+							className="absolute inset-0 grid place-items-center overflow-auto bg-background p-5"
+							data-testid="browser-certificate-error"
+						>
+							<div className="flex w-full max-w-md flex-col gap-3 text-xs">
+								<p className="m-0 text-sm font-medium text-foreground">{t("browser.certificate.title")}</p>
+								<dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-muted-foreground">
+									<dt>{t("browser.certificate.host")}</dt>
+									<dd className="m-0 break-all font-mono text-foreground">{navState.certificateError.host}</dd>
+									<dt>{t("browser.certificate.issuer")}</dt>
+									<dd className="m-0 break-words text-foreground">{navState.certificateError.issuer}</dd>
+									<dt>{t("browser.certificate.fingerprint")}</dt>
+									<dd className="m-0 break-all font-mono text-foreground">{navState.certificateError.fingerprint}</dd>
+									<dt>{t("browser.certificate.error")}</dt>
+									<dd className="m-0 break-all font-mono text-destructive">{navState.certificateError.error}</dd>
+								</dl>
+								<p className="m-0 text-muted-foreground">{t("browser.certificate.trustHint")}</p>
+								<div>
+									<Button onClick={() => void trustCertificate()} size="sm" variant="secondary">
+										{t("browser.certificate.trust")}
+									</Button>
+								</div>
+							</div>
+						</div>
+					) : navState.error ? (
 						<p
 							className={cn(
 								"absolute inset-x-2.5 bottom-2.5 m-0 border border-error/35 bg-error/8 px-2.5 py-2",

@@ -47,6 +47,9 @@ type AgentAccountsController struct {
 func (c *AgentAccountsController) Register(r chi.Router) {
 	r.Get("/agents/accounts", c.list)
 	r.Get("/agents/accounts/usage", c.usage)
+	// Outside /agents/accounts on purpose: that prefix is blocked on the LAN
+	// listener, and another computer's desktop needs these limits (read-only).
+	r.Get("/usage/account-limits", c.accountLimits)
 	r.Post("/agents/accounts/login", c.startLogin)
 	r.Post("/agents/accounts/login/{operationId}/verify", c.verifyLogin)
 	r.Post("/agents/accounts/login/{operationId}/cancel", c.cancelLogin)
@@ -64,6 +67,35 @@ func (c *AgentAccountsController) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.writeAccounts(w, r, r.URL.Query().Get("refresh") == "true" || r.URL.Query().Get("refresh") == "1")
+}
+
+// accountLimits is the read-only view of the accounts' limits that a desktop on
+// another computer reads: the same rows as GET /agents/accounts, plus the
+// Claude and Codex account the named session runs under. It never refreshes
+// (the daemon reuses a reading for five minutes) and changes nothing.
+func (c *AgentAccountsController) accountLimits(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/usage/account-limits")
+		return
+	}
+	views, err := c.Svc.List(r.Context(), false)
+	if err != nil {
+		writeAgentAccountError(w, r, err)
+		return
+	}
+	out := AccountLimitsResponse{Accounts: make([]AgentAccountResponse, 0, len(views))}
+	for _, view := range views {
+		out.Accounts = append(out.Accounts, agentAccountResponse(view))
+	}
+	if sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId")); sessionID != "" {
+		bound, err := c.Svc.SessionAccounts(r.Context(), domain.SessionID(sessionID))
+		if err != nil {
+			writeAgentAccountError(w, r, err)
+			return
+		}
+		out.Session = &SessionAgentAccountsResponse{Claude: bound[domain.AgentAccountProviderClaude], Codex: bound[domain.AgentAccountProviderCodex]}
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
 }
 
 func (c *AgentAccountsController) writeAccounts(w http.ResponseWriter, r *http.Request, refresh bool) {

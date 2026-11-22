@@ -92,6 +92,8 @@ export function AutopilotDialog({
 							view={view}
 							onHandled={(eventId) => actions.resolveItem.mutate(eventId)}
 							handling={actions.resolveItem.isPending}
+							onUndo={(eventId) => actions.undoDecision.mutate(eventId)}
+							undoing={actions.undoDecision.isPending}
 						/>
 					) : null}
 					{!isOpenRun ? (
@@ -291,10 +293,14 @@ function RunDetails({
 	view,
 	onHandled,
 	handling,
+	onUndo,
+	undoing,
 }: {
 	view: AutopilotView;
 	onHandled: (eventId: string) => void;
 	handling: boolean;
+	onUndo: (eventId: string) => void;
+	undoing: boolean;
 }) {
 	const { t } = useTranslation();
 	const report = view.report;
@@ -345,9 +351,18 @@ function RunDetails({
 						<Field label={t("autopilot.panel.decisions")}>
 							<ul className="flex flex-col gap-1.5" data-testid="autopilot-decisions">
 								{decisions.map((decision) => (
-									<li key={decision.id}>
-										<span>{decision.summary}</span>
-										{decision.detail ? <span className="block text-xs text-settings-muted">{decision.detail}</span> : null}
+									<li key={decision.id} className="flex items-start justify-between gap-3" data-testid="autopilot-decision">
+										<div className="min-w-0">
+											<span>{decision.summary}</span>
+											{decision.detail ? <span className="block text-xs text-settings-muted">{decision.detail}</span> : null}
+										</div>
+										{decision.resolvedAt ? (
+											<span className="shrink-0 text-xs leading-5 text-settings-muted">{t("autopilot.panel.undone")}</span>
+										) : (
+											<Button type="button" size="xs" variant="secondary" disabled={undoing} onClick={() => onUndo(decision.id)}>
+												{t("autopilot.panel.undo")}
+											</Button>
+										)}
 									</li>
 								))}
 							</ul>

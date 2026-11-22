@@ -430,6 +430,198 @@ export function patchClaudeSteerSettlement(adapterPath) {
 	return true;
 }
 
+/**
+ * Make "Always Allow" cover more than the one call it was pressed on.
+ *
+ * claude-agent-acp 0.70 answers "Always Allow" with the rule Claude Code itself
+ * suggests, and for two common shapes that rule is a single exact call:
+ *
+ * - An interpreter run that starts with a flag or names a script (`node -e
+ *   "..."`, `python -c "..."`, `python script.py`) gets the whole command line,
+ *   so the next one with different code or arguments asks again.
+ * - An MCP tool gets only that tool, so every sibling tool of the same server
+ *   asks again.
+ *
+ * Commands with a subcommand (`git add *`, `npm run *`) already get a class
+ * rule, and file edits switch the session to accept-edits; both are left alone.
+ *
+ * For the two shapes above AO adds an explicit, named choice and changes no
+ * existing id. `allow_always` (what `ao session approvals resolve --decision
+ * allow_always` sends) stays Claude Code's own narrow rule. An interpreter run
+ * gains `allow_always_class` for the command kind (`node -e *`), offered only
+ * for a short allowlist of interpreters: a program that deletes, moves data or
+ * runs other commands (`rm -rf`, `git --no-pager`, `chmod -R`, `curl`, `npx`,
+ * shells) never gets a wildcard from AO. An MCP tool gains
+ * `allow_always_server` for `mcp__<server>`, because a server's tools differ in
+ * risk. Every rule keeps the destination Claude Code chose (the session's own
+ * `.claude/settings.local.json`), and the option names say what is remembered.
+ * Setting AO_CLAUDE_EXACT_ALWAYS_ALLOW=1 in the adapter's environment removes
+ * the added choices.
+ *
+ * The anchors are a deliberate upgrade tripwire: if upstream changes this code,
+ * packaging fails instead of silently going back to asking again.
+ */
+export function patchClaudeAlwaysAllowScope(adapterPath) {
+	let source = readFileSync(adapterPath, "utf8");
+	if (source.includes(CLAUDE_ALWAYS_ALLOW_MARKER)) return false;
+	const patches = [
+		[
+			"function permissionMetadataForAlwaysAllow(suggestions, toolName) {",
+			`${CLAUDE_ALWAYS_ALLOW_HELPERS}function permissionMetadataForAlwaysAllow(suggestions, toolName) {`,
+		],
+		[
+			[
+				"                    {",
+				'                        kind: "allow_always",',
+				'                        name: "Always Allow",',
+				'                        optionId: "allow_always",',
+				"                        _meta: {",
+				"                            permission: permissionMetadataForAlwaysAllow(suggestions, toolName),",
+				"                        },",
+				"                    },",
+			].join("\n"),
+			[
+				"                    ...aoAlwaysAllowOptions(toolName, suggestions).map((choice) => ({",
+				'                        kind: "allow_always",',
+				"                        name: choice.name,",
+				"                        optionId: choice.optionId,",
+				"                        _meta: {",
+				"                            permission: permissionMetadataForAlwaysAllow(choice.updates, toolName),",
+				"                        },",
+				"                    })),",
+			].join("\n"),
+		],
+		[
+			'(response.outcome.optionId === "allow" || response.outcome.optionId === "allow_always")) {',
+			[
+				'(response.outcome.optionId === "allow" ||',
+				"                    aoAlwaysAllowOptions(toolName, suggestions).some((choice) => choice.optionId === response.outcome.optionId))) {",
+			].join("\n"),
+		],
+		[
+			[
+				'                if (response.outcome.optionId === "allow_always") {',
+				"                    return {",
+				'                        behavior: "allow",',
+				"                        updatedInput: toolInput,",
+				"                        updatedPermissions: suggestions ?? [",
+			].join("\n"),
+			[
+				'                if (response.outcome.optionId !== "allow") {',
+				"                    const aoChoice = aoAlwaysAllowOptions(toolName, suggestions).find((choice) => choice.optionId === response.outcome.optionId);",
+				"                    return {",
+				'                        behavior: "allow",',
+				"                        updatedInput: toolInput,",
+				"                        updatedPermissions: aoChoice.updates ?? [",
+			].join("\n"),
+		],
+	];
+	for (const [original, replacement] of patches) {
+		const at = source.indexOf(original);
+		if (at < 0 || source.indexOf(original, at + 1) >= 0) {
+			throw new Error("claude-agent-acp no longer matches AO's always-allow scope patch");
+		}
+		source = source.slice(0, at) + replacement + source.slice(at + original.length);
+	}
+	writeFileSync(adapterPath, source);
+	return true;
+}
+
+const CLAUDE_ALWAYS_ALLOW_MARKER = "// AO: add always-allow choices where Claude Code's own rule is one exact call.";
+
+// Injected into the adapter as written, so it must be plain self-contained
+// JavaScript. It avoids backticks and ${} because this is a template literal.
+const CLAUDE_ALWAYS_ALLOW_HELPERS = String.raw`// AO: add always-allow choices where Claude Code's own rule is one exact call.
+// The only programs AO offers a command-kind choice for: interpreters and a test
+// runner, where "this kind of run" (node -e, python script.py) is what a person
+// means. Anything else keeps Claude Code's exact rule and gets no wildcard from
+// AO: a program that deletes or moves data (rm, mv, chmod, git), reaches the
+// network (curl, wget, ssh), fetches and runs packages (npx) or runs another
+// command line (shells, env, sudo, xargs) must never be a standing "any
+// arguments" grant that a worker can pick by sending allow_always.
+const AO_CLASS_PROGRAMS = new Set(["node", "python", "python3", "py", "pytest"]);
+// Shell syntax that makes a command more than one plain invocation, plus the
+// characters that would make the quote scan below unreliable.
+const AO_SHELL_SYNTAX = ";&|<>(){}$\\" + String.fromCharCode(96, 10, 13);
+// The command without its varying arguments, for one plain invocation: the
+// program, its leading options, and a script file that follows them. Undefined
+// when Claude Code's rule should stand: a compound command, a program outside
+// the allowlist above, or a command that has no option or script to hold on to.
+function aoBashCommandClass(content) {
+    if (typeof content !== "string") return undefined;
+    const text = content.trim();
+    if (text === "" || text.endsWith("*")) return undefined;
+    let quote = "";
+    for (const ch of text) {
+        if (ch === "$" || ch === "\\" || ch === String.fromCharCode(96)) return undefined;
+        if (quote) {
+            if (ch === quote) quote = "";
+            continue;
+        }
+        if (ch === "'" || ch === '"') {
+            quote = ch;
+            continue;
+        }
+        if (AO_SHELL_SYNTAX.includes(ch)) return undefined;
+    }
+    if (quote) return undefined;
+    const words = text.split(/\s+/);
+    if (!/^[A-Za-z][A-Za-z0-9._+-]*$/.test(words[0]) || !AO_CLASS_PROGRAMS.has(words[0].toLowerCase().replace(/\.exe$/, ""))) return undefined;
+    let end = 1;
+    while (end < words.length && /^--?[A-Za-z][A-Za-z0-9-]*$/.test(words[end])) end++;
+    const options = end > 1;
+    // A script path (script.js, tests/a.py), not a URL or a bare word.
+    const script = end < words.length && /^[A-Za-z0-9_.\/~-]+$/.test(words[end]) && /[./]/.test(words[end]) && !words[end].startsWith("-");
+    if (script) end++;
+    if (!script && (!options || end === words.length)) return undefined;
+    return words.slice(0, end).join(" ");
+}
+function aoAlwaysAllowLabel(text) {
+    return text.length > 48 ? text.slice(0, 45) + "..." : text;
+}
+// The "always" choices to offer for a permission request. The first one is
+// always "allow_always" with Claude Code's own rule, so an existing id never
+// means more than it did. updates is what Claude Code applies when a choice is
+// picked, and undefined keeps claude-agent-acp's own fallback for that choice.
+function aoAlwaysAllowOptions(toolName, suggestions) {
+    const stock = [{ optionId: "allow_always", name: "Always Allow", updates: suggestions }];
+    if (process.env.AO_CLAUDE_EXACT_ALWAYS_ALLOW === "1") return stock;
+    const isAllowRule = (update) => update?.type === "addRules" && update.behavior === "allow" && Array.isArray(update.rules);
+    if (typeof toolName === "string" && toolName.startsWith("mcp__")) {
+        const [, server, tool] = toolName.split("__");
+        if (!server || !tool) return stock;
+        const destination = Array.isArray(suggestions) ? suggestions.find(isAllowRule)?.destination : undefined;
+        return [
+            { optionId: "allow_always", name: "Always allow this tool in this workspace", updates: suggestions },
+            {
+                optionId: "allow_always_server",
+                name: "Always allow all " + aoAlwaysAllowLabel(server) + " tools in this workspace",
+                updates: [{ type: "addRules", rules: [{ toolName: "mcp__" + server }], behavior: "allow", destination: destination ?? "session" }],
+            },
+        ];
+    }
+    if (toolName !== "Bash" || !Array.isArray(suggestions)) return stock;
+    const classes = [];
+    const widened = suggestions.map((update) => {
+        if (!isAllowRule(update)) return update;
+        return {
+            ...update,
+            rules: update.rules.map((rule) => {
+                const prefix = rule?.toolName === "Bash" ? aoBashCommandClass(rule.ruleContent) : undefined;
+                if (prefix === undefined) return rule;
+                classes.push(prefix);
+                return { ...rule, ruleContent: prefix + " *" };
+            }),
+        };
+    });
+    if (classes.length === 0) return stock;
+    return [
+        { optionId: "allow_always", name: "Always allow only this exact command", updates: suggestions },
+        { optionId: "allow_always_class", name: "Always allow " + String.fromCharCode(34) + aoAlwaysAllowLabel(classes.join(", ")) + " ..." + String.fromCharCode(34) + " in this workspace", updates: widened },
+    ];
+}
+`;
+
 export function pruneNodeDistribution(nodeRoot) {
 	// The Unix archives expose npm/corepack as bin/ symlinks into lib/. Remove
 	// the entry points before their targets so packagers never see dangling

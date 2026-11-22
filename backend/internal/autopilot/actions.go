@@ -167,6 +167,51 @@ func (s *Service) ResolveParked(ctx context.Context, eventID string) (domain.Aut
 	return resolved, nil
 }
 
+// UndoDecision records that the user wants a decision reversed and asks the
+// agent to reverse it. The decision stays in the log, marked undone, so the
+// return report still shows what happened. Undoing the same decision again is a
+// no-op that does not message the agent twice.
+func (s *Service) UndoDecision(ctx context.Context, eventID string) (domain.AutopilotEvent, error) {
+	if err := requireUser(ctx); err != nil {
+		return domain.AutopilotEvent{}, err
+	}
+	s.undoMu.Lock()
+	defer s.undoMu.Unlock()
+	ev, ok, err := s.store.GetAutopilotEvent(ctx, eventID)
+	if err != nil {
+		return domain.AutopilotEvent{}, fmt.Errorf("autopilot: read decision: %w", err)
+	}
+	if !ok || ev.Kind != domain.AutopilotEventDecision {
+		return domain.AutopilotEvent{}, apierr.NotFound("AUTOPILOT_DECISION_NOT_FOUND", "Unknown decision")
+	}
+	if !ev.ResolvedAt.IsZero() {
+		return ev, nil
+	}
+	run, found, err := s.store.GetAutopilotRun(ctx, ev.RunID)
+	if err != nil {
+		return domain.AutopilotEvent{}, fmt.Errorf("autopilot: read run: %w", err)
+	}
+	if !found {
+		return domain.AutopilotEvent{}, apierr.NotFound("AUTOPILOT_DECISION_NOT_FOUND", "Unknown decision")
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	if err := s.messenger.Send(sendCtx, run.SessionID, undoMessage(ev, run.State.Open())); err != nil {
+		return domain.AutopilotEvent{}, apierr.Unavailable("AUTOPILOT_UNDO_UNDELIVERED",
+			"The agent could not be reached, so the decision was not undone yet. Try again in a moment.")
+	}
+	s.mu.Lock()
+	resolved, changed, err := s.store.ResolveAutopilotEvent(ctx, eventID, s.clock())
+	s.mu.Unlock()
+	if err != nil {
+		return domain.AutopilotEvent{}, fmt.Errorf("autopilot: mark undone: %w", err)
+	}
+	if !changed {
+		return ev, nil
+	}
+	return resolved, nil
+}
+
 // OnWaitDeclared is called when an orchestrator declares that it is waiting for
 // the user (`ao notify-user --waiting`). While Autopilot runs for it, the user is
 // not told: the question becomes an open decision the agent must take itself,

@@ -92,7 +92,7 @@ type CreateAutopilotRunParams struct {
 	UpdatedAt     time.Time
 }
 
-// Autopilot task runs and their log. See migration 20261117082908410.
+// Autopilot task runs and their log. See migration 20261122090000000.
 func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRunParams) (AutopilotRun, error) {
 	row := q.db.QueryRowContext(ctx, createAutopilotRun,
 		arg.ID,
@@ -516,7 +516,7 @@ const resolveAutopilotEvent = `-- name: ResolveAutopilotEvent :one
 UPDATE autopilot_events
 SET resolved_at = ?
 WHERE id = ?
-  AND kind = 'parked'
+  AND kind IN ('parked', 'decision')
   AND resolved_at IS NULL
 RETURNING id, run_id, session_id, kind, iteration, summary, detail, created_at, resolved_at
 `

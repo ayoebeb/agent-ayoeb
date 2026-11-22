@@ -17,6 +17,51 @@ type ConversationUsageLimit struct {
 	ResumeError string     `json:"resumeError,omitempty"`
 }
 
+// UsageLimitResume says what AO will do about a session stopped on a usage limit.
+type UsageLimitResume string
+
+// The usage-limit resume states a client can show.
+const (
+	// UsageLimitResumeScheduled means AO will continue the session once the
+	// limit window resets.
+	UsageLimitResumeScheduled UsageLimitResume = "scheduled"
+	// UsageLimitResumeWaiting means the window has reset and the session waits
+	// for a free resume slot, so resumes do not all hit the new window at once.
+	UsageLimitResumeWaiting UsageLimitResume = "waiting"
+	// UsageLimitResumeOff means AO will not continue the session by itself.
+	UsageLimitResumeOff UsageLimitResume = "off"
+)
+
+// SessionUsageLimit is the read-model fact behind the "usage limit" session
+// status: the session's latest turn stopped on the provider's quota. It is
+// derived at read time from the failed turn and never stored as a status.
+type SessionUsageLimit struct {
+	TurnID string `json:"turnId" description:"The turn that stopped on the limit."`
+	// Window is the provider's own name for the limit, such as "5-hour" or "weekly".
+	Window    string    `json:"window,omitempty" description:"The limit that was hit, in the provider's words, such as 5-hour or weekly."`
+	Message   string    `json:"message" description:"The provider's message for the stop."`
+	StoppedAt time.Time `json:"stoppedAt" description:"When the turn stopped."`
+	// ResetsAt is absent when the provider gave no reset time AO can rely on.
+	ResetsAt *time.Time       `json:"resetsAt,omitempty" description:"When the limit window resets; absent when unknown."`
+	Resume   UsageLimitResume `json:"resume" enum:"scheduled,waiting,off" description:"What AO will do: continue after the reset (scheduled), wait for a free resume slot (waiting), or leave it alone (off)."`
+	// ResumeOffReason explains an off resume.
+	ResumeOffReason string `json:"resumeOffReason,omitempty" enum:"disabled,unknown_reset,cancelled,retry_scheduled,repeated,unavailable" description:"Why AO will not continue the session by itself."`
+}
+
+// UsageLimitStopMessage reports whether a failed turn's error is a provider
+// usage-limit refusal, and returns the provider's window name when it names one.
+func UsageLimitStopMessage(message string) (window string, ok bool) {
+	if ParseConversationUsageLimit(message, nil) == nil {
+		return "", false
+	}
+	if match := usageLimitWindowName.FindStringSubmatch(strings.ReplaceAll(message, "’", "'")); match != nil {
+		return strings.TrimSpace(match[1]), true
+	}
+	return "", true
+}
+
+var usageLimitWindowName = regexp.MustCompile(`(?i)(?:hit|reached) your ([A-Za-z0-9][A-Za-z0-9 .-]*?) limit`)
+
 var claudeUsageLimitPrefixes = []string{
 	"You've hit your",
 	"You've reached your",

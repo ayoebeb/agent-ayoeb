@@ -96,6 +96,21 @@ export type SessionProvisionStep = {
 };
 
 /** The daemon's observed branch facts. `unpushed` equals `commits` until the branch reaches its remote. */
+/**
+ * Present while the session's latest turn is stopped on the provider's usage
+ * limit. Derived by the daemon from the failed turn, never stored: it ends the
+ * moment a new turn starts.
+ */
+export type SessionUsageLimit = {
+	/** The provider's name for the limit, such as "5-hour" or "weekly". */
+	window?: string;
+	/** When the window resets (ISO time); absent when the provider gave none. */
+	resetsAt?: string;
+	/** What AO does: continue after the reset, wait for a free resume slot, or leave it alone. */
+	resume: "scheduled" | "waiting" | "off";
+	resumeOffReason?: string;
+};
+
 export type SessionBranchState = { commits: number; remoteBranch?: string; remoteHead?: string; unpushed: number };
 
 /** The session's current launch still runs a harness release an update has replaced. */
@@ -156,6 +171,8 @@ export type WorkspaceSession = {
 	 * {@link status} already produced.
 	 */
 	displayStatus?: string;
+	/** Set while the latest turn is stopped on the provider's usage limit. */
+	usageLimit?: SessionUsageLimit;
 	statusReadiness?: "checking" | "ready" | "unavailable";
 	/**
 	 * How far this session's start-up got. A Chat spawn answers as soon as the
@@ -205,6 +222,10 @@ export type WorkspaceSession = {
 	lastUserMessageAt?: string;
 	/** ISO timestamp of human direction or deliberate same-project orchestrator direction. */
 	lastInteractionAt?: string;
+	/** ISO timestamp of the last thing a person would notice: an activity change, a PR or CI change, a review. */
+	lastEventAt?: string;
+	/** The agent model the session resolved to at spawn; absent means the agent's own default. */
+	model?: string;
 	isPinned?: boolean;
 	pinnedAt?: string;
 	/** Raw agent lifecycle activity from the daemon. */

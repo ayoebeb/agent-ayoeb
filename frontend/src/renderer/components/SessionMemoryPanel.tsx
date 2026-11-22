@@ -10,7 +10,6 @@ import {
 	processList,
 	stableResourceOrder,
 	type ChipTone,
-	type PressureState,
 	type ProcessRow as ProcessListRow,
 	type ResourceSessionFacts,
 } from "@aoagents/product-ui";
@@ -25,6 +24,8 @@ import {
 	formatMemory,
 	useAppMemory,
 	useFastMemorySampling,
+	useStatusMemorySampling,
+	resourceStatusParts,
 	usePressureState,
 	sampleHistoryLength,
 	cpuSampleOf,
@@ -72,17 +73,6 @@ export function toSessionFacts(session: WorkspaceSession, reading: SessionMemory
 	};
 }
 
-const stateDot: Record<PressureState, string> = {
-	fine: "bg-success",
-	tight_soon: "bg-warning",
-	tight: "animate-status-pulse bg-destructive",
-};
-const stateText: Record<PressureState, string> = {
-	fine: "",
-	tight_soon: "text-warning",
-	tight: "text-destructive",
-};
-
 /** The pressure state and what each live session holds, for the row chips. */
 function usePressureFacts(projectId?: string) {
 	const workspaces = useWorkspaceQuery().data ?? EMPTY_WORKSPACES;
@@ -98,13 +88,15 @@ function usePressureFacts(projectId?: string) {
 }
 
 /**
- * The board's memory light, beside the orchestrator button: a dot and AO's
- * size. Colour means something needs doing; grey means nothing does. The
- * tooltip holds the machine figures, the window behind it everything else.
+ * The status in the window's bottom-right corner: a dot, the machine's RAM
+ * and CPU, and Ayo's own size. Colour means something needs doing; grey means
+ * nothing does. The tooltip holds the pressure detail, the window behind it
+ * (click) everything else.
  */
 export function AppMemoryIndicator() {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
+	useStatusMemorySampling();
 	const memory = useAppMemory();
 	const { state } = usePressureFacts();
 	const app = memory.data?.app;
@@ -113,6 +105,7 @@ export function AppMemoryIndicator() {
 		return null;
 	}
 	const word = state ? t(`shell.memoryState.${state}`) : t("shell.memoryState.unknown");
+	const parts = resourceStatusParts(system, app);
 	const detail = system
 		? t("shell.memoryBarDetail", {
 			free: formatMemory(system.availableBytes),
@@ -127,17 +120,34 @@ export function AppMemoryIndicator() {
 				<TooltipTrigger asChild>
 					<Pressable
 						aria-label={`${word} · ${detail}`}
-						className="inline-flex items-center gap-2 px-2 font-mono text-2xs tabular-nums text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
+						className={cn(
+							"flex w-full min-w-0 items-center gap-1 truncate rounded-md px-2 py-1 text-2xs tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline",
+							state === "tight" ? "text-destructive" : "text-muted-foreground",
+						)}
 						data-memory-state={state ?? "unknown"}
 						data-testid="app-memory-indicator"
 						onClick={() => setOpen(true)}
 						type="button"
 					>
-						<span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", state ? stateDot[state] : "bg-passive")} />
-						<span className={state ? stateText[state] : undefined}>{formatMemory(app.rssBytes)}</span>
+						{parts.ram ? (
+							<span data-testid="app-memory-ram">
+								{t("shell.resourceStatus.ram")} {parts.ram.used}/{parts.ram.total}
+							</span>
+						) : null}
+						{parts.ram && parts.cpu ? <span aria-hidden="true">·</span> : null}
+						{parts.cpu ? (
+							<span data-testid="app-memory-cpu">
+								{t("shell.resourceStatus.cpu")} {parts.cpu}
+							</span>
+						) : null}
+						{parts.ram || parts.cpu ? null : (
+							<span data-testid="app-memory-ayo">
+								{t("shell.resourceStatus.ayo")} {parts.ayo}
+							</span>
+						)}
 					</Pressable>
 				</TooltipTrigger>
-				<TooltipContent side="bottom">{detail}</TooltipContent>
+				<TooltipContent side="right">{detail}</TooltipContent>
 			</Tooltip>
 			{open ? <SessionMemoryPanel onOpenChange={setOpen} open /> : null}
 		</>

@@ -23,6 +23,7 @@ import { type OrchestratorReplacementFailure, useUiStore } from "../stores/ui-st
 import { newestActiveOrchestrator } from "../types/workspace";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import { buildIntake } from "./IntakeFields";
+import { JiraConnectionSettings } from "./JiraConnectionSettings";
 import { ReviewerSelect, reviewerTrustWarning } from "./ReviewerSelect";
 import { ProjectSettingsEditor, type ProjectAgentPickerProps, type ProjectSettingsDraft } from "./ProjectSettingsEditor";
 import { CloudProjectSettingsAdapter } from "./CloudProjectSettingsForm";
@@ -334,11 +335,14 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 		modelScope={() => ""} defaultReviewer={(draft) => WORKER_DEFAULT_REVIEWERS[draft.workerAgent] ?? "claude-code"}
 		reviewerWarning={reviewerTrustWarning} save={save} saveUnchanged onSaveState={onSaveState}
 		modelHostId={hostId}
-		generalExtra={workspace && importableProject(workspace) ? <SettingsSection title={t("sessionImport.settingsTitle")} grouped>
+		generalExtra={<>
+			{workspace && importableProject(workspace) ? <SettingsSection title={t("sessionImport.settingsTitle")} grouped>
 			<SettingsRow label={t("sessionImport.settingsLabel")} description={t("sessionImport.settingsDescription")}>
 				<Button type="button" variant="quiet" size="sm" onClick={() => openProjectImport(projectId)}>{t("sessionImport.menuItem")}</Button>
 			</SettingsRow>
-		</SettingsSection> : undefined}
+		</SettingsSection> : null}
+			{isScratchProject ? null : <JiraConnectionSettings projectId={projectId} hostId={hostId} />}
+		</>}
 		renderAgent={(props) => <LocalAgentPicker {...props} projectId={projectId} hostId={hostId} agentsQuery={agentsQuery} />} />;
 }
 

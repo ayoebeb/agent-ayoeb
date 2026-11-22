@@ -230,3 +230,59 @@ describe("sidebar selection", () => {
 		expect(selectRange(anchored, "session", ordered, "hidden").selection?.keys).toEqual(["s2", "hidden"]);
 	});
 });
+
+describe("panes on different computers", () => {
+	const remoteA: SessionPaneRef = { kind: "session", sessionId: "a", projectId: "p1", hostId: "host-2" };
+	const remoteOrch: SessionPaneRef = { kind: "orchestrator", projectId: "p1", hostId: "host-2" };
+
+	it("keys the same id on two computers apart, and leaves local keys as they were", () => {
+		expect(sessionPaneKey(a)).toBe("session:a");
+		expect(sessionPaneKey(remoteA)).not.toBe(sessionPaneKey(a));
+		expect(sessionPaneKey({ ...a, hostId: "local" })).toBe("session:a");
+		expect(sessionPaneKey(remoteOrch)).not.toBe(sessionPaneKey({ kind: "orchestrator", projectId: "p1" }));
+	});
+
+	it("splits a local session beside a remote one with the same id", () => {
+		const result = splitPaneBeside(null, a, remoteA, "right");
+		expect(result.outcome).toBe("split");
+		expect(Object.keys(result.split!.panes)).toHaveLength(2);
+		expect(result.split!.panes[sessionPaneKey(remoteA)]).toEqual(remoteA);
+		expect(result.split!.focus).toBe(sessionPaneKey(remoteA));
+	});
+
+	it("tells which pane a remote route belongs to", () => {
+		const split = openSplit([a, remoteA])!;
+		expect(paneKeyForSession(split, { id: "a", kind: "worker", workspaceId: "p1", hostId: "host-2" })).toBe(sessionPaneKey(remoteA));
+		expect(paneKeyForSession(split, { id: "a", kind: "worker", workspaceId: "p1" })).toBe(sessionPaneKey(a));
+		const orch = openSplit([a, remoteOrch])!;
+		expect(paneKeyForSession(orch, { id: "o", kind: "orchestrator", workspaceId: "p1", hostId: "host-2" })).toBe(sessionPaneKey(remoteOrch));
+		expect(paneKeyForSession(orch, { id: "o", kind: "orchestrator", workspaceId: "p1" })).toBeUndefined();
+	});
+
+	it("resolves each pane against its own computer's projects", () => {
+		const local = workspace("p1", [session({ id: "a", status: "working" })]);
+		const remote = { ...workspace("p1", [session({ id: "a", status: "working", hostId: "host-2" })]), hostId: "host-2" } as WorkspaceSummary;
+		expect(resolvePane(a, [local, remote])).toMatchObject({ kind: "session", workspace: local });
+		expect(resolvePane(remoteA, [local, remote])).toMatchObject({ kind: "session", workspace: remote });
+		expect(resolvePane(remoteA, [local])).toEqual({ kind: "remote", sessionId: "a", projectId: "p1", hostId: "host-2" });
+	});
+
+	it("shows an offline computer's orchestrator pane as unavailable, not missing", () => {
+		expect(resolvePane(remoteOrch, [workspace("p1", [])])).toEqual({ kind: "host-unavailable", hostId: "host-2" });
+		expect(resolvePane({ kind: "orchestrator", projectId: "gone" }, [workspace("p1", [])])).toEqual({ kind: "missing" });
+	});
+
+	it("remembers the computer of a pane across a reload", () => {
+		const split = openSplit([a, remoteA, remoteOrch])!;
+		const restored = parseStoredSplit(JSON.stringify(split))!;
+		expect(Object.values(restored.panes)).toEqual(expect.arrayContaining([a, remoteA, remoteOrch]));
+		expect(restored.panes[sessionPaneKey(remoteA)]).toEqual(remoteA);
+		expect(paneRefFromDragKey(paneDragKey(remoteA))).toEqual(remoteA);
+	});
+
+	it("selects rows from different computers for one split", () => {
+		const first = toggleSelection(null, "session", sessionPaneKey(a));
+		const second = toggleSelection(first.selection, "session", sessionPaneKey(remoteA));
+		expect(second.selection?.keys).toEqual([sessionPaneKey(a), sessionPaneKey(remoteA)]);
+	});
+});

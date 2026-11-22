@@ -82,6 +82,11 @@ func (f *fakeAutopilot) ResolveParked(ctx context.Context, id string) (domain.Au
 	return f.event, f.err
 }
 
+func (f *fakeAutopilot) UndoDecision(ctx context.Context, id string) (domain.AutopilotEvent, error) {
+	f.rec(ctx, "undo "+id)
+	return f.event, f.err
+}
+
 func autopilotRouter(svc AutopilotService) http.Handler {
 	r := chi.NewRouter()
 	r.Use(caller.Middleware)
@@ -174,6 +179,8 @@ func TestAutopilotForbiddenAndConflictKeepTheirStatus(t *testing.T) {
 		{"already on", http.MethodPost, "/sessions/x/autopilot", `{"task":"t"}`, apierr.Conflict("AUTOPILOT_ALREADY_ON", "on", nil), http.StatusConflict},
 		{"not on", http.MethodPost, "/sessions/x/autopilot/decisions", `{"question":"q","choice":"c","why":"w"}`, apierr.Conflict("AUTOPILOT_NOT_ON", "off", nil), http.StatusConflict},
 		{"a hard limit", http.MethodPost, "/sessions/x/autopilot/decisions", `{"question":"q","choice":"c","why":"w"}`, apierr.Invalid("AUTOPILOT_HARD_LIMIT", "limit", nil), http.StatusBadRequest},
+		{"unknown decision", http.MethodPost, "/autopilot/items/nope/undo", ``, apierr.NotFound("AUTOPILOT_DECISION_NOT_FOUND", "no"), http.StatusNotFound},
+		{"undo cannot reach the agent", http.MethodPost, "/autopilot/items/ape_1/undo", ``, apierr.Unavailable("AUTOPILOT_UNDO_UNDELIVERED", "no"), http.StatusServiceUnavailable},
 		{"unknown item", http.MethodPost, "/autopilot/items/nope/resolve", ``, apierr.NotFound("AUTOPILOT_ITEM_NOT_FOUND", "no"), http.StatusNotFound},
 		{"unreachable session", http.MethodPost, "/sessions/x/autopilot/resume", ``, apierr.Unavailable("AUTOPILOT_RESUME_FAILED", "down"), http.StatusServiceUnavailable},
 	} {

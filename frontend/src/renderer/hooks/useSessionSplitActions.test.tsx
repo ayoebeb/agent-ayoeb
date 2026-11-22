@@ -9,10 +9,11 @@ import { paneOnScreen, useSessionSplitActions } from "./useSessionSplitActions";
 
 const navigate = vi.fn();
 let routedSessionId: string | undefined;
+let routedHostId: string | undefined;
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@tanstack/react-router")>()),
 	useNavigate: () => navigate,
-	useParams: ({ select }: { select: (params: Record<string, string | undefined>) => unknown }) => select({ sessionId: routedSessionId }),
+	useParams: ({ select }: { select: (params: Record<string, string | undefined>) => unknown }) => select({ sessionId: routedSessionId, hostId: routedHostId }),
 }));
 
 function session(id: string, workspaceId: string, overrides: Partial<WorkspaceSession> = {}): WorkspaceSession {
@@ -43,6 +44,7 @@ describe("useSessionSplitActions", () => {
 		navigate.mockReset();
 		toast.mockReset();
 		routedSessionId = undefined;
+		routedHostId = undefined;
 		window.localStorage.clear();
 		useSessionSplitStore.setState({ split: null });
 		useUiStore.setState({ showGlobalToast: toast } as never);
@@ -88,7 +90,7 @@ describe("useSessionSplitActions", () => {
 
 	it("adds a session beside the one on screen and refuses a fifth pane", () => {
 		const { addBeside } = actions();
-		const onScreen = paneOnScreen(null, workspaces, "yia-88")!;
+		const onScreen = paneOnScreen(null, workspaces, { sessionId: "yia-88" })!;
 		expect(onScreen).toEqual({ kind: "session", sessionId: "yia-88", projectId: "yoobi" });
 		act(() => {
 			expect(addBeside(onScreen, { kind: "orchestrator", projectId: "balip" }, "right")).toBe(true);
@@ -96,7 +98,7 @@ describe("useSessionSplitActions", () => {
 		expect(leafKeys(useSessionSplitStore.getState().split!.root)).toEqual(["session:yia-88", "orchestrator:balip"]);
 		expect(navigate).toHaveBeenLastCalledWith({ to: "/projects/$projectId/sessions/$sessionId", params: { projectId: "balip", sessionId: "balip-orc" } });
 		// With the split on screen, the focused pane is the anchor.
-		expect(paneOnScreen(useSessionSplitStore.getState().split, workspaces, "balip-orc")).toEqual({ kind: "orchestrator", projectId: "balip" });
+		expect(paneOnScreen(useSessionSplitStore.getState().split, workspaces, { sessionId: "balip-orc" })).toEqual({ kind: "orchestrator", projectId: "balip" });
 
 		act(() => {
 			addBeside(onScreen, { kind: "orchestrator", projectId: "yoobi" }, "bottom");
@@ -105,5 +107,38 @@ describe("useSessionSplitActions", () => {
 		});
 		expect(toast).toHaveBeenLastCalledWith("Up to 4 can be shown side by side");
 		expect(leafKeys(useSessionSplitStore.getState().split!.root)).toHaveLength(4);
+	});
+
+	describe("with another computer", () => {
+		const remote = { ...workspace("yoobi", [session("yia-88", "yoobi", { hostId: "box-b" }), session("box-orc", "yoobi", { kind: "orchestrator", hostId: "box-b" })]), hostId: "box-b" } as WorkspaceSummary;
+		const both = [...workspaces, remote];
+
+		it("puts a session from another computer beside the local one on screen, and routes to its host", () => {
+			routedSessionId = "yia-88";
+			const { addBeside } = renderHook(() => useSessionSplitActions(() => both)).result.current;
+			const onScreen = paneOnScreen(null, both, { sessionId: "yia-88" })!;
+			expect(onScreen).toEqual({ kind: "session", sessionId: "yia-88", projectId: "yoobi" });
+			const remoteRef = { kind: "session" as const, sessionId: "yia-88", projectId: "yoobi", hostId: "box-b" };
+			act(() => {
+				expect(addBeside(onScreen, remoteRef, "right")).toBe(true);
+			});
+			expect(Object.keys(useSessionSplitStore.getState().split!.panes)).toEqual(["session:yia-88", "session:remote:box-b:yia-88"]);
+			expect(navigate).toHaveBeenLastCalledWith({ to: "/host/$hostId/project/$projectId/session/$sessionId", params: { hostId: "box-b", projectId: "yoobi", sessionId: "yia-88" } });
+		});
+
+		it("anchors on the remote session the route shows", () => {
+			expect(paneOnScreen(null, both, { sessionId: "yia-88", hostId: "box-b" })).toEqual({ kind: "session", sessionId: "yia-88", projectId: "yoobi", hostId: "box-b" });
+		});
+
+		it("opens orchestrators of two computers together and shows the one on screen first", () => {
+			routedHostId = "box-b";
+			routedSessionId = "box-orc";
+			const { open } = renderHook(() => useSessionSplitActions(() => both)).result.current;
+			act(() => {
+				expect(open([{ kind: "orchestrator", projectId: "yoobi" }, { kind: "orchestrator", projectId: "yoobi", hostId: "box-b" }])).toBe(true);
+			});
+			expect(useSessionSplitStore.getState().split!.focus).toBe("orchestrator:remote:box-b:yoobi");
+			expect(navigate).toHaveBeenLastCalledWith({ to: "/host/$hostId/project/$projectId/session/$sessionId", params: { hostId: "box-b", projectId: "yoobi", sessionId: "box-orc" } });
+		});
 	});
 });

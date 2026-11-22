@@ -29,6 +29,7 @@ type Store interface {
 	SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error
 	SetComputerUse(ctx context.Context, enabled bool, now time.Time) error
 	SetSessionRetentionDays(ctx context.Context, days int, now time.Time) error
+	SetUsageLimitAutoResume(ctx context.Context, enabled bool, maxConcurrent int, now time.Time) error
 	SetOrchestratorWaiting(ctx context.Context, enabled bool, renotifyMinutes int, now time.Time) error
 }
 
@@ -55,7 +56,13 @@ type Snapshot struct {
 	// unanswered before it is announced a second time. 0 turns the reminder off;
 	// the default is 10.
 	OrchestratorWaitingRenotifyMinutes int
-	UpdatedAt                          time.Time
+	// UsageLimitAutoResume continues a session that stopped on a usage limit
+	// once the window resets (Settings, General). On by default.
+	UsageLimitAutoResume bool
+	// UsageLimitMaxResumes is how many of those continued turns may run at once,
+	// so they do not all spend the next window together. 3 by default.
+	UsageLimitMaxResumes int
+	UpdatedAt            time.Time
 }
 
 // Offering reports which AO offerings this daemon exposes to clients. It is
@@ -249,6 +256,24 @@ func (s *Service) SetSessionRetentionDays(ctx context.Context, days int) (Snapsh
 	return s.Get(ctx)
 }
 
+// Bounds of the concurrent usage-limit resumes setting.
+const (
+	minUsageLimitMaxResumes = 1
+	maxUsageLimitMaxResumes = 10
+)
+
+// SetUsageLimitAutoResume sets whether sessions stopped on a usage limit are
+// continued once it resets, and how many continued turns may run at once.
+func (s *Service) SetUsageLimitAutoResume(ctx context.Context, enabled bool, maxConcurrent int) (Snapshot, error) {
+	if maxConcurrent < minUsageLimitMaxResumes || maxConcurrent > maxUsageLimitMaxResumes {
+		return Snapshot{}, apierr.Invalid("USAGE_LIMIT_RESUME_INVALID", fmt.Sprintf("maxConcurrent must be between %d and %d", minUsageLimitMaxResumes, maxUsageLimitMaxResumes), nil)
+	}
+	if err := s.store.SetUsageLimitAutoResume(ctx, enabled, maxConcurrent, s.now()); err != nil {
+		return Snapshot{}, err
+	}
+	return s.Get(ctx)
+}
+
 // maxOrchestratorWaitingRenotifyMinutes bounds the reminder delay to a day.
 const maxOrchestratorWaitingRenotifyMinutes = 24 * 60
 
@@ -280,6 +305,15 @@ func (s *Service) SetOrchestratorWaiting(ctx context.Context, enabled bool, reno
 		return Snapshot{}, err
 	}
 	return s.Get(ctx)
+}
+
+// UsageLimitResume reports the usage-limit resume preference for the watcher.
+func (s *Service) UsageLimitResume(ctx context.Context) (bool, int, error) {
+	snapshot, err := s.store.GetAppSettings(ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	return snapshot.UsageLimitAutoResume, snapshot.UsageLimitMaxResumes, nil
 }
 
 // ChatHibernationEnabled is false on every daemon boot until Developer Mode

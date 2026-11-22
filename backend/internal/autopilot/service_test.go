@@ -287,7 +287,7 @@ func TestStartSendsTheTaskTheRulesAndTheHardLimits(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Autopilot is ON", "Make the importer twice as fast", "ao autopilot criteria", "ao autopilot done --evidence",
-		"ao autopilot decide", "ao autopilot park", "--ci-cannot-run", "at most 30", "orchestrator",
+		"ao autopilot decide", "ao autopilot park", "--ci-cannot-run", "at most 30", "orchestrator", "at most 2 workers", "never Opus",
 		"never spend money", "never disable, skip or weaken CI", "never use administrator or elevated rights",
 		"never message people outside AO", "never change logins, tokens, passwords or credentials",
 	} {
@@ -763,6 +763,58 @@ func TestDecideRecordsTheDecisionAndRefusesAHardLimit(t *testing.T) {
 	}
 	if decisions != 1 {
 		t.Fatalf("logged decisions = %d, want only the one accepted", decisions)
+	}
+}
+
+func TestUndoAsksTheAgentToReverseTheDecisionAndMarksItUndoneOnce(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	e.start(orch.ID, "task")
+	agent := asAgent(e.ctx, orch.ID)
+	dec, err := e.svc.Decide(agent, orch.ID, "Refactor or patch?", "Patch the one function", "The refactor touches 40 files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.msgs.to(orch.ID))
+
+	if _, err := e.svc.UndoDecision(agent, dec.ID); !hasCode(err, "AUTOPILOT_USER_ONLY") {
+		t.Fatalf("an agent must not undo its own decision: %v", err)
+	}
+	if _, err := e.svc.UndoDecision(e.ctx, "missing"); !hasCode(err, "AUTOPILOT_DECISION_NOT_FOUND") {
+		t.Fatalf("unknown decision err = %v", err)
+	}
+	undone, err := e.svc.UndoDecision(e.ctx, dec.ID)
+	if err != nil || undone.ResolvedAt.IsZero() {
+		t.Fatalf("undo = %+v, %v; want the decision stamped as undone", undone, err)
+	}
+	msgs := e.msgs.to(orch.ID)
+	if len(msgs) != before+1 {
+		t.Fatalf("messages = %d, want one undo request to the agent", len(msgs)-before)
+	}
+	last := msgs[len(msgs)-1]
+	for _, want := range []string{"undo a decision", "Patch the one function", "40 files", "ao autopilot decide"} {
+		if !strings.Contains(last, want) {
+			t.Errorf("undo message %q lacks %q", last, want)
+		}
+	}
+	if _, err := e.svc.UndoDecision(e.ctx, dec.ID); err != nil || len(e.msgs.to(orch.ID)) != before+1 {
+		t.Fatalf("undoing twice must not message again: %v", err)
+	}
+
+	// A parked item is not a decision; it has its own route.
+	parked, _, _ := e.svc.Park(agent, orch.ID, domain.HardLimitMoney, "Pay for the plan", "x")
+	if _, err := e.svc.UndoDecision(e.ctx, parked.ID); !hasCode(err, "AUTOPILOT_DECISION_NOT_FOUND") {
+		t.Fatalf("undo of a parked item err = %v", err)
+	}
+	// If the agent cannot be reached nothing is marked, so the user can retry.
+	dec2, _ := e.svc.Decide(agent, orch.ID, "Q2?", "A2", "because")
+	e.msgs.fail = errors.New("session gone")
+	if _, err := e.svc.UndoDecision(e.ctx, dec2.ID); !hasCode(err, "AUTOPILOT_UNDO_UNDELIVERED") {
+		t.Fatalf("undelivered err = %v", err)
+	}
+	e.msgs.fail = nil
+	if ev, err := e.svc.UndoDecision(e.ctx, dec2.ID); err != nil || ev.ResolvedAt.IsZero() {
+		t.Fatalf("retry after a failed delivery = %+v, %v", ev, err)
 	}
 }
 

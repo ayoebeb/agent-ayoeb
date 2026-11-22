@@ -162,24 +162,30 @@ describe("AppMemoryIndicator", () => {
 	it("reads a dot and AO's size, plus the fix; grey means nothing to do", () => {
 		const { rerender } = renderButton();
 		const button = screen.getByTestId("app-memory-indicator");
-		expect(button).toHaveTextContent("2.0 GB");
+		// The sidebar line: machine RAM and CPU only, muted, no dot; Ayo's own size lives in the tooltip.
+		expect(button.textContent).toBe("RAM 12.0 GB/32.0 GB·CPU 0%");
+		expect(button).not.toHaveTextContent("Ayo");
+		expect(button).toHaveClass("text-muted-foreground");
+		expect(button).not.toHaveClass("text-destructive");
 		expect(button).not.toHaveTextContent("Fine");
 		expect(button).toHaveAttribute("data-memory-state", "fine");
 		expect(button).toHaveAttribute("aria-label", "Fine · 20.0 GB free of 32.0 GB · Ayo holds 2.0 GB · pressure 0.0");
 
-		// Stalling on memory: the light colours, the phrase stays AO's own size.
+		// Stalling on memory: the state flips, the line stays plain.
 		appMemoryMock.mockReturnValue(appReading(3, 12, 20));
 		rerender();
 		expect(screen.getByTestId("app-memory-indicator")).toHaveAttribute("data-memory-state", "tight_soon");
-		expect(screen.getByTestId("app-memory-indicator")).toHaveTextContent("20.0 GB");
-		expect(screen.getByTestId("app-memory-indicator")).not.toHaveTextContent("·");
+		expect(screen.getByTestId("app-memory-indicator")).toHaveTextContent("RAM 29.0 GB/32.0 GB");
+		// Only "tight" turns the text red.
+		expect(screen.getByTestId("app-memory-indicator")).not.toHaveClass("text-destructive");
 
-		// Tight while AO is a sliver of what is in use: still only AO's own size, never a verdict on other apps.
+		// Tight while AO is a sliver of what is in use: red text, never a verdict on other apps.
 		appMemoryMock.mockReturnValue(appReading(1, 40, 2));
 		rerender();
 		const tight = screen.getByTestId("app-memory-indicator");
 		expect(tight).toHaveAttribute("data-memory-state", "tight");
-		expect(tight).toHaveTextContent("2.0 GB");
+		expect(tight).toHaveTextContent("RAM 31.0 GB/32.0 GB");
+		expect(tight).toHaveClass("text-destructive");
 		expect(tight.textContent).not.toMatch(/apps|Ayo is only|not Ayo/i);
 	});
 

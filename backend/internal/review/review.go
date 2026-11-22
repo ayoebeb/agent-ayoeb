@@ -20,6 +20,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
 
 // ErrInvalid and ErrNotFound let the transport layer map failures to 422/404.
@@ -386,6 +387,11 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 			config = mergeReviewerAgentConfig(domain.AgentConfig{}, overrideConfig)
 		} else {
 			config = domain.AgentConfig{}
+		}
+		if config.Model == "" && override != resolvedHarness {
+			if config.Model, err = e.sameHarnessProjectModel(ctx, worker, harness); err != nil {
+				return TriggerResult{}, err
+			}
 		}
 	} else if !overrideConfig.IsZero() {
 		config = mergeReviewerAgentConfig(config, overrideConfig)
@@ -1874,6 +1880,10 @@ func (e *Engine) terminateReviewer(ctx stdctx.Context, workerID domain.SessionID
 		return TerminateResult{}, err
 	}
 	destroyedHandle := ""
+	// Worker termination must not be blocked by a reviewer pane that cannot be
+	// confirmed gone (for example a stale pty-host pid). Remember the failure,
+	// finish the review-state cleanup, and report it last so the caller can warn.
+	var paneErr error
 	for _, review := range reviews {
 		if archive && review.InterfaceMode == domain.ReviewerInterfaceChat {
 			if err := e.stopReviewChatWork(ctx, review); err != nil {
@@ -1881,7 +1891,10 @@ func (e *Engine) terminateReviewer(ctx stdctx.Context, workerID domain.SessionID
 			}
 		} else if review.ReviewerHandleID != "" {
 			if err := e.launcher.Destroy(ctx, review.ReviewerHandleID); err != nil {
-				return TerminateResult{}, err
+				if archive {
+					return TerminateResult{}, err
+				}
+				paneErr = errors.Join(paneErr, fmt.Errorf("%w: %s: %w", sessionmanager.ErrReviewerPaneTeardown, review.ReviewerHandleID, err))
 			}
 		}
 		if destroyedHandle == "" {
@@ -1913,14 +1926,58 @@ func (e *Engine) terminateReviewer(ctx stdctx.Context, workerID domain.SessionID
 		run.GithubReviewID = ""
 		cancelled = append(cancelled, run)
 	}
-	return TerminateResult{ReviewerHandleID: destroyedHandle, CancelledRuns: cancelled}, nil
+	return TerminateResult{ReviewerHandleID: destroyedHandle, CancelledRuns: cancelled}, paneErr
 }
 
 // reviewerSelection resolves which reviewer reviews the worker's PR: a
 // persisted session preference wins, then the project's reviewer config, then
 // the project's default worker config, then the worker's own harness when
 // supported, otherwise claude-code.
+//
+// When the chosen harness ends up with no model of its own, the model the
+// project configures for that same harness fills the gap (see
+// fillReviewerModel). A model is never carried across harnesses.
 func (e *Engine) reviewerSelection(
+	ctx stdctx.Context,
+	worker domain.SessionRecord,
+) (domain.ReviewerHarness, domain.AgentConfig, error) {
+	harness, config, err := e.reviewerSelectionRaw(ctx, worker)
+	if err != nil || config.Model != "" {
+		return harness, config, err
+	}
+	if config.Model, err = e.sameHarnessProjectModel(ctx, worker, harness); err != nil {
+		return "", domain.AgentConfig{}, err
+	}
+	return harness, config, nil
+}
+
+func (e *Engine) sameHarnessProjectModel(ctx stdctx.Context, worker domain.SessionRecord, harness domain.ReviewerHarness) (string, error) {
+	if e.projects == nil {
+		return "", nil
+	}
+	proj, ok, err := e.projects.GetProject(ctx, string(worker.ProjectID))
+	if err != nil || !ok {
+		return "", err
+	}
+	return fillReviewerModel(proj.Config, harness), nil
+}
+
+// fillReviewerModel returns the model configured for the same harness
+// elsewhere in the project: the worker override's model when the worker agent
+// is that harness, else the project-level model when the worker agent is
+// unset or that harness. Empty when none applies.
+func fillReviewerModel(cfg domain.ProjectConfig, harness domain.ReviewerHarness) string {
+	worker := cfg.Worker.Harness
+	if worker != "" && string(worker) != string(harness) {
+		return ""
+	}
+	if worker != "" && cfg.Worker.AgentConfig.Model != "" {
+		return cfg.Worker.AgentConfig.Model
+	}
+	return cfg.AgentConfig.Model
+}
+
+func (e *Engine) reviewerSelectionRaw(
 	ctx stdctx.Context,
 	worker domain.SessionRecord,
 ) (domain.ReviewerHarness, domain.AgentConfig, error) {

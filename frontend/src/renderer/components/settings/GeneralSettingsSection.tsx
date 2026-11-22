@@ -25,7 +25,7 @@ import { SettingsSection } from "./SettingsSection";
 import { ThemePaletteSwatch } from "./ThemePaletteSwatch";
 import { Switch } from "../ui/switch";
 import { cn } from "../../lib/utils";
-import { useSettings, useUpdateSessionInterface, useUpdateSessionRetention, useUpdateVersionRefresh } from "../../hooks/useSettings";
+import { useSettings, useUpdateSessionInterface, useUpdateSessionRetention, useUpdateUsageLimitResume, useUpdateVersionRefresh } from "../../hooks/useSettings";
 import { useEditorPreference, useSetPreferredEditor } from "../../hooks/useEditorHandoff";
 import { TargetIcon } from "../TopbarOpenEditorButton";
 import type { EditorId } from "../../../shared/editor-handoff";
@@ -133,6 +133,52 @@ function VersionRefreshRow() {
 					onCheckedChange={update}
 				/>
 			</SettingsRow>
+			{error ? (
+				<p role="alert" className="px-3 pb-2 text-caption leading-4 text-error">
+					{error}
+				</p>
+			) : null}
+		</div>
+	);
+}
+
+const USAGE_LIMIT_RESUME_CHOICES = [1, 2, 3, 5];
+
+/**
+ * When a session stops on its provider's usage limit, AO continues it once the
+ * limit resets, a few at a time so they do not use up the next window together.
+ * Daemon-owned; hidden on a daemon that predates it.
+ */
+function UsageLimitResumeRow() {
+	const { t } = useTranslation();
+	const { settings, isLoading } = useSettings();
+	const { update, saving, error } = useUpdateUsageLimitResume();
+	const enabled = settings?.usageLimitAutoResume;
+	const max = settings?.usageLimitMaxResumes ?? 3;
+	if (enabled === undefined) return null;
+	const choices = USAGE_LIMIT_RESUME_CHOICES.includes(max) ? USAGE_LIMIT_RESUME_CHOICES : [...USAGE_LIMIT_RESUME_CHOICES, max].sort((a, b) => a - b);
+	const options: SettingsOption<string>[] = choices.map((choice) => ({ value: String(choice), label: String(choice) }));
+	return (
+		<div className="flex w-full flex-col">
+			<SettingsRow className="rounded-none" label={t("settings.usageLimitResume.label")} description={t("settings.usageLimitResume.description")}>
+				<Switch
+					aria-label={t("settings.usageLimitResume.label")}
+					checked={enabled}
+					disabled={isLoading || saving}
+					onCheckedChange={(next) => update({ enabled: next, maxConcurrent: max })}
+				/>
+			</SettingsRow>
+			{enabled ? (
+				<SettingsRow className="rounded-none" label={t("settings.usageLimitResume.maxLabel")}>
+					<SettingsOptionMenu
+						aria-label={t("settings.usageLimitResume.maxLabel")}
+						value={String(max)}
+						options={options}
+						onChange={(next) => update({ enabled, maxConcurrent: Number(next) })}
+						disabled={isLoading || saving}
+					/>
+				</SettingsRow>
+			) : null}
 			{error ? (
 				<p role="alert" className="px-3 pb-2 text-caption leading-4 text-error">
 					{error}
@@ -347,6 +393,8 @@ export function GeneralSettingsSection({
 	const setNavigationGestures = useUiStore((state) => state.setNavigationGestures);
 	const renderMath = useUiStore((state) => state.renderMath);
 	const setRenderMath = useUiStore((state) => state.setRenderMath);
+	const resourceStatus = useUiStore((state) => state.resourceStatus);
+	const setResourceStatus = useUiStore((state) => state.setResourceStatus);
 	const terminalCopyOnSelect = useUiStore((state) => state.terminalCopyOnSelect);
 	const setTerminalCopyOnSelect = useUiStore((state) => state.setTerminalCopyOnSelect);
 	const projectAvatars = useUiStore((state) => state.projectAvatars);
@@ -433,6 +481,9 @@ export function GeneralSettingsSection({
 				<SettingsRow label={t("settings.renderMath")} description={t("settings.renderMathHint")}>
 					<Switch aria-label={t("settings.renderMath")} checked={renderMath} onCheckedChange={setRenderMath} />
 				</SettingsRow>
+				<SettingsRow label={t("settings.resourceStatus")} description={t("settings.resourceStatusHint")}>
+					<Switch aria-label={t("settings.resourceStatus")} checked={resourceStatus} onCheckedChange={setResourceStatus} />
+				</SettingsRow>
 			</SettingsSection>
 
 			<SettingsSection title={t("settings.navigation")} grouped>
@@ -458,6 +509,7 @@ export function GeneralSettingsSection({
 					/>
 				</SettingsRow>
 				<VersionRefreshRow />
+				<UsageLimitResumeRow />
 				<SessionRetentionRow />
 				<TerminalShellRows />
 				<SettingsRow label={t("settings.terminalCopyOnSelect")}>

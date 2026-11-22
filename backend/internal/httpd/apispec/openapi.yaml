@@ -2153,6 +2153,57 @@ paths:
       summary: Mark a parked Autopilot item handled
       tags:
       - autopilot
+  /api/v1/autopilot/items/{eventId}/undo:
+    post:
+      operationId: undoAutopilotDecision
+      parameters:
+      - description: Parked item identifier, e.g. ape_1.
+        in: path
+        name: eventId
+        required: true
+        schema:
+          description: Parked item identifier, e.g. ape_1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveAutopilotItemResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Ask the agent to undo one of its recorded Autopilot decisions
+      tags:
+      - autopilot
   /api/v1/autopilot/stop:
     post:
       operationId: stopAllAutopilot
@@ -5000,6 +5051,479 @@ paths:
       summary: Replace a project's per-project config
       tags:
       - projects
+  /api/v1/projects/{id}/jira:
+    delete:
+      operationId: disconnectProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Remove a project's Jira connection, token and ticket links
+      tags:
+      - jira
+    get:
+      operationId: getProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraConnection'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Report whether a project is connected to Jira (never returns the token)
+      tags:
+      - jira
+    put:
+      operationId: connectProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JiraConnectRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraConnection'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Verify and store a project's Jira connection
+      tags:
+      - jira
+  /api/v1/projects/{id}/jira/board:
+    get:
+      operationId: getProjectJiraBoard
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraBoard'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: List the project's Jira tickets grouped into its board columns
+      tags:
+      - jira
+  /api/v1/projects/{id}/jira/test:
+    post:
+      operationId: testProjectJira
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JiraConnectRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraTestResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Check Jira credentials, project and query without saving them
+      tags:
+      - jira
+  /api/v1/projects/{id}/jira/tickets/{issueKey}/start:
+    post:
+      operationId: startProjectJiraTicket
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Jira ticket key, for example YIA-123.
+        in: path
+        name: issueKey
+        required: true
+        schema:
+          description: Jira ticket key, for example YIA-123.
+          type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JiraStartResult'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Send a Jira ticket to the project's orchestrator as a new task
+      tags:
+      - jira
+  /api/v1/projects/{id}/permission-rules:
+    get:
+      operationId: listProjectPermissionRules
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListProjectPermissionRulesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the tool permissions users chose "Always allow" for in this project
+      tags:
+      - projects
+  /api/v1/projects/{id}/permission-rules/{ruleId}:
+    delete:
+      operationId: revokeProjectPermissionRule
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Remembered permission rule identifier.
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          description: Remembered permission rule identifier.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Revoke a remembered permission rule for future sessions and live Claude
+        Code sessions of the project
+      tags:
+      - projects
   /api/v1/projects/{id}/permissions:
     delete:
       operationId: forgetProjectPermissions
@@ -5223,6 +5747,138 @@ paths:
       summary: Create a cue for a project
       tags:
       - cues
+  /api/v1/projects/{projectId}/live-servers:
+    get:
+      operationId: listLiveServers
+      parameters:
+      - description: Project whose running dev servers are listed.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          description: Project whose running dev servers are listed.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListLiveServersResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the dev servers running for a project, with an HTTP health reading
+        each
+      tags:
+      - liveServers
+  /api/v1/projects/{projectId}/live-servers/restart:
+    post:
+      operationId: restartLiveServer
+      parameters:
+      - description: Project whose running dev servers are listed.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          description: Project whose running dev servers are listed.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveServerActionRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveServerEnvelope'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Restart a dev server that AO started from .ao/launch.json
+      tags:
+      - liveServers
+  /api/v1/projects/{projectId}/live-servers/stop:
+    post:
+      operationId: stopLiveServer
+      parameters:
+      - description: Project whose running dev servers are listed.
+        in: path
+        name: projectId
+        required: true
+        schema:
+          description: Project whose running dev servers are listed.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveServerActionRequest'
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop one running dev server
+      tags:
+      - liveServers
   /api/v1/projects/clone:
     post:
       operationId: cloneProject
@@ -14044,6 +14700,44 @@ paths:
       summary: Choose how long archived sessions are kept before they are deleted
       tags:
       - settings
+  /api/v1/settings/usage-limit-resume:
+    patch:
+      operationId: updateUsageLimitResume
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUsageLimitResumeRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Choose whether AO continues sessions after a usage limit resets, and
+        how many at once
+      tags:
+      - settings
   /api/v1/settings/version-refresh:
     patch:
       operationId: updateVersionRefresh
@@ -14759,6 +15453,33 @@ paths:
       summary: Check that a custom shell path is an executable
       tags:
       - shellTerminals
+  /api/v1/usage/account-limits:
+    get:
+      operationId: getUsageAccountLimits
+      parameters:
+      - description: Also return the account this session runs under.
+        in: query
+        name: sessionId
+        schema:
+          description: Also return the account this session runs under.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountLimitsResponse'
+          description: OK
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read the accounts' limits and a session's accounts, read-only, for
+        another computer's desktop
+      tags:
+      - usage
   /api/v1/usage/limit-history:
     put:
       operationId: setUsageLimitHistory
@@ -15079,6 +15800,17 @@ components:
       - error
       - code
       - message
+      type: object
+    AccountLimitsResponse:
+      properties:
+        accounts:
+          items:
+            $ref: '#/components/schemas/AgentAccountResponse'
+          type: array
+        session:
+          $ref: '#/components/schemas/SessionAgentAccountsResponse'
+      required:
+      - accounts
       type: object
     AcknowledgeSessionInterfaceTransitionNoticeResponse:
       properties:
@@ -18186,6 +18918,42 @@ components:
         deleteArtifacts:
           type: boolean
       type: object
+    ControllersListProjectPermissionRulesResponse:
+      properties:
+        rules:
+          items:
+            $ref: '#/components/schemas/ControllersProjectPermissionRuleResponse'
+          type: array
+      required:
+      - rules
+      type: object
+    ControllersProjectPermissionRuleResponse:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        kind:
+          enum:
+          - exact
+          - command
+          - tool
+          - server
+          type: string
+        label:
+          type: string
+        sourceSessionId:
+          type: string
+        tool:
+          type: string
+      required:
+      - id
+      - kind
+      - label
+      - tool
+      - createdAt
+      type: object
     ControllersRemoteHostAccountTokenResponse:
       properties:
         hostId:
@@ -18311,6 +19079,7 @@ components:
           - Exited
           - No signal
           - Interrupted
+          - Usage limit
           - Awaiting PR
           - Fixing CI failures
           - Addressing comments
@@ -18474,6 +19243,7 @@ components:
           - idle
           - terminated
           - no_signal
+          - usage_limit
           type: string
         statusReadiness:
           enum:
@@ -18492,6 +19262,8 @@ components:
         updatedAt:
           format: date-time
           type: string
+        usageLimit:
+          $ref: '#/components/schemas/SessionUsageLimit'
         workspaceCleanup:
           enum:
           - pending
@@ -20534,6 +21306,208 @@ components:
       required:
       - kind
       type: object
+    JiraBoard:
+      properties:
+        accountId:
+          type: string
+        boardName:
+          type: string
+        columns:
+          items:
+            $ref: '#/components/schemas/JiraBoardColumn'
+          type: array
+        fetchedAt:
+          format: date-time
+          type: string
+        jql:
+          type: string
+        projectKey:
+          type: string
+        siteUrl:
+          type: string
+        total:
+          type: integer
+        truncated:
+          type: boolean
+      required:
+      - siteUrl
+      - jql
+      - columns
+      - total
+      - fetchedAt
+      type: object
+    JiraBoardColumn:
+      properties:
+        name:
+          type: string
+        other:
+          type: boolean
+        tickets:
+          items:
+            $ref: '#/components/schemas/JiraTicket'
+          type: array
+      required:
+      - name
+      - tickets
+      type: object
+    JiraConnectRequest:
+      properties:
+        apiToken:
+          description: 'Atlassian API token. Write-only: it is stored locally and
+            never returned. Empty keeps the stored token.'
+          maxLength: 2048
+          type: string
+        boardId:
+          description: Jira board id. Omit to use the project's first board.
+          type: integer
+        email:
+          description: Email address of the Atlassian account that owns the API token.
+          maxLength: 320
+          type: string
+        jql:
+          description: Optional JQL that chooses the tickets. Overrides the project
+            key's default query.
+          maxLength: 4096
+          type: string
+        projectKey:
+          description: Jira project key, for example YIA. Optional, empty shows every
+            ticket assigned to you in any Jira project.
+          maxLength: 32
+          type: string
+        siteUrl:
+          description: Jira Cloud site, for example yourcompany.atlassian.net.
+          maxLength: 512
+          type: string
+      required:
+      - siteUrl
+      - email
+      type: object
+    JiraConnection:
+      properties:
+        accountName:
+          type: string
+        boardId:
+          type: integer
+        connected:
+          type: boolean
+        connectedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        email:
+          type: string
+        jql:
+          type: string
+        projectKey:
+          type: string
+        siteUrl:
+          type: string
+      required:
+      - connected
+      type: object
+    JiraStartResult:
+      properties:
+        duplicate:
+          type: boolean
+        issueKey:
+          type: string
+        orchestratorId:
+          type: string
+        spawned:
+          type: boolean
+      required:
+      - issueKey
+      - orchestratorId
+      type: object
+    JiraTestResult:
+      properties:
+        accountName:
+          type: string
+        jql:
+          type: string
+        projectName:
+          type: string
+        ticketCount:
+          type: integer
+      required:
+      - accountName
+      - jql
+      - ticketCount
+      type: object
+    JiraTicket:
+      properties:
+        acceptanceCriteria:
+          type: string
+        assignee:
+          $ref: '#/components/schemas/JiraTicketUser'
+        description:
+          type: string
+        issueType:
+          type: string
+        key:
+          type: string
+        labels:
+          items:
+            type: string
+          type: array
+        priority:
+          type: string
+        sessions:
+          items:
+            $ref: '#/components/schemas/JiraTicketSession'
+          type: array
+        status:
+          $ref: '#/components/schemas/JiraTicketStatus'
+        summary:
+          type: string
+        updatedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        url:
+          type: string
+      required:
+      - key
+      - summary
+      - url
+      - status
+      type: object
+    JiraTicketSession:
+      properties:
+        sessionId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+      required:
+      - sessionId
+      - startedAt
+      type: object
+    JiraTicketStatus:
+      properties:
+        category:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+      required:
+      - id
+      - name
+      - category
+      type: object
+    JiraTicketUser:
+      properties:
+        accountId:
+          type: string
+        displayName:
+          type: string
+      required:
+      - accountId
+      - displayName
+      type: object
     KillReviewResponse:
       properties:
         reviewerHandleId:
@@ -20707,6 +21681,15 @@ components:
       - path
       - parent
       - entries
+      type: object
+    ListLiveServersResponse:
+      properties:
+        servers:
+          items:
+            $ref: '#/components/schemas/LiveServerResponse'
+          type: array
+      required:
+      - servers
       type: object
     ListNotificationsResponse:
       properties:
@@ -20943,6 +21926,97 @@ components:
       - path
       - entries
       - truncated
+      type: object
+    LiveServerActionRequest:
+      properties:
+        key:
+          description: The key of a server from the list.
+          type: string
+      required:
+      - key
+      type: object
+    LiveServerEnvelope:
+      properties:
+        server:
+          $ref: '#/components/schemas/LiveServerResponse'
+      required:
+      - server
+      type: object
+    LiveServerResponse:
+      properties:
+        canRestart:
+          type: boolean
+        command:
+          type: string
+        error:
+          type: string
+        health:
+          description: up when the server answered an HTTP request within a few seconds.
+          enum:
+          - up
+          - down
+          type: string
+        healthMs:
+          format: int64
+          type: integer
+        healthNote:
+          type: string
+        key:
+          description: 'Stable identifier within the project: managed:<sessionId>
+            or detected:<port>.'
+          type: string
+        logs:
+          items:
+            type: string
+          type: array
+        name:
+          type: string
+        outputAvailable:
+          type: boolean
+        pid:
+          type: integer
+        port:
+          type: integer
+        sessionId:
+          type: string
+        sessionName:
+          type: string
+        source:
+          description: managed servers were started by AO from .ao/launch.json; detected
+            ones by a worker on its own.
+          enum:
+          - managed
+          - detected
+          type: string
+        startedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        state:
+          description: 'Lifecycle state: starting, ready, stopping or failed.'
+          type: string
+        terminalId:
+          description: PTY handle the terminal mux attaches to; present only for managed
+            servers.
+          type: string
+        url:
+          type: string
+        workingDir:
+          type: string
+      required:
+      - key
+      - source
+      - name
+      - port
+      - url
+      - sessionId
+      - state
+      - health
+      - healthMs
+      - logs
+      - outputAvailable
+      - canRestart
       type: object
     MarkAllNotificationsReadRequest:
       properties:
@@ -22479,7 +23553,14 @@ components:
         at:
           format: date-time
           type: string
+        error:
+          description: Why a failed turn failed, such as a usage-limit message.
+          type: string
         harness:
+          type: string
+        state:
+          description: 'The turn''s state when it did not complete: failed, interrupted
+            or running.'
           type: string
         userRequest:
           type: string
@@ -23134,6 +24215,52 @@ components:
       - startedAt
       - failed
       type: object
+    SessionUsageLimit:
+      properties:
+        message:
+          description: The provider's message for the stop.
+          type: string
+        resetsAt:
+          description: When the limit window resets; absent when unknown.
+          format: date-time
+          type:
+          - "null"
+          - string
+        resume:
+          description: 'What AO will do: continue after the reset (scheduled), wait
+            for a free resume slot (waiting), or leave it alone (off).'
+          enum:
+          - scheduled
+          - waiting
+          - "off"
+          type: string
+        resumeOffReason:
+          description: Why AO will not continue the session by itself.
+          enum:
+          - disabled
+          - unknown_reset
+          - cancelled
+          - retry_scheduled
+          - repeated
+          - unavailable
+          type: string
+        stoppedAt:
+          description: When the turn stopped.
+          format: date-time
+          type: string
+        turnId:
+          description: The turn that stopped on the limit.
+          type: string
+        window:
+          description: The limit that was hit, in the provider's words, such as 5-hour
+            or weekly.
+          type: string
+      required:
+      - turnId
+      - message
+      - stoppedAt
+      - resume
+      type: object
     SessionWait:
       properties:
         reason:
@@ -23533,6 +24660,14 @@ components:
           type: integer
         trackerIntakeEnabled:
           type: boolean
+        usageLimitAutoResume:
+          description: When a session stops on the provider's usage limit, AO continues
+            it after the limit resets.
+          type: boolean
+        usageLimitMaxResumes:
+          description: How many sessions AO continues at once after a usage limit
+            resets, so they do not all spend the next window together.
+          type: integer
         versionRefresh:
           description: After a harness update, idle open sessions restart on the new
             release instead of running the old one until they happen to restart.
@@ -23546,6 +24681,8 @@ components:
       - versionRefresh
       - computerUse
       - sessionRetentionDays
+      - usageLimitAutoResume
+      - usageLimitMaxResumes
       - orchestratorWaitingEnabled
       - orchestratorWaitingRenotifyMinutes
       - autopilotMaxIterations
@@ -24998,6 +26135,24 @@ components:
       required:
       - title
       type: object
+    UpdateUsageLimitResumeRequest:
+      properties:
+        enabled:
+          description: Continue sessions stopped on a usage limit once it resets.
+          type:
+          - "null"
+          - boolean
+        maxConcurrent:
+          description: Most continued turns that run at once.
+          maximum: 10
+          minimum: 1
+          type:
+          - "null"
+          - integer
+      required:
+      - enabled
+      - maxConcurrent
+      type: object
     UpdateVersionRefreshRequest:
       properties:
         enabled:
@@ -26163,3 +27318,5 @@ tags:
   name: link-preview
 - description: Local GitHub personal access token storage and repository listing
   name: github
+- description: Per-project Jira Cloud connection, ticket board and start-from-ticket
+  name: jira

@@ -37,8 +37,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/systemexec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/telemetry/policyauthority"
 	"github.com/aoagents/agent-orchestrator/backend/internal/agentlaunch"
-	"github.com/aoagents/agent-orchestrator/backend/internal/autopilot"
 	"github.com/aoagents/agent-orchestrator/backend/internal/attachmentstore"
+	"github.com/aoagents/agent-orchestrator/backend/internal/autopilot"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autoreview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/browserruntime"
 	"github.com/aoagents/agent-orchestrator/backend/internal/browserstream"
@@ -76,6 +76,7 @@ import (
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	linkpreviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/linkpreview"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/permissionmemory"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/report"
@@ -86,6 +87,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systeminstall"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/terminaltitle"
 	usagesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/usage"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/usagelimit"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -98,6 +100,10 @@ import (
 const usageReconcileTick = 3 * time.Minute
 
 const chatHibernateSweepTick = 30 * time.Second
+
+// usageLimitSweepEvery is how often the usage-limit watcher looks for new stops
+// and a due resume. Resumes are further spaced by the watcher's own stagger.
+const usageLimitSweepEvery = 5 * time.Second
 
 // workspaceCleanupSweepTick paces the terminated-session cleanup reconcile.
 // Its work is retry and bookkeeping, not anything a user waits on.
@@ -451,7 +457,17 @@ func Run(buildVersion string) error {
 	// The review and chat services and the hook route start before the SCM
 	// observer they ask for early refreshes, so they hold a late-bound handle.
 	reviewRefresher := &scmReviewRefresher{}
+	// "Always allow" choices a user made, remembered per project: kept in the
+	// daemon's own store, written into each new Claude Code session workspace.
+	permissionMemory := permissionmemory.New(permissionmemory.Options{
+		Store:       store,
+		Sessions:    store,
+		AddRules:    claudecodeagent.AddPermissionRules,
+		RemoveRules: claudecodeagent.RemovePermissionRules,
+		Log:         log,
+	})
 	chatSvc := chatsvc.New(chatsvc.Options{
+		PermissionMemory:    permissionMemory,
 		PRChanged:           reviewRefresher.RequestSessionRefresh,
 		Store:               store,
 		Sessions:            store,
@@ -659,6 +675,9 @@ func Run(buildVersion string) error {
 		}
 		return fmt.Errorf("wire session service: %w", err)
 	}
+	if binder, ok := wiredSessMgr.(projectPermissionBinder); ok {
+		binder.SetProjectPermissionApplier(permissionMemory)
+	}
 	if usage != nil {
 		sessionSvc.SetUsageArchiveFlush(func(context.Context) { usage.requestArchiveFlush() })
 	}
@@ -806,6 +825,32 @@ func Run(buildVersion string) error {
 		Delivery: reportSemanticDelivery{chat: chatSvc, sessions: reportSessions, store: store},
 	})
 	chatSvc.SetReportCoordinator(reportCoordinator)
+	// A worker that ends a turn without running `ao report` gets one automatic
+	// report to its orchestrator, for Chat and terminal workers alike.
+	lcStack.LCM.SetTurnObserver(reportsvc.NewMissingReportFallback(reportsvc.MissingReportDeps{
+		Store: store, Reports: reportSvc, Turns: chatSvc, Sessions: store, Busy: chatSvc, Logger: log,
+	}))
+	// A turn that stops on the provider's usage limit is followed up exactly once:
+	// the orchestrator is told, the person gets one notification per account and
+	// window, and the session is continued after the reset (staggered and capped).
+	usageLimitSvc := usagelimit.New(usagelimit.Deps{
+		Store:    store,
+		Settings: settingsSvc,
+		Accounts: usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID},
+		Notifier: notificationWriter,
+		Reporter: usageLimitReporter{reports: reportSvc},
+		Sender:   usageLimitSender{sessions: reportSessions},
+		Logger:   log,
+	})
+	chatSvc.SetUsageLimitResumeIntent(func(intentCtx context.Context, turnID string, retryArmed bool) {
+		reason := domain.UsageLimitOffCancelled
+		if retryArmed {
+			reason = domain.UsageLimitOffRetryArmed
+		}
+		if _, err := store.SkipUsageLimitStop(intentCtx, turnID, reason); err != nil {
+			log.Warn("record usage-limit resume choice", "turn", turnID, "err", err)
+		}
+	})
 	chatSvc.SetHumanReplyObserver(orchestratorWaiting)
 
 	// Autopilot keeps a session on one task until it is verifiably done, answers
@@ -821,9 +866,7 @@ func Run(buildVersion string) error {
 		Progress:    autopilot.GitProgress{},
 		Approvals:   chatSvc,
 		Logger:      log,
-		// UsageLimited is the integration point for the usage-limit state of
-		// PR #23: wire it to the session's usage_limit status there. Nil reads as
-		// "never limited", so the loop keeps going until then.
+		UsageLimited: autopilotUsageLimited(store, time.Now),
 	})
 	autopilotRef.Store(autopilotSvc)
 	orchestratorWaiting.SetAutopilot(autopilotSvc)
@@ -943,6 +986,10 @@ func Run(buildVersion string) error {
 	// lifetime — see internal/service/shellterm.
 	shellTermSvc := startShellTerminals(ctx, cfg, runtimeAdapter, store, projectSvc, sessionSvc, log)
 	configureShellTerminalElevation(shellTermSvc, termMgr, elevationSecret)
+	// Managed preview servers run in PTYs so the Live tab can attach a terminal.
+	managedPreview.SetTerminals(previewTerminals{terminals: shellTermSvc, runtime: runtimeAdapter})
+	reapAbandonedPreviewTerminals(ctx, shellTermSvc, log)
+	liveServers := newLiveServerService(liveServerDeps{dataDir: cfg.DataDir, managed: managedPreview, sessions: sessionSvc, projects: projectSvc, runtime: runtimeAdapter})
 	// Agents started by hand in a shell give its tab their logo and status.
 	if rt, ok := runtimeAdapter.(shellagent.Runtime); ok {
 		shellAgents := shellagent.NewManager(ctx, rt, agents, log)
@@ -1225,59 +1272,61 @@ func Run(buildVersion string) error {
 	// the session's own must not replace its activity or transcript.
 	hookActivity := hookprocess.New(lcStack.LCM, store, runtimeAdapter, nil, log)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
-		Awake:               awakeSvc,
-		Projects:            projectSvc,
-		ArtifactVersions:    lcStack.ArtifactVersions,
-		HostID:              hostIdentity.HostID,
-		Endpoints:           bs,
-		Agents:              agentSvc,
-		CodexAccounts:       agentSvc,
-		AgentAccounts:       freshAccountUsage{agentAccountSvc, usagePipeline},
-		SystemChecks:        systemChecks,
-		Installer:           systemInstall,
-		ComputerUse:         computerUse,
-		Sessions:            sessionSvc,
-		Automations:         automationSvc,
-		DesktopWorkspaces:   sessionSvc,
-		PRs:                 prActions,
-		Reviews:             reviewSvc,
-		Notifications:       notifier,
-		OrchestratorWaiting: orchestratorWaiting,
-		Autopilot:           autopilotSvc,
-		Reports:             reportSvc,
-		NotificationStream:  notificationHub,
-		Push:                pushRegistry,
-		Presence:            presenceTracker,
-		DeviceRoster:        deviceRoster,
-		DeviceLive:          presenceTracker,
-		Import:              importsvc.New(importsvc.Deps{Store: store}),
-		SessionImport:       sessionImportSvc,
-		Directories:         fsbrowsersvc.New(),
-		ShellTerminals:      shellTermSvc,
-		CommandRuns:         shellTermSvc,
-		CommandRunKey:       httpd.DeriveCommandRunKey(browserRuntimeToken),
-		Cues:                cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
-		AgentAuth:           agentAuthSvc,
-		GitHub:              newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),
-		Conversations:       chatSvc,
-		ConversationSearch:  store,
-		Settings:            settingsSvc,
-		CDC:                 store,
-		Events:              cdcPipe.Broadcaster,
-		Activity:            hookActivity,
-		PRRefresh:           reviewRefresher,
-		NativeSessions:      nativeSessions,
-		UsageHooks:          usageCollector,
-		UsageSummary:        freshUsageSummary{usagesvc.NewSummaryReader(store), usagePipeline},
-		UsageReport:         freshUsageReport{usageReportReader(store, usagePricing), usagePipeline},
-		UsageLimitHistory:   usagesvc.NewLimitHistoryReader(store),
-		UsageLimitSetting:   store,
-		UsagePrices:         usagePrices(usagePricing),
-		SessionMemory:       memoryReader,
-		SessionSteps:        lcStack.LCM,
-		Telemetry:           telemetrySink,
-		TelemetryIdentity:   telemetryIdentity,
-		LifetimeSessions:    store.LifetimeSessions,
+		Awake:                  awakeSvc,
+		Projects:               projectSvc,
+		ProjectPermissionRules: permissionMemory,
+		ArtifactVersions:       lcStack.ArtifactVersions,
+		HostID:                 hostIdentity.HostID,
+		Endpoints:              bs,
+		Agents:                 agentSvc,
+		CodexAccounts:          agentSvc,
+		AgentAccounts:          freshAccountUsage{agentAccountSvc, usagePipeline},
+		SystemChecks:           systemChecks,
+		Installer:              systemInstall,
+		ComputerUse:            computerUse,
+		Sessions:               sessionSvc,
+		Automations:            automationSvc,
+		DesktopWorkspaces:      sessionSvc,
+		PRs:                    prActions,
+		Reviews:                reviewSvc,
+		Notifications:          notifier,
+		OrchestratorWaiting:    orchestratorWaiting,
+		Autopilot:              autopilotSvc,
+		Reports:                reportSvc,
+		NotificationStream:     notificationHub,
+		Push:                   pushRegistry,
+		Presence:               presenceTracker,
+		DeviceRoster:           deviceRoster,
+		DeviceLive:             presenceTracker,
+		Import:                 importsvc.New(importsvc.Deps{Store: store}),
+		SessionImport:          sessionImportSvc,
+		Directories:            fsbrowsersvc.New(),
+		ShellTerminals:         shellTermSvc,
+		CommandRuns:            shellTermSvc,
+		CommandRunKey:          httpd.DeriveCommandRunKey(browserRuntimeToken),
+		Cues:                   cuesvc.New(cuesvc.Deps{Store: store, Sessions: sessionSvc, Terminals: shellTermSvc}),
+		AgentAuth:              agentAuthSvc,
+		GitHub:                 newGitHubStatusService(githubpat.New(cfg.DataDir), prReader),
+		Jira:                   newJiraService(cfg.DataDir, store, sessionSvc),
+		Conversations:          chatSvc,
+		ConversationSearch:     store,
+		Settings:               settingsSvc,
+		CDC:                    store,
+		Events:                 cdcPipe.Broadcaster,
+		Activity:               hookActivity,
+		PRRefresh:              reviewRefresher,
+		NativeSessions:         nativeSessions,
+		UsageHooks:             usageCollector,
+		UsageSummary:           freshUsageSummary{usagesvc.NewSummaryReader(store), usagePipeline},
+		UsageReport:            freshUsageReport{usageReportReader(store, usagePricing), usagePipeline},
+		UsageLimitHistory:      usagesvc.NewLimitHistoryReader(store),
+		UsageLimitSetting:      store,
+		UsagePrices:            usagePrices(usagePricing),
+		SessionMemory:          memoryReader,
+		SessionSteps:           lcStack.LCM,
+		Telemetry:              telemetrySink,
+		TelemetryIdentity:      telemetryIdentity,
+		LifetimeSessions:       store.LifetimeSessions,
 		UsageFlush: func(ctx context.Context) {
 			if usage != nil {
 				usage.flush(ctx, false)
@@ -1297,6 +1346,7 @@ func Run(buildVersion string) error {
 		SharedBrowserProfiles:    newSharedBrowserProfilesViaDesktop(browserBroker, log),
 		LinkPreview:              linkpreviewsvc.New(nil),
 		PreviewServer:            managedPreview,
+		LiveServers:              liveServers,
 		SessionCapabilities:      browserAuthority,
 		ShellPreviewCapabilities: shellTermSvc,
 	})
@@ -1514,6 +1564,17 @@ func Run(buildVersion string) error {
 				case <-ticker.C:
 				}
 			}
+		}()
+		go func() {
+			defer sentryobs.RecoverBackground()
+			// Recovery first, like the scheduled retries above: a stop is only
+			// continued once the session's provider work has been reattached.
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return
+			}
+			usageLimitSvc.Run(ctx, usageLimitSweepEvery)
 		}()
 		go func() {
 			defer sentryobs.RecoverBackground()

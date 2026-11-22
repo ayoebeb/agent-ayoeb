@@ -22,6 +22,10 @@ const (
 	NotificationReviewCompleted NotificationType = "review_completed"
 	// NotificationReviewChangesRequested means an AO reviewer found changes to make.
 	NotificationReviewChangesRequested NotificationType = "review_changes_requested"
+	// NotificationUsageLimit means sessions on one account stopped on the
+	// provider's usage limit. There is one per account and limit window, however
+	// many sessions stopped, and it names the session that stopped first.
+	NotificationUsageLimit NotificationType = "usage_limit"
 	// NotificationOrchestratorWaiting means a project's orchestrator, the user's
 	// main contact, is waiting for the user: a pending approval or question, or a
 	// turn that ended with a question the orchestrator declared with
@@ -37,7 +41,7 @@ const (
 func (t NotificationType) Valid() bool {
 	switch t {
 	case NotificationNeedsInput, NotificationReadyToMerge, NotificationPRMerged, NotificationPRClosedUnmerged,
-		NotificationReviewCompleted, NotificationReviewChangesRequested, NotificationOrchestratorWaiting,
+		NotificationReviewCompleted, NotificationReviewChangesRequested, NotificationOrchestratorWaiting, NotificationUsageLimit,
 		NotificationAutopilotParked:
 		return true
 	default:

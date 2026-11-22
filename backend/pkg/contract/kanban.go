@@ -200,7 +200,10 @@ const (
 	DisplayExited      DisplayStatus = "Exited"
 	DisplayNoSignal    DisplayStatus = "No signal"
 	DisplayInterrupted DisplayStatus = "Interrupted"
-	DisplayAwaitingPR  DisplayStatus = "Awaiting PR"
+	// DisplayUsageLimit is a worker stopped on the provider's usage limit. It
+	// shows in every column a live worker can sit in.
+	DisplayUsageLimit DisplayStatus = "Usage limit"
+	DisplayAwaitingPR DisplayStatus = "Awaiting PR"
 	// Validating.
 	DisplayFixingCI           DisplayStatus = "Fixing CI failures"
 	DisplayAddressingComments DisplayStatus = "Addressing comments"
@@ -310,6 +313,8 @@ func buildingDisplayStatus(session KanbanSessionFacts, now time.Time, noSignalGr
 		return DisplayBlocked
 	case session.Activity == ActivityExited:
 		return DisplayExited
+	case usageLimitedWhileIdle(session):
+		return DisplayUsageLimit
 	case interruptedWhileIdle(session):
 		return DisplayInterrupted
 	case silentPastGrace(session.SessionFacts, now, noSignalGrace):
@@ -331,6 +336,8 @@ func validatingDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts, now t
 		return DisplayBlocked
 	case session.Activity == ActivityExited:
 		return DisplayExited
+	case usageLimitedWhileIdle(session):
+		return DisplayUsageLimit
 	case silentPastGrace(session.SessionFacts, now, noSignalGrace):
 		return DisplayNoSignal
 	case pr.CI == CIFailing && session.AutoInjectCI && session.Activity == ActivityActive:
@@ -364,6 +371,8 @@ func artifactDisplayStatus(session KanbanSessionFacts, now time.Time, noSignalGr
 		return DisplayBlocked
 	case session.Activity == ActivityExited:
 		return DisplayExited
+	case usageLimitedWhileIdle(session):
+		return DisplayUsageLimit
 	case interruptedWhileIdle(session):
 		return DisplayInterrupted
 	case silentPastGrace(session.SessionFacts, now, noSignalGrace):
@@ -371,6 +380,13 @@ func artifactDisplayStatus(session KanbanSessionFacts, now time.Time, noSignalGr
 	default:
 		return DisplayNeedsReview
 	}
+}
+
+// usageLimitedWhileIdle reports a worker whose latest turn stopped on the
+// provider's usage limit. It outranks the pull request phrases: until the
+// window resets the worker cannot act on any of them.
+func usageLimitedWhileIdle(session KanbanSessionFacts) bool {
+	return session.UsageLimited && session.Activity == ActivityIdle
 }
 
 // interruptedWhileIdle reports a worker the person stopped mid-turn. Without
@@ -396,6 +412,8 @@ func inReviewDisplayStatus(session KanbanSessionFacts, pr KanbanPRFacts, now tim
 		return DisplayBlocked
 	case session.Activity == ActivityExited:
 		return DisplayExited
+	case usageLimitedWhileIdle(session):
+		return DisplayUsageLimit
 	case silentPastGrace(session.SessionFacts, now, noSignalGrace):
 		return DisplayNoSignal
 	case pr.CI == CIFailing && session.AutoInjectCI && session.Activity == ActivityActive:

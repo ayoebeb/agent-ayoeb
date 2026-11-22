@@ -23,7 +23,7 @@ import { NAV_ROW_HIGHLIGHT_HOST_CLASS, NavRowHighlight } from "./NavRowHighlight
 import { cn } from "./utils";
 import { UserAvatar } from "./UserAvatar";
 
-export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts";
+export type InspectorView = "summary" | "reviews" | "browser" | "sideChat" | "files" | "artifacts" | "crew" | "live";
 
 export type InspectorTab = {
 	badge?: boolean;
@@ -46,6 +46,8 @@ export function SessionInspectorShellView({
 	artifactsView,
 	browserPoppedOut,
 	browserView,
+	crewView,
+	liveView,
 	sideChatView,
 	filesView,
 	headerActions,
@@ -61,6 +63,10 @@ export function SessionInspectorShellView({
 	artifactsView?: ReactNode;
 	browserPoppedOut: boolean;
 	browserView?: ReactNode;
+	/** An orchestrator's crew: every worker of the project. It owns its own scrolling. */
+	crewView?: ReactNode;
+	/** An orchestrator's running dev servers (Live). It owns its own scrolling. */
+	liveView?: ReactNode;
 	sideChatView?: ReactNode;
 	filesView?: ReactNode;
 	headerActions?: ReactNode;
@@ -179,10 +185,10 @@ export function SessionInspectorShellView({
 				className={cn(
 					inspectorBodyBaseClass,
 					!isVisible && "invisible pointer-events-none",
-					activeView !== "browser" && activeView !== "files" && activeView !== "sideChat" && activeView !== "artifacts" && inspectorScrollableBodyClass,
+					activeView !== "browser" && activeView !== "files" && activeView !== "sideChat" && activeView !== "artifacts" && activeView !== "crew" && activeView !== "live" && inspectorScrollableBodyClass,
 					// Read-only details opt out of the app-wide `user-select: none` so they can be copied.
 					(activeView === "summary" || activeView === "reviews") && "select-text",
-					(activeView === "sideChat" || activeView === "artifacts") && "p-0 overflow-hidden",
+					(activeView === "sideChat" || activeView === "artifacts" || activeView === "crew" || activeView === "live") && "p-0 overflow-hidden",
 					activeView === "browser" &&
 						!browserPoppedOut &&
 						"session-inspector__body--browser p-0 overflow-hidden [&>[role=tabpanel]]:border-0 [&>[role=tabpanel]]:rounded-none",
@@ -196,6 +202,8 @@ export function SessionInspectorShellView({
 				{activeView === "sideChat" ? sideChatView : null}
 				{activeView === "files" ? filesView : null}
 				{activeView === "artifacts" ? artifactsView : null}
+				{activeView === "crew" ? crewView : null}
+				{activeView === "live" ? liveView : null}
 			</div>
 		</aside>
 	);

@@ -95,7 +95,7 @@ func buildSystemPromptText(cfg systemPromptConfig) string {
 		}
 	case sessionPromptRoleWorker:
 		if cfg.Standalone {
-			sections = append(sections, standaloneWorkerSystemPrompt(), workerContainerLabelPrompt())
+			sections = append(sections, standaloneWorkerSystemPrompt(), workerContainerLabelPrompt(), workerDevServerPrompt())
 			break
 		}
 		orchestratorID := strings.TrimSpace(cfg.OrchestratorSessionID)
@@ -106,7 +106,7 @@ func buildSystemPromptText(cfg systemPromptConfig) string {
 		if strings.TrimSpace(cfg.Project.Repo) != "" {
 			sections = append(sections, workerNativeReviewPrompt(cfg.Project, orchestratorID != ""))
 		}
-		sections = append(sections, workerMultiPRPrompt(), workerContainerLabelPrompt(), workerGitIsolationPrompt())
+		sections = append(sections, workerMultiPRPrompt(), workerContainerLabelPrompt(), workerDevServerPrompt(), workerGitIsolationPrompt())
 		if rules := strings.TrimSpace(cfg.ProjectRules); rules != "" {
 			sections = append(sections, "## Project Rules\n"+rules)
 		}
@@ -349,6 +349,7 @@ Use `+"`ao report`"+` to persist meaningful progress for the active project orch
 - When the assigned work is complete, run `+"`ao report --done --note <text>`"+`. Attach deliverables with `+"`--artifact`"+` and PRs with `+"`--pr-created`"+` or `+"`--pr-reviewed`"+`; summarize validation and mention anything else, such as issues you filed, in the note.
 - Attach each deliverable with `+"`--artifact <absolute-path>`"+` as soon as it exists, on the report for that milestone; do not wait for `+"`--done`"+`. `+"`--artifact`"+` takes only a path to a file in the session artifact directory, one flag per deliverable, not its supporting files.
 - Do not file a report for routine commands. Report meaningful transitions, decisions, blockers, outputs, and completion. Outputs do not imply completion, and `+"`--done`"+` does not terminate the session. This limit applies to `+"`ao report`"+` only, not to what you tell the user in the conversation.
+- If you end a turn without running `+"`ao report`"+`, AO sends the orchestrator an automatic report on your behalf, so do not rely on it: report yourself.
 
 ## In-App Session Links
 
@@ -471,4 +472,10 @@ func projectValue(value string) string {
 		return trimmed
 	}
 	return "not configured"
+}
+
+// workerDevServerPrompt asks workers to start long-running dev servers through
+// ao preview, so they show in the Live overview with a terminal.
+func workerDevServerPrompt() string {
+	return "## Dev Servers\n\nStart long-running dev servers through `ao preview` (with a `.ao/launch.json` configuration) instead of a background shell command, so they appear in Live with a terminal and Stop/Restart buttons."
 }

@@ -277,3 +277,34 @@ func TestClassifyTextFlagsChoicesThatCrossALimit(t *testing.T) {
 		}
 	}
 }
+
+// A forbidden step must not hide inside a command that runs another command.
+func TestEvaluateReadsCommandsInsideCommands(t *testing.T) {
+	cases := []struct {
+		cmd   string
+		limit domain.HardLimit
+	}{
+		{`sh -c 'git push origin main'`, domain.HardLimitMainPush},
+		{`bash -lc "go test ./... && git push origin main"`, domain.HardLimitMainPush},
+		{`eval "git push origin main"`, domain.HardLimitMainPush},
+		{"echo $(rm -rf /etc)", domain.HardLimitDataDelete},
+		{"echo `sudo ls`", domain.HardLimitAdmin},
+		{`powershell -Command "Remove-Item -Recurse C:\Users\x\Documents"`, domain.HardLimitDataDelete},
+		{`cmd /c del C:\Windows\x`, domain.HardLimitDataDelete},
+		{`bash -c 'bash -c "sudo ls"'`, domain.HardLimitAdmin},
+	}
+	for _, c := range cases {
+		if v := Evaluate(bash(c.cmd)); v.Allow || v.Limit != c.limit {
+			t.Errorf("Evaluate(%q) = allow %v limit %q, want deny %q", c.cmd, v.Allow, v.Limit, c.limit)
+		}
+	}
+	// An encoded script cannot be read, so it is refused without naming a limit.
+	if v := Evaluate(bash("powershell -EncodedCommand AAAA")); v.Allow {
+		t.Errorf("an undecodable encoded command was allowed")
+	}
+	for _, cmd := range []string{`bash -c "go build ./..."`, "echo $(git rev-parse HEAD)", `sh -c 'npm test'`} {
+		if v := Evaluate(bash(cmd)); !v.Allow {
+			t.Errorf("Evaluate(%q) denied (%s: %s), want allow", cmd, v.Limit, v.Reason)
+		}
+	}
+}

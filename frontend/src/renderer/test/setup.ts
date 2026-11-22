@@ -345,6 +345,18 @@ if (typeof window !== "undefined") {
 				canGoForward: false,
 				isLoading: false,
 			}),
+			trustCertificate: async (viewId: string) => ({
+				viewId,
+				url: "",
+				title: "",
+				canGoBack: false,
+				canGoForward: false,
+				isLoading: false,
+			}),
+			certificates: {
+				list: async () => [],
+				remove: async () => [],
+			},
 			stop: async (viewId: string) => ({
 				viewId,
 				url: "",
@@ -404,6 +416,7 @@ if (typeof window !== "undefined") {
 			onAnnotationSubmit: () => () => undefined,
 			onAnnotationCancel: () => () => undefined,
 			onAnnotationState: () => () => undefined,
+			setSessionHost: async () => ({ routed: false }),
 		},
 		browserProfiles: {
 			list: async () => ({ profiles: [], defaultProfileId: null }),
@@ -483,6 +496,10 @@ if (typeof window !== "undefined") {
 			relaunch: async () => undefined,
 			onStatus: () => () => undefined,
 		onTelemetry: () => () => undefined,
+		},
+		dailyUpdate: {
+			get: async () => ({ state: "hidden" as const }),
+			apply: async () => ({ state: "hidden" as const }),
 		},
 		featureBuilds: {
 			list: async () => [],

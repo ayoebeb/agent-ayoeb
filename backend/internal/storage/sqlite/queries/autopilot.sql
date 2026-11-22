@@ -1,4 +1,4 @@
--- Autopilot task runs and their log. See migration 20261117082908410.
+-- Autopilot task runs and their log. See migration 20261122090000000.
 
 -- name: CreateAutopilotRun :one
 INSERT INTO autopilot_runs (
@@ -91,11 +91,13 @@ WHERE session_id = ?
   AND kind = 'parked'
   AND resolved_at IS NULL;
 
+-- A parked item is resolved when the user marks it handled; a decision, when the
+-- user asks the agent to undo it.
 -- name: ResolveAutopilotEvent :one
 UPDATE autopilot_events
 SET resolved_at = ?
 WHERE id = ?
-  AND kind = 'parked'
+  AND kind IN ('parked', 'decision')
   AND resolved_at IS NULL
 RETURNING *;
 

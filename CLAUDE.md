@@ -13,7 +13,7 @@ from a validated Chrome, Firefox, or Safari profile: read known source files
 without modifying them and keep snapshots and results under `~/.ao`. One write exception is Chrome mode's native-messaging host manifest, which Chrome
 only reads from its own `NativeMessagingHosts` directory: written only by an
 explicit `ao browser chrome setup`, removed by `remove`, pointing at a wrapper
-under `~/.ao` and holding no AO state. The other write outside `~/.ao` is Windows toast naming: an unpackaged (dev or daily) run registers its display name and icon once under `HKCUSoftwareClassesAppUserModelIddev.agent-orchestrator.desktop` (`frontend/src/main/windows-toast-identity.ts`) so Windows labels its toasts "Ayo" instead of "Electron". It holds no AO state, and a packaged build never writes it (its installer shortcut carries the name).
+under `~/.ao` and holding no AO state. The other write outside `~/.ao` is Windows toast naming: an unpackaged (dev or daily) run registers its display name and icon once under `HKCU\Software\Classes\AppUserModelId\dev.agent-orchestrator.desktop` (`frontend/src/main/windows-toast-identity.ts`) so Windows labels its toasts "Ayo" instead of "Electron". It holds no AO state, and a packaged build never writes it (its installer shortcut carries the name).
 `frontend/src/main.ts` pins Electron's `userData` to
 `~/.ao/electron`; do not remove that override. See the hard rule in `AGENTS.md`.
 

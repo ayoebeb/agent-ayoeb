@@ -2,7 +2,7 @@ package controllers
 
 import "time"
 
-// AutopilotItemIDParam is the path parameter of the parked-item routes.
+// AutopilotItemIDParam is the path parameter of the parked-item and decision routes.
 type AutopilotItemIDParam struct {
 	EventID string `path:"eventId" description:"Parked item identifier, e.g. ape_1."`
 }

@@ -26,47 +26,51 @@ import (
 
 // APIDeps bundles every service the API layer's controllers depend on.
 type APIDeps struct {
-	UsageFlush        func(context.Context)
-	Awake             controllers.AwakeService
-	Agents            controllers.AgentCatalog
-	CodexAccounts     controllers.CodexAccountService
-	AgentAccounts     controllers.AgentAccountService
-	Projects          projectsvc.Manager
-	Sessions          controllers.SessionService
-	ArtifactVersions  controllers.ArtifactVersionService
-	Automations       controllers.AutomationService
-	DesktopWorkspaces controllers.DesktopWorkspaceService
-	Activity          controllers.ActivityRecorder
-	PRRefresh         controllers.PRRefresher
-	NativeSessions    ports.AgentNativeSessionResolver
-	UsageHooks        controllers.UsageHookRecorder
-	UsageSummary      controllers.UsageSummaryService
-	UsageReport       controllers.UsageReportService
-	UsageLimitHistory controllers.UsageLimitHistoryService
-	UsageLimitSetting controllers.UsageLimitHistorySetting
-	UsagePrices       controllers.UsagePriceService
-	SessionMemory     controllers.SessionMemoryService
-	SessionSteps      controllers.SessionStepsReader
-	PRs               prsvc.ActionManager
-	Reviews           reviewsvc.Manager
-	Notifications     controllers.NotificationService
+	UsageFlush    func(context.Context)
+	Awake         controllers.AwakeService
+	Agents        controllers.AgentCatalog
+	CodexAccounts controllers.CodexAccountService
+	AgentAccounts controllers.AgentAccountService
+	Projects      projectsvc.Manager
+	// ProjectPermissionRules lists and revokes a project's remembered "Always
+	// allow" rules. Nil answers 501.
+	ProjectPermissionRules controllers.ProjectPermissionRules
+	Sessions               controllers.SessionService
+	ArtifactVersions       controllers.ArtifactVersionService
+	Automations            controllers.AutomationService
+	DesktopWorkspaces      controllers.DesktopWorkspaceService
+	Activity               controllers.ActivityRecorder
+	PRRefresh              controllers.PRRefresher
+	NativeSessions         ports.AgentNativeSessionResolver
+	UsageHooks             controllers.UsageHookRecorder
+	UsageSummary           controllers.UsageSummaryService
+	UsageReport            controllers.UsageReportService
+	UsageLimitHistory      controllers.UsageLimitHistoryService
+	UsageLimitSetting      controllers.UsageLimitHistorySetting
+	UsagePrices            controllers.UsagePriceService
+	SessionMemory          controllers.SessionMemoryService
+	SessionSteps           controllers.SessionStepsReader
+	PRs                    prsvc.ActionManager
+	Reviews                reviewsvc.Manager
+	Notifications          controllers.NotificationService
 	// OrchestratorWaiting records and lists orchestrators waiting for the user.
 	OrchestratorWaiting controllers.OrchestratorWaitingService
 	// Autopilot runs a task to completion without the user: start, stop, the
 	// agent's own commands, and the run log.
-	Autopilot controllers.AutopilotService
-	Reports             controllers.ReportService
-	NotificationStream  controllers.NotificationStream
-	Push                controllers.PushRegistry
-	Import              controllers.ImportService
-	SessionImport       controllers.SessionImportService
-	Directories         controllers.DirectoryBrowserService
-	ShellTerminals      controllers.ShellTerminalService
+	Autopilot          controllers.AutopilotService
+	Reports            controllers.ReportService
+	NotificationStream controllers.NotificationStream
+	Push               controllers.PushRegistry
+	Import             controllers.ImportService
+	SessionImport      controllers.SessionImportService
+	Directories        controllers.DirectoryBrowserService
+	ShellTerminals     controllers.ShellTerminalService
 	// CommandRuns runs commands from Chat's Run button; CommandRunKey is the
 	// key the local desktop presents for them (see DeriveCommandRunKey).
 	CommandRuns   controllers.CommandRunService
 	CommandRunKey string
 	Cues          controllers.CueService
+	LiveServers   controllers.LiveServerService
 	// Conversations is nil until a Chat driver is wired; the controller then
 	// answers 501 rather than panicking, matching the other optional surfaces.
 	Conversations controllers.ConversationService
@@ -104,6 +108,8 @@ type APIDeps struct {
 	AgentAuth   controllers.AgentAuthService
 	// GitHub is the local GitHub PAT + repos surface.
 	GitHub controllers.GitHubPATService
+	// Jira is the per-project Jira connection, board and start-from-ticket surface.
+	Jira controllers.JiraService
 	// LinkPreview unfurls external URLs for the renderer's hover cards; nil
 	// leaves the route answering 501.
 	LinkPreview controllers.LinkPreviewService
@@ -153,38 +159,42 @@ type API struct {
 	codexAccounts *controllers.CodexAccountsController
 	agentAccounts *controllers.AgentAccountsController
 	projects      *controllers.ProjectsController
-	sessions      *controllers.SessionsController
-	automations   *controllers.AutomationsController
-	desktop       *controllers.DesktopWorkspaceController
-	usage         *controllers.UsageController
-	prs           *controllers.PRsController
-	reviews       *controllers.ReviewsController
-	notifications *controllers.NotificationsController
-	orchWaiting   *controllers.OrchestratorWaitingController
-	autopilot     *controllers.AutopilotController
-	reports       *controllers.ReportsController
-	push          *controllers.PushController
-	imports       *controllers.ImportController
-	sessionImport *controllers.SessionImportController
-	fs            *controllers.FSController
-	shellTerms    *controllers.ShellTerminalsController
-	commandRuns   *controllers.CommandRunsController
-	cues          *controllers.CuesController
-	conversations *controllers.ConversationsController
-	settings      *controllers.SettingsController
-	dev           *controllers.DevController
-	browser       *controllers.BrowserController
-	sharedBrowser *controllers.SharedBrowserProfilesController
-	system        *controllers.SystemController
-	identity      *controllers.IdentityController
-	endpoints     *controllers.EndpointsController
-	telemetryID   *controllers.TelemetryIdentityController
-	systemInstall *controllers.SystemInstallController
-	computerUse   *controllers.ComputerUseController
-	agentAuth     *controllers.AgentAuthController
-	linkPreview   *controllers.LinkPreviewController
-	github        *controllers.GitHubController
-	events        *EventsController
+	// projectPermissionRules serves /projects/{id}/permission-rules.
+	projectPermissionRules *controllers.ProjectPermissionRulesController
+	sessions               *controllers.SessionsController
+	automations            *controllers.AutomationsController
+	desktop                *controllers.DesktopWorkspaceController
+	usage                  *controllers.UsageController
+	prs                    *controllers.PRsController
+	reviews                *controllers.ReviewsController
+	notifications          *controllers.NotificationsController
+	orchWaiting            *controllers.OrchestratorWaitingController
+	autopilot              *controllers.AutopilotController
+	reports                *controllers.ReportsController
+	push                   *controllers.PushController
+	imports                *controllers.ImportController
+	sessionImport          *controllers.SessionImportController
+	fs                     *controllers.FSController
+	shellTerms             *controllers.ShellTerminalsController
+	commandRuns            *controllers.CommandRunsController
+	cues                   *controllers.CuesController
+	liveServers            *controllers.LiveServersController
+	conversations          *controllers.ConversationsController
+	settings               *controllers.SettingsController
+	dev                    *controllers.DevController
+	browser                *controllers.BrowserController
+	sharedBrowser          *controllers.SharedBrowserProfilesController
+	system                 *controllers.SystemController
+	identity               *controllers.IdentityController
+	endpoints              *controllers.EndpointsController
+	telemetryID            *controllers.TelemetryIdentityController
+	systemInstall          *controllers.SystemInstallController
+	computerUse            *controllers.ComputerUseController
+	agentAuth              *controllers.AgentAuthController
+	linkPreview            *controllers.LinkPreviewController
+	github                 *controllers.GitHubController
+	jira                   *controllers.JiraController
+	events                 *EventsController
 }
 
 // NewAPI constructs the API surface from its dependencies. cfg carries the
@@ -208,6 +218,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		projects: &controllers.ProjectsController{
 			Mgr: deps.Projects,
 		},
+		projectPermissionRules: &controllers.ProjectPermissionRulesController{Svc: deps.ProjectPermissionRules},
 		sessions: &controllers.SessionsController{
 			Svc:                      deps.Sessions,
 			Projects:                 deps.Projects,
@@ -243,6 +254,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 			UserClientGate: commandRunGate(cfg.AllowedOrigins, deps.CommandRunKey),
 		},
 		cues:          &controllers.CuesController{Svc: deps.Cues},
+		liveServers:   &controllers.LiveServersController{Svc: deps.LiveServers, UserClientGate: liveServerGate(cfg.AllowedOrigins, deps.CommandRunKey)},
 		conversations: &controllers.ConversationsController{Svc: deps.Conversations, Renders: attachmentstore.New(cfg.DataDir), Search: deps.ConversationSearch, UserMessages: userMessageRecorder(deps.Sessions)},
 		settings:      &controllers.SettingsController{Svc: deps.Settings, Autopilot: autopilotSettings(deps.Autopilot)},
 		dev:           &controllers.DevController{Import: deps.DevImport},
@@ -257,6 +269,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		agentAuth:     &controllers.AgentAuthController{Svc: deps.AgentAuth},
 		linkPreview:   &controllers.LinkPreviewController{Svc: deps.LinkPreview},
 		github:        &controllers.GitHubController{Svc: deps.GitHub},
+		jira:          &controllers.JiraController{Svc: deps.Jira},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
@@ -271,7 +284,9 @@ func setupRoute(req *http.Request) bool {
 	switch chi.RouteContext(req.Context()).RoutePattern() {
 	case "/api/v1/sessions", "/api/v1/orchestrators", "/api/v1/sessions/{sessionId}/restore",
 		// The first open of an imported chat runs Setup in its new workspace.
-		"/api/v1/sessions/{sessionId}/resume-agent":
+		"/api/v1/sessions/{sessionId}/resume-agent",
+		// Sending a Jira ticket starts the project's orchestrator when it has none.
+		"/api/v1/projects/{id}/jira/tickets/{issueKey}/start":
 		return true
 	}
 	return false
@@ -375,6 +390,7 @@ func (a *API) Register(root chi.Router) {
 			a.codexAccounts.Register(r)
 			a.agentAccounts.Register(r)
 			a.projects.Register(r)
+			a.projectPermissionRules.Register(r)
 			a.sessions.Register(r)
 			a.automations.Register(r)
 			a.desktop.Register(r)
@@ -392,6 +408,7 @@ func (a *API) Register(root chi.Router) {
 			a.shellTerms.Register(r)
 			a.commandRuns.Register(r)
 			a.cues.Register(r)
+			a.liveServers.Register(r)
 			a.conversations.Register(r)
 			a.settings.Register(r)
 			a.dev.Register(r)
@@ -409,6 +426,7 @@ func (a *API) Register(root chi.Router) {
 			a.agentAuth.Register(r)
 			a.linkPreview.Register(r)
 			a.github.Register(r)
+			a.jira.Register(r)
 			// Sibling REST controllers plug in here.
 		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.

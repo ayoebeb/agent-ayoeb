@@ -437,6 +437,13 @@ func TestBuildSystemPrompt_OrchestratorIncludesCommunicationStyleByDefault(t *te
 		"what the tool, feature or change actually does for the human",
 		"why it matters, what happened, and what they must decide, with each option explained",
 		`Never name something only by an internal label such as "option B", "the new tool", a PR number, or a worker id`,
+		// Question anchors: each question under its own heading, linked by the
+		// exact anchor rule the chat renderer uses (chat-anchors.ts).
+		"Put each question the human must answer under its own short heading",
+		`"## Which database?"`,
+		"[Which database?](#which-database)",
+		"lowercase, punctuation removed, spaces turned into hyphens",
+		"a repeated heading gets -1, -2",
 		"Number any task of more than one step",
 		"End with one concrete next action",
 		// The signal that makes the human's main contact audible: nothing observes

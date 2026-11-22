@@ -129,8 +129,11 @@ func TestAutopilot_EventsNewestFirstAndParkedItemsResolveOnce(t *testing.T) {
 	if _, ok, err := s.ResolveAutopilotEvent(ctx, "ev_2", now.Add(2*time.Hour)); err != nil || ok {
 		t.Fatalf("a handled item must not resolve twice: ok=%v err=%v", ok, err)
 	}
-	if _, ok, err := s.ResolveAutopilotEvent(ctx, "ev_3", now.Add(time.Hour)); err != nil || ok {
-		t.Fatalf("only a parked item resolves: ok=%v err=%v", ok, err)
+	if _, ok, err := s.ResolveAutopilotEvent(ctx, "ev_1", now.Add(time.Hour)); err != nil || ok {
+		t.Fatalf("only a parked item or a decision resolves: ok=%v err=%v", ok, err)
+	}
+	if ev, ok, err := s.ResolveAutopilotEvent(ctx, "ev_3", now.Add(time.Hour)); err != nil || !ok || ev.ResolvedAt.IsZero() {
+		t.Fatalf("a decision is stamped when it is undone: %+v ok=%v err=%v", ev, ok, err)
 	}
 	if n, _ := s.CountOpenParkedAutopilotEventsForSession(ctx, sess.ID); n != 0 {
 		t.Fatalf("open parked after resolve = %d, want 0", n)

@@ -55,6 +55,7 @@ import {
 } from "./shared/telemetry-policy";
 import type { MigrationState } from "./main/app-state";
 import type { PrivacyGuideRequest, PrivacyPane } from "./main/privacy-guide";
+import type { DailyUpdateState } from "./shared/daily-update";
 import type { UpdateSettings, UpdateStatus, UpdateInstallResult } from "./main/update-settings";
 import type { CloudAccount, CloudPendingSignIn } from "./shared/cloud-account";
 import {
@@ -113,6 +114,7 @@ import type {
 	BrowserDownloadActionInput,
 	BrowserDownloadsState,
 } from "./shared/browser-downloads";
+import type { BrowserTrustedCertificate } from "./shared/browser-certificate";
 
 if (typeof document !== "undefined") {
 	const markNativeBrowserComposition = () => {
@@ -592,6 +594,8 @@ const api = {
 		getRuntimeState: () => ipcRenderer.invoke("browser:runtime:state") as Promise<BrowserRuntimeState>,
 		nativeCompositionEnabled: true,
 		ensure: (sessionId: string, createInitialTab = true) => ipcRenderer.invoke("browser:ensure", sessionId, createInitialTab) as Promise<BrowserNavState>,
+		/** Tell main which computer a session's browser belongs to (null: this PC), so that computer's localhost opens there. */
+		setSessionHost: (sessionId: string, hostId: string | null) => ipcRenderer.invoke("browser:setSessionHost", sessionId, hostId) as Promise<{ routed: boolean }>,
 		setBounds: (input: BrowserBoundsInput) => ipcRenderer.send("browser:setBounds", input),
 		onBoundsApplied: (listener: (result: BrowserBoundsApplied) => void) => {
 			const wrapped = (_event: Electron.IpcRendererEvent, result: BrowserBoundsApplied) => listener(result);
@@ -612,6 +616,13 @@ const api = {
 		goForward: (viewId: string) => ipcRenderer.invoke("browser:goForward", viewId) as Promise<BrowserNavState>,
 		reload: (viewId: string) => ipcRenderer.invoke("browser:reload", viewId) as Promise<BrowserNavState>,
 		stop: (viewId: string) => ipcRenderer.invoke("browser:stop", viewId) as Promise<BrowserNavState>,
+		trustCertificate: (viewId: string) =>
+			ipcRenderer.invoke("browser:trustCertificate", viewId) as Promise<BrowserNavState>,
+		certificates: {
+			list: () => ipcRenderer.invoke("browser:certificates:list") as Promise<BrowserTrustedCertificate[]>,
+			remove: (host: string, fingerprint: string) =>
+				ipcRenderer.invoke("browser:certificates:remove", host, fingerprint) as Promise<BrowserTrustedCertificate[]>,
+		},
 		getFindState: (viewId: string) =>
 			ipcRenderer.invoke("browser:find:get", viewId) as Promise<BrowserFindState>,
 		findInPage: (input: BrowserFindInput) =>
@@ -901,6 +912,10 @@ const api = {
 				ipcRenderer.off("updates:telemetry", wrapped);
 			};
 		},
+	},
+	dailyUpdate: {
+		get: () => ipcRenderer.invoke("dailyUpdate:get") as Promise<DailyUpdateState>,
+		apply: () => ipcRenderer.invoke("dailyUpdate:apply") as Promise<DailyUpdateState>,
 	},
 	featureBuilds: {
 		list: () => ipcRenderer.invoke("featureBuilds:list") as Promise<FeatureBuild[]>,

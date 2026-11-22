@@ -153,7 +153,7 @@ describe("registerRemotesIpc", () => {
 		const identity = vi.fn(async () => "h_workbox");
 		const probe = vi.fn(async () => "online" as const);
 		let localHostId: string | null = null;
-		const start = vi.fn(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId: string, sourceUrl: string) => sourceUrl, resolvePreviewUrl: (_sessionId: string, viewedUrl: string) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, close: async () => {} }));
+		const start = vi.fn(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId: string, sourceUrl: string) => sourceUrl, resolvePreviewUrl: (_sessionId: string, viewedUrl: string) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, openLoopbackStream: async () => { throw new Error("unused"); }, close: async () => {} }));
 		const ipc = fakeIpc();
 		registerRemotes(ipc.ipcMain, { file, registry: new RemoteRegistry(start), requireAccount: signedIn, identity, probe, localIdentity: async () => localHostId });
 		await expect(ipc.invoke("remotes:list")).resolves.toHaveLength(1);
@@ -190,7 +190,7 @@ describe("registerRemotesIpc", () => {
 		await writeFile(file, JSON.stringify({ remotes: [{ hostId: "h_workbox", label: "Other", url, password: "original", accountUserId: TEST_ACCOUNT }] }));
 		const original = await readFile(file, "utf8");
 		const probe = vi.fn(async () => "online" as const);
-		const start = vi.fn(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId: string, sourceUrl: string) => sourceUrl, resolvePreviewUrl: (_sessionId: string, viewedUrl: string) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, close: async () => {} }));
+		const start = vi.fn(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId: string, sourceUrl: string) => sourceUrl, resolvePreviewUrl: (_sessionId: string, viewedUrl: string) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, openLoopbackStream: async () => { throw new Error("unused"); }, close: async () => {} }));
 		const ipc = fakeIpc();
 		registerRemotes(ipc.ipcMain, { file, registry: new RemoteRegistry(start), requireAccount: signedIn, identity: async () => "h_workbox", probe });
 		await expect(ipc.invoke("remotes:connect", url)).resolves.toMatchObject({ hostId: "h_workbox", url });
@@ -202,7 +202,7 @@ describe("registerRemotesIpc", () => {
 	it("retains an existing verified remote if local identity becomes unavailable during its probe", async () => {
 		const file = await tempFile();
 		const close = vi.fn(async () => {});
-		const registry = new RemoteRegistry(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId, sourceUrl) => sourceUrl, resolvePreviewUrl: (_sessionId, viewedUrl) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, close }));
+		const registry = new RemoteRegistry(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId, sourceUrl) => sourceUrl, resolvePreviewUrl: (_sessionId, viewedUrl) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, openLoopbackStream: async () => { throw new Error("unused"); }, close }));
 		await registry.connect({ hostId: "h_workbox", label: "workbox", url: "http://192.0.2.1:1", password: "old" });
 		let localHostId: string | null = "h_this_mac";
 		const probe = vi.fn(async () => { localHostId = null; return "online" as const; });
@@ -390,7 +390,7 @@ describe("registerRemotesIpc", () => {
 			{ hostId: "h_b", label: "B", url, password: "b", accountUserId: TEST_ACCOUNT },
 		] }));
 		const closed = vi.fn().mockResolvedValue(undefined);
-		const registry = new RemoteRegistry(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId, sourceUrl) => sourceUrl, resolvePreviewUrl: (_sessionId, viewedUrl) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, close: closed }));
+		const registry = new RemoteRegistry(async () => ({ base: "http://127.0.0.1:5000/token", previewUrl: (_sessionId, sourceUrl) => sourceUrl, resolvePreviewUrl: (_sessionId, viewedUrl) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, openLoopbackStream: async () => { throw new Error("unused"); }, close: closed }));
 		await registry.connect({ hostId: "h_b", label: "B", url, password: "b" });
 		const ipc = fakeIpc();
 		registerRemotes(ipc.ipcMain, { file, registry, requireAccount: signedIn, identity: async () => "h_b", probe: async () => "online" });
@@ -444,7 +444,7 @@ describe("registerRemotesIpc", () => {
 	it("drops the proxy of a removed host", async () => {
 		const ipc = fakeIpc();
 		const closed = vi.fn().mockResolvedValue(undefined);
-		const registry = new RemoteRegistry(async () => ({ base: "http://127.0.0.1:7654/token", previewUrl: (_sessionId, sourceUrl) => sourceUrl, resolvePreviewUrl: (_sessionId, viewedUrl) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, close: closed }));
+		const registry = new RemoteRegistry(async () => ({ base: "http://127.0.0.1:7654/token", previewUrl: (_sessionId, sourceUrl) => sourceUrl, resolvePreviewUrl: (_sessionId, viewedUrl) => viewedUrl, agentBrowserUrl: async () => "", isAgentBrowserUrl: () => false, externalUrl: (url: string) => url, openLoopbackStream: async () => { throw new Error("unused"); }, close: closed }));
 		await registry.connect({ hostId: "h_workbox", label: "workbox", url: "http://192.0.2.1:1", password: "old" });
 		registerRemotes(ipc.ipcMain, { file: await tempFile(), registry, requireAccount: signedIn });
 		await ipc.invoke("remotes:remove", "http://192.0.2.1:1");

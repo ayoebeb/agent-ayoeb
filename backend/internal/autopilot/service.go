@@ -117,11 +117,10 @@ type ApprovalResolver interface {
 
 // UsageLimitCheck reports whether the session's account is on a usage limit.
 //
-// INTEGRATION POINT (PR #23, usage-limit state and auto-resume): wire this to the
-// session's usage-limit state (status usage_limit, Session.usageLimit) once that
-// lands. Until then it is nil, which reads as "never limited", and the loop keeps
-// going. While it reports true, the loop sends nothing and the run reads paused;
-// it resumes by itself when the check turns false.
+// The daemon wires it to the session's usage-limit state (a latest turn that
+// stopped on a limit that has not reset). Nil reads as "never limited". While it
+// reports true, the loop sends nothing and the run reads paused; it resumes by
+// itself when the check turns false.
 type UsageLimitCheck func(ctx context.Context, id domain.SessionID) (bool, error)
 
 // TestsVerifier is an optional check that the tests an agent lists as evidence
@@ -171,6 +170,8 @@ type Service struct {
 	// decision and a stop never overwrite each other. It is never held across a
 	// message to a session.
 	mu sync.Mutex
+	// undoMu serialises undo requests so one decision is never undone twice.
+	undoMu sync.Mutex
 	// judging holds the sessions whose turn end is being judged, so the hook and
 	// the watchdog cannot both send the next message for one turn.
 	judging map[domain.SessionID]bool

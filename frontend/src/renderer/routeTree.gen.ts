@@ -15,9 +15,11 @@ import { Route as ShellUsageRouteImport } from './routes/_shell.usage'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellSessionsRouteImport } from './routes/_shell.sessions'
 import { Route as ShellNewRouteImport } from './routes/_shell.new'
+import { Route as ShellMachinesRouteImport } from './routes/_shell.machines'
 import { Route as ShellAutomationsRouteImport } from './routes/_shell.automations'
 import { Route as ShellArtifactsRouteImport } from './routes/_shell.artifacts'
 import { Route as ShellSessionsIndexRouteImport } from './routes/_shell.sessions.index'
+import { Route as ShellProjectsIndexRouteImport } from './routes/_shell.projects.index'
 import { Route as ShellSessionsSessionIdRouteImport } from './routes/_shell.sessions.$sessionId'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellProjectsProjectIdSettingsRouteImport } from './routes/_shell.projects.$projectId_.settings'
@@ -55,6 +57,11 @@ const ShellNewRoute = ShellNewRouteImport.update({
   path: '/new',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellMachinesRoute = ShellMachinesRouteImport.update({
+  id: '/machines',
+  path: '/machines',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellAutomationsRoute = ShellAutomationsRouteImport.update({
   id: '/automations',
   path: '/automations',
@@ -69,6 +76,11 @@ const ShellSessionsIndexRoute = ShellSessionsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ShellSessionsRoute,
+} as any)
+const ShellProjectsIndexRoute = ShellProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => ShellRoute,
 } as any)
 const ShellSessionsSessionIdRoute = ShellSessionsSessionIdRouteImport.update({
   id: '/$sessionId',
@@ -115,12 +127,14 @@ export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/artifacts': typeof ShellArtifactsRoute
   '/automations': typeof ShellAutomationsRoute
+  '/machines': typeof ShellMachinesRoute
   '/new': typeof ShellNewRoute
   '/sessions': typeof ShellSessionsRouteWithChildren
   '/settings': typeof ShellSettingsRoute
   '/usage': typeof ShellUsageRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
+  '/projects/': typeof ShellProjectsIndexRoute
   '/sessions/': typeof ShellSessionsIndexRoute
   '/projects/$projectId/settings': typeof ShellProjectsProjectIdSettingsRoute
   '/host/$hostId/project/$projectId': typeof ShellHostHostIdProjectProjectIdRoute
@@ -131,12 +145,14 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/artifacts': typeof ShellArtifactsRoute
   '/automations': typeof ShellAutomationsRoute
+  '/machines': typeof ShellMachinesRoute
   '/new': typeof ShellNewRoute
   '/settings': typeof ShellSettingsRoute
   '/usage': typeof ShellUsageRoute
   '/': typeof ShellIndexRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
+  '/projects': typeof ShellProjectsIndexRoute
   '/sessions': typeof ShellSessionsIndexRoute
   '/projects/$projectId/settings': typeof ShellProjectsProjectIdSettingsRoute
   '/host/$hostId/project/$projectId': typeof ShellHostHostIdProjectProjectIdRoute
@@ -149,6 +165,7 @@ export interface FileRoutesById {
   '/_shell': typeof ShellRouteWithChildren
   '/_shell/artifacts': typeof ShellArtifactsRoute
   '/_shell/automations': typeof ShellAutomationsRoute
+  '/_shell/machines': typeof ShellMachinesRoute
   '/_shell/new': typeof ShellNewRoute
   '/_shell/sessions': typeof ShellSessionsRouteWithChildren
   '/_shell/settings': typeof ShellSettingsRoute
@@ -156,6 +173,7 @@ export interface FileRoutesById {
   '/_shell/': typeof ShellIndexRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
+  '/_shell/projects/': typeof ShellProjectsIndexRoute
   '/_shell/sessions/': typeof ShellSessionsIndexRoute
   '/_shell/projects/$projectId_/settings': typeof ShellProjectsProjectIdSettingsRoute
   '/_shell/host/$hostId/project/$projectId': typeof ShellHostHostIdProjectProjectIdRoute
@@ -169,12 +187,14 @@ export interface FileRouteTypes {
     | '/'
     | '/artifacts'
     | '/automations'
+    | '/machines'
     | '/new'
     | '/sessions'
     | '/settings'
     | '/usage'
     | '/projects/$projectId'
     | '/sessions/$sessionId'
+    | '/projects/'
     | '/sessions/'
     | '/projects/$projectId/settings'
     | '/host/$hostId/project/$projectId'
@@ -185,12 +205,14 @@ export interface FileRouteTypes {
   to:
     | '/artifacts'
     | '/automations'
+    | '/machines'
     | '/new'
     | '/settings'
     | '/usage'
     | '/'
     | '/projects/$projectId'
     | '/sessions/$sessionId'
+    | '/projects'
     | '/sessions'
     | '/projects/$projectId/settings'
     | '/host/$hostId/project/$projectId'
@@ -202,6 +224,7 @@ export interface FileRouteTypes {
     | '/_shell'
     | '/_shell/artifacts'
     | '/_shell/automations'
+    | '/_shell/machines'
     | '/_shell/new'
     | '/_shell/sessions'
     | '/_shell/settings'
@@ -209,6 +232,7 @@ export interface FileRouteTypes {
     | '/_shell/'
     | '/_shell/projects/$projectId'
     | '/_shell/sessions/$sessionId'
+    | '/_shell/projects/'
     | '/_shell/sessions/'
     | '/_shell/projects/$projectId_/settings'
     | '/_shell/host/$hostId/project/$projectId'
@@ -265,6 +289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellNewRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/machines': {
+      id: '/_shell/machines'
+      path: '/machines'
+      fullPath: '/machines'
+      preLoaderRoute: typeof ShellMachinesRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/automations': {
       id: '/_shell/automations'
       path: '/automations'
@@ -285,6 +316,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/sessions/'
       preLoaderRoute: typeof ShellSessionsIndexRouteImport
       parentRoute: typeof ShellSessionsRoute
+    }
+    '/_shell/projects/': {
+      id: '/_shell/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ShellProjectsIndexRouteImport
+      parentRoute: typeof ShellRoute
     }
     '/_shell/sessions/$sessionId': {
       id: '/_shell/sessions/$sessionId'
@@ -355,12 +393,14 @@ const ShellSessionsRouteWithChildren = ShellSessionsRoute._addFileChildren(
 interface ShellRouteChildren {
   ShellArtifactsRoute: typeof ShellArtifactsRoute
   ShellAutomationsRoute: typeof ShellAutomationsRoute
+  ShellMachinesRoute: typeof ShellMachinesRoute
   ShellNewRoute: typeof ShellNewRoute
   ShellSessionsRoute: typeof ShellSessionsRouteWithChildren
   ShellSettingsRoute: typeof ShellSettingsRoute
   ShellUsageRoute: typeof ShellUsageRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
+  ShellProjectsIndexRoute: typeof ShellProjectsIndexRoute
   ShellProjectsProjectIdSettingsRoute: typeof ShellProjectsProjectIdSettingsRoute
   ShellHostHostIdProjectProjectIdRoute: typeof ShellHostHostIdProjectProjectIdRoute
   ShellHostHostIdSessionSessionIdRoute: typeof ShellHostHostIdSessionSessionIdRoute
@@ -371,12 +411,14 @@ interface ShellRouteChildren {
 const ShellRouteChildren: ShellRouteChildren = {
   ShellArtifactsRoute: ShellArtifactsRoute,
   ShellAutomationsRoute: ShellAutomationsRoute,
+  ShellMachinesRoute: ShellMachinesRoute,
   ShellNewRoute: ShellNewRoute,
   ShellSessionsRoute: ShellSessionsRouteWithChildren,
   ShellSettingsRoute: ShellSettingsRoute,
   ShellUsageRoute: ShellUsageRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
+  ShellProjectsIndexRoute: ShellProjectsIndexRoute,
   ShellProjectsProjectIdSettingsRoute: ShellProjectsProjectIdSettingsRoute,
   ShellHostHostIdProjectProjectIdRoute: ShellHostHostIdProjectProjectIdRoute,
   ShellHostHostIdSessionSessionIdRoute: ShellHostHostIdSessionSessionIdRoute,

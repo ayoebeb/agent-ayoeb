@@ -189,6 +189,8 @@ type AppSetting struct {
 	LimitHistory                       bool
 	OrchestratorWaitingEnabled         int64
 	OrchestratorWaitingRenotifyMinutes int64
+	UsageLimitAutoResume               bool
+	UsageLimitMaxResumes               int64
 	AutopilotMaxIterations             int64
 }
 
@@ -663,6 +665,17 @@ type Project struct {
 	Kind          string
 }
 
+type ProjectPermissionRule struct {
+	ID              string
+	ProjectID       string
+	Tool            string
+	Content         string
+	Kind            string
+	Label           string
+	SourceSessionID string
+	CreatedAt       time.Time
+}
+
 type Report struct {
 	ID                 string
 	SessionID          string
@@ -999,6 +1012,24 @@ type UsageCodexSourceDiscovery struct {
 	NativeSessionID        string
 	DiscoveredChildIdsJson string
 	HasMixedChildTypes     int64
+}
+
+type UsageLimitStop struct {
+	TurnID       string
+	SessionID    string
+	ProjectID    string
+	AccountKey   string
+	WindowKey    string
+	WindowLabel  string
+	ResetsAt     sql.NullTime
+	DetectedAt   time.Time
+	ReportedAt   sql.NullTime
+	ResumeState  string
+	SkipReason   string
+	Attempts     int64
+	RetryAt      sql.NullTime
+	ResumedAt    sql.NullTime
+	ResumeTurnID string
 }
 
 type UsageMessageSummary struct {

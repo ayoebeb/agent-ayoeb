@@ -49,7 +49,7 @@ func startMessage(run domain.AutopilotRun, kind domain.SessionKind) string {
 	b.WriteString("1. First, write the acceptance criteria: a short checklist that says exactly when this task is done and how you will prove it. Record it with `ao autopilot criteria \"<done when ...>\"`.\n")
 	fmt.Fprintf(&b, "2. Work through the task. After every turn that did not finish it, AO sends you the task again (iteration 2, 3, ... of at most %d) until it is verifiably done.\n", run.MaxIterations)
 	b.WriteString("3. Never wait for the user. If you would ask something, pick your recommended option and record it with `ao autopilot decide --question \"<what>\" --choice \"<what you chose>\" --why \"<reason>\"`, then continue.\n")
-	b.WriteString("4. Permission prompts inside your workspace are answered for you, for you and for the workers you start. Keep at most 3 workers running at once.\n")
+	b.WriteString("4. Permission prompts inside your workspace are answered for you, for you and for the workers you start. Keep at most 2 workers running at once, and start every worker and every review on a Sonnet model, never Opus.\n")
 	b.WriteString("5. When every criterion is met and you have verified it (run the tests and builds that prove it), declare it with `ao autopilot done --evidence \"<the commands you ran and their results>\"`. ")
 	b.WriteString("AO then checks the gates: for pull-request work an AO review of the exact head must be approved and CI must be green. If CI cannot start (for example a billing limit), say so with `--ci-cannot-run \"<why>\"`: that is recorded as a gap, not a pass. A gate that fails sends you back to work with the reason.\n")
 	if kind == domain.KindOrchestrator {
@@ -91,6 +91,21 @@ func iterationMessage(run domain.AutopilotRun, next int) string {
 
 func resumeMessage(run domain.AutopilotRun, next int, reason string) string {
 	return reason + "\n\n" + iterationMessage(run, next)
+}
+
+// undoMessage asks the agent to reverse one decision the user disagrees with.
+func undoMessage(ev domain.AutopilotEvent, running bool) string {
+	var b strings.Builder
+	b.WriteString("The user asks you to undo a decision Autopilot recorded for you.\n")
+	fmt.Fprintf(&b, "Decision: %s\n", clip(ev.Summary, 400))
+	if ev.Detail != "" {
+		fmt.Fprintf(&b, "Why you chose it: %s\n", clip(ev.Detail, 600))
+	}
+	b.WriteString("Reverse it: put back what that choice changed, or take the other option instead.")
+	if running {
+		b.WriteString(" Record the replacement with `ao autopilot decide --question \"...\" --choice \"...\" --why \"...\"` and carry on with the task.")
+	}
+	return b.String()
 }
 
 // stopMessage tells the agent the user ended the run.

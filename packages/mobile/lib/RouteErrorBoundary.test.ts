@@ -37,6 +37,7 @@ const screenRoutes = [
 	"spawn.tsx",
 	"preview/[id].tsx",
 	"project/[id].tsx",
+	"jira/[projectId].tsx",
 	"render.tsx",
 	"review/[sessionId].tsx",
 	"reviewer/[reviewId].tsx",

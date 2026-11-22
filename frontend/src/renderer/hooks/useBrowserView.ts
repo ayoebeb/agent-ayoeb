@@ -63,7 +63,7 @@ function sameBrowserOrigin(left: string, right: string): boolean {
 type UseBrowserViewOptions = {
 	sessionId: string;
 	/** Source daemon for preview URLs; omitted for the local daemon. */
-	origin?: { hostId: string; sessionId: string; proxyBase: string };
+	origin?: { hostId: string; sessionId: string; proxyBase: string; label?: string };
 	/** A cloud session, whose agent browser the control plane serves. */
 	cloudAgentBrowser?: { baseUrl: string; orgId: string; sessionId: string };
 	active: boolean;
@@ -91,6 +91,8 @@ type UseBrowserViewOptions = {
 };
 
 export type BrowserViewModel = {
+	/** The computer this session's tabs reach localhost through, when main routes its loopback there; null otherwise. */
+	loopbackVia?: string | null;
 	viewId: string;
 	navState: BrowserNavState;
 	slotRef: (node: HTMLDivElement | null) => void;
@@ -99,6 +101,9 @@ export type BrowserViewModel = {
 	goForward: () => Promise<void>;
 	reload: () => Promise<void>;
 	stop: () => Promise<void>;
+	// Trusts the certificate the page failed on (exactly that host and
+	// fingerprint), then reloads the page.
+	trustCertificate: () => Promise<void>;
 	findState: BrowserFindState;
 	findOpenRequest: number;
 	findInPage: (query: string, forward: boolean, newSession: boolean) => Promise<void>;
@@ -621,6 +626,21 @@ export function useBrowserView({
 		sendHiddenBounds,
 		sessionId,
 	]);
+
+	// A session on another computer: its tabs open that computer's localhost dev
+	// servers (main routes loopback through the host). A profile shared with a
+	// session elsewhere cannot be routed, and main says so.
+	const [loopbackRouted, setLoopbackRouted] = useState(false);
+	const loopbackHostId = origin?.hostId;
+	useEffect(() => {
+		setLoopbackRouted(false);
+		if (!hasNativeBrowser || !loopbackHostId || !viewId || terminated) return undefined;
+		let cancelled = false;
+		void window.ao?.browser.setSessionHost?.(sessionId, loopbackHostId).then((result) => {
+			if (!cancelled) setLoopbackRouted(result.routed);
+		}).catch(() => undefined);
+		return () => { cancelled = true; };
+	}, [hasNativeBrowser, loopbackHostId, sessionId, terminated, viewId]);
 
 	// Swap native views as the destination session first paints: show its
 	// cached view, then hide the departing one, so no frame shows neither.
@@ -1296,6 +1316,7 @@ export function useBrowserView({
 	const switchingTo = !stateBelongsToSession && hasNativeBrowser && !terminated ? nativeViewBySession.get(sessionId) : undefined;
 
 	return {
+		loopbackVia: loopbackRouted && origin ? (origin.label || origin.hostId) : null,
 		viewId: stateBelongsToSession ? viewId : (switchingTo?.viewId ?? ""),
 		navState: stateBelongsToSession ? navState : (switchingTo?.navState ?? EMPTY_NAV_STATE),
 		slotRef,
@@ -1304,6 +1325,7 @@ export function useBrowserView({
 		goForward: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.goForward(id)) : Promise.resolve()),
 		reload: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.reload(id)) : Promise.resolve()),
 		stop: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.stop(id)) : Promise.resolve()),
+		trustCertificate: () => (hasNativeBrowser ? withView((id) => window.ao!.browser.trustCertificate(id)) : Promise.resolve()),
 		findState: stateBelongsToSession ? findState : EMPTY_FIND_STATE,
 		findOpenRequest: stateBelongsToSession ? findOpenRequest : 0,
 		findInPage,

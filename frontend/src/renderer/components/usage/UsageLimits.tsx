@@ -11,7 +11,8 @@ import { AgentAvatar } from "../AgentAvatar";
 import { formatPlanName } from "../settings/AgentAccountsSection";
 import { Button } from "../ui/button";
 
-export function UsageLimits({ accounts, now }: { accounts: readonly AgentAccount[]; now: Date }) {
+/** computerName: another linked computer's usage, where the "device" login is that computer's own. */
+export function UsageLimits({ accounts, now, computerName }: { accounts: readonly AgentAccount[]; now: Date; computerName?: string }) {
 	const { t, i18n } = useTranslation();
 	const providers = useMemo(() => groupAccounts(accounts), [accounts]);
 	const openGlobalSettings = useUiStore((state) => state.openGlobalSettings);
@@ -20,8 +21,8 @@ export function UsageLimits({ accounts, now }: { accounts: readonly AgentAccount
 		return (
 			<div className="flex flex-col items-center gap-2 py-16 text-center">
 				<p className="text-control font-medium text-foreground">{t("usage.limits.empty")}</p>
-				<p className="max-w-sm text-xs text-muted-foreground">{t("usage.limits.emptyBody")}</p>
-				<Button variant="ghost" size="sm" onClick={() => openGlobalSettings("harness")}>{t("usage.limits.openSettings")}</Button>
+								<p className="max-w-sm text-xs text-muted-foreground">{computerName ? t("usage.limits.emptyBodyRemote", { name: computerName }) : t("usage.limits.emptyBody")}</p>
+				{computerName ? null : <Button variant="ghost" size="sm" onClick={() => openGlobalSettings("harness")}>{t("usage.limits.openSettings")}</Button>}
 			</div>
 		);
 	}
@@ -42,7 +43,7 @@ export function UsageLimits({ accounts, now }: { accounts: readonly AgentAccount
 					</div>
 					<div className="grid grid-cols-[minmax(7rem,auto)_5.5rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3">
 						{entry.accounts.map((account, index) => (
-							<AccountLimitRows key={account.id} account={account} harness={PROVIDER_HARNESS[entry.provider]} first={index === 0} now={now} />
+							<AccountLimitRows key={account.id} account={account} harness={PROVIDER_HARNESS[entry.provider]} first={index === 0} now={now} computerName={computerName} />
 						))}
 					</div>
 				</section>
@@ -51,13 +52,13 @@ export function UsageLimits({ accounts, now }: { accounts: readonly AgentAccount
 	);
 }
 
-function AccountLimitRows({ account, harness, first, now }: { account: AgentAccount; harness: string; first: boolean; now: Date }) {
+function AccountLimitRows({ account, harness, first, now, computerName }: { account: AgentAccount; harness: string; first: boolean; now: Date; computerName?: string }) {
 	const { t, i18n } = useTranslation();
 	const windows = account.limits?.windows ?? [];
 	const plan = formatPlanName(account.plan);
 	const resetCredits = account.limits?.resetCredits ?? 0;
 	const meta = [
-		account.device ? t("usage.limits.thisComputer") : null,
+				account.device ? (computerName ? t("usage.limits.computerLogin", { name: computerName }) : t("usage.limits.thisComputer")) : null,
 		plan ? t("settings.codexAccounts.planLabel", { name: plan }) : null,
 		account.default ? t("settings.agentAccounts.default") : null,
 		resetCredits > 0 ? t("usage.limits.resetCredits", { value: resetCredits }) : null,

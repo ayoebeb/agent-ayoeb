@@ -3396,10 +3396,10 @@ func TestPRObservation_DedupSurvivesManagerRestart(t *testing.T) {
 		t.Fatalf("post-restart manager re-nudged on identical observation, got %d msgs: %v", len(second.msgs), second.msgs)
 	}
 
-	// And a genuinely new signature (different log tail) still fires — proving
+	// And a genuinely new signature (new head SHA) still fires — proving
 	// the persisted state is per-signature, not a blanket "this PR was nudged".
 	o2 := o
-	o2.Checks = []ports.PRCheckObservation{{Name: "build", CommitHash: "c1", Status: domain.PRCheckFailed, LogTail: "different boom"}}
+	o2.Checks = []ports.PRCheckObservation{{Name: "build", CommitHash: "c2", Status: domain.PRCheckFailed, LogTail: "boom"}}
 	if err := m2.ApplyPRObservation(ctx, "mer-1", o2); err != nil {
 		t.Fatalf("third ApplyPRObservation: %v", err)
 	}
@@ -5055,5 +5055,82 @@ func TestScopedPostAgentRefreshesIdleProofWithoutStateTransition(t *testing.T) {
 				t.Fatalf("idle proof = %v, want %v", got.LastActivityAt, want)
 			}
 		})
+	}
+}
+
+func TestPRObservation_CINudgeIgnoresLogTailURLAndOrderWobble(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = working("mer-1")
+	msg := &fakeMessenger{}
+	m := New(st, msg)
+	url := "https://github.com/o/r/pull/1"
+	mk := func(tail, runURL string, reverse bool) ports.PRObservation {
+		checks := []ports.PRCheckObservation{
+			{Name: "build", CommitHash: "c1", Status: domain.PRCheckFailed, URL: runURL + "/1", LogTail: tail},
+			{Name: "test", CommitHash: "c1", Status: domain.PRCheckFailed, URL: runURL + "/2", LogTail: tail},
+		}
+		if reverse {
+			checks[0], checks[1] = checks[1], checks[0]
+		}
+		return ports.PRObservation{Fetched: true, URL: url, CI: domain.CIFailing, Checks: checks}
+	}
+	polls := []ports.PRObservation{
+		mk("<log fetch failed: a>", "https://x/runs/1", false),
+		mk("<log fetch failed: b>", "https://x/runs/1", true),
+		mk("", "https://x/runs/2", false),
+	}
+	for i, o := range polls {
+		if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+			t.Fatalf("poll %d: %v", i, err)
+		}
+	}
+	if len(msg.msgs) != 1 {
+		t.Fatalf("unchanged failing run must notify once, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+	// A new head SHA is a new failure and notifies again.
+	o := mk("boom", "https://x/runs/3", false)
+	for i := range o.Checks {
+		o.Checks[i].CommitHash = "c2"
+	}
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatalf("new sha: %v", err)
+	}
+	if len(msg.msgs) != 2 {
+		t.Fatalf("new head SHA should notify, got %d", len(msg.msgs))
+	}
+	// A different failing set on the same SHA notifies too.
+	o.Checks = o.Checks[:1]
+	if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+		t.Fatalf("changed set: %v", err)
+	}
+	if len(msg.msgs) != 3 {
+		t.Fatalf("changed failing set should notify, got %d", len(msg.msgs))
+	}
+}
+
+func TestPRObservation_BillingBlockedCISendsOneInfraNotice(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = working("mer-1")
+	msg := &fakeMessenger{}
+	m := New(st, msg)
+	billing := "The job was not started because recent account payments have failed or your spending limit needs to be increased."
+	o := ports.PRObservation{Fetched: true, URL: "https://github.com/o/r/pull/159", CI: domain.CIFailing}
+	for _, name := range []string{"a", "b", "c", "d"} {
+		o.Checks = append(o.Checks, ports.PRCheckObservation{Name: name, CommitHash: "c1", Status: domain.PRCheckFailed, LogTail: billing})
+	}
+	for i := 0; i < 5; i++ {
+		if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+			t.Fatalf("poll %d: %v", i, err)
+		}
+	}
+	if len(msg.msgs) != 1 {
+		t.Fatalf("billing-blocked run must send one notice, got %d: %v", len(msg.msgs), msg.msgs)
+	}
+	got := msg.msgs[0]
+	if !strings.Contains(got, "billing") || !strings.Contains(got, "not a code failure") {
+		t.Fatalf("want an infrastructure/billing notice, got %q", got)
+	}
+	if strings.Contains(got, "Fix the issues") || strings.Contains(got, "Failed:") {
+		t.Fatalf("billing notice must not ask for code fixes: %q", got)
 	}
 }

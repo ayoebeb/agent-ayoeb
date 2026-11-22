@@ -5,6 +5,7 @@
 package lifecycle
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -255,6 +256,8 @@ type Manager struct {
 	operationGate    sessionOperationGate
 	turnEndMu        sync.RWMutex
 	turnEndObservers []TurnEndObserver
+	turnObserverMu   sync.RWMutex
+	turnObserver     TurnObserver
 	// dataDir backs ReconcileSessionOutputType's artifact-dir fallback for
 	// sessions rows created before session_output_type/artifact_dir existed.
 	dataDir string
@@ -365,6 +368,39 @@ func (m *Manager) SetSessionOperationGate(gate sessionOperationGate) {
 	m.operationGateMu.Unlock()
 }
 
+// TurnObserver hears every message a session receives and every turn that ends,
+// for both Chat and terminal sessions, because both report through
+// ApplyActivitySignal. Implementations must not block: they run on the caller's
+// activity path.
+type TurnObserver interface {
+	// SessionMessageReceived is told a message (a task, a follow-up, or a
+	// person's prompt) started a turn at the given time.
+	SessionMessageReceived(id domain.SessionID, at time.Time)
+	// SessionTurnIdle is told a turn that was running ended and the session went
+	// idle. finalMessage is the agent's last message when the signal carried it.
+	SessionTurnIdle(rec domain.SessionRecord, event, finalMessage string)
+}
+
+// SetTurnObserver wires the optional observer of message and turn boundaries.
+func (m *Manager) SetTurnObserver(o TurnObserver) {
+	m.turnObserverMu.Lock()
+	m.turnObserver = o
+	m.turnObserverMu.Unlock()
+}
+
+func (m *Manager) currentTurnObserver() TurnObserver {
+	m.turnObserverMu.RLock()
+	defer m.turnObserverMu.RUnlock()
+	return m.turnObserver
+}
+
+// isMessageStart reports a signal that opens a turn: a terminal prompt hook or
+// the start of a Chat turn.
+func isMessageStart(s ports.ActivitySignal) bool {
+	return s.SubagentID == "" && s.State == domain.ActivityActive &&
+		(s.Event == "user-prompt-submit" || s.Event == "chat.turn.started")
+}
+
 func (m *Manager) sessionMutationInProgress(id domain.SessionID) bool {
 	m.operationGateMu.RLock()
 	gate := m.operationGate
@@ -452,7 +488,7 @@ func (m *Manager) mutate(ctx context.Context, id domain.SessionID, fn func(domai
 // input arrived, or because the session ended — has nothing left to resolve.
 func needsInputResolutions(prev, next domain.SessionRecord, now time.Time) []ports.NotificationResolution {
 	var out []ports.NotificationResolution
-	if prev.Activity.State.NeedsInput() && !(next.Activity.State.NeedsInput() && !next.IsTerminated) {
+	if prev.Activity.State.NeedsInput() && (!next.Activity.State.NeedsInput() || next.IsTerminated) {
 		out = append(out, ports.NotificationResolution{
 			Type:       domain.NotificationNeedsInput,
 			SessionID:  next.ID,
@@ -761,6 +797,11 @@ retryProjection:
 	if !terminalTurnRecorded && mode == domain.SessionModeTUI {
 		terminalTurnRecorded = true
 		m.recordTerminalTurn(ctx, rec, s, now)
+	}
+	if isMessageStart(s) {
+		if o := m.currentTurnObserver(); o != nil {
+			o.SessionMessageReceived(id, timeOr(s.Timestamp, now))
+		}
 	}
 	resetConversationCheckpoint :=
 		nativeIdentityChanged ||
@@ -1167,6 +1208,9 @@ retryProjection:
 		m.turnEndMu.RUnlock()
 		for _, observer := range observers {
 			observer.SessionTurnEnded(next)
+		}
+		if o := m.currentTurnObserver(); o != nil && prevState == domain.ActivityActive {
+			o.SessionTurnIdle(next, s.Event, cmp.Or(s.FinalAssistantMessage, s.LatestAssistantUpdate))
 		}
 	}
 	for _, ev := range waitingEvents {

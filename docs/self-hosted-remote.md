@@ -54,7 +54,11 @@ installer uses `~/.ao/host`; it does not copy agent or GitHub credentials from
 your laptop.
 
 Use the same channel on the VM and your desktop: stable with stable, nightly
-with nightly. Updating your laptop alone does not update the VM. A release
+with nightly. Updating your laptop alone does not update the VM. The
+**Computers** page (sidebar, once a computer is linked) lists each computer with
+the Ayo release it runs and warns when it differs from this computer's. A VM on
+a release from before this page does not report its version yet; it shows
+"Version not reported" until you update it. A release
 without `ao remote-host link` prints an address and password instead of the
 sign-in link; pair it by hand, or install nightly.
 
@@ -172,6 +176,21 @@ native host. Projects still need their own build dependencies on the host.
 
 Removing a saved connection on desktop/mobile does not stop the host or its
 sessions.
+
+### Open the host's localhost dev servers
+
+In the Browser panel of a session that runs on a remote host, `localhost`,
+`127.0.0.1`, `[::1]` and `*.localhost` (any port) mean the **host's** loopback:
+`npm run dev` on `localhost:5173` there opens at `http://localhost:5173` in the
+panel, hot reload included, and the address bar shows "via <host name>". The
+desktop sends those connections over a WebSocket to the host's
+`/api/v1/loopback-tunnel` (same password and host-ID check as every other host
+request); TLS stays end to end between the panel and the dev server. Every other
+address keeps using this computer's network. The host dials loopback addresses
+only, never another machine, caps concurrent tunnels at 256 and drops one that
+is silent for 15 minutes. The route is per Browser profile: a profile also used
+by a local session or a session on another host stays unrouted. Hosts without
+this endpoint (older daemons) answer an error page for such URLs.
 
 ## Security and limits
 

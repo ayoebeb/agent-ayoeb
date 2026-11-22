@@ -165,6 +165,10 @@ var (
 	ErrChatController          = errors.New("chat controller")
 )
 
+// ErrReviewerPaneTeardown marks a reviewer pane that could not be confirmed
+// gone during worker termination. Kill logs it and continues.
+var ErrReviewerPaneTeardown = errors.New("session: reviewer pane teardown failed")
+
 // wrapSpawnStage annotates a spawn failure with a stage sentinel. The original
 // error stays in the chain so errors.Is still matches inner sentinels.
 func wrapSpawnStage(id domain.SessionID, stage, err error) error {
@@ -404,6 +408,8 @@ type Manager struct {
 	agents    ports.AgentResolver
 	workspace ports.Workspace
 	store     Store
+	// projectPermissions is late-bound by SetProjectPermissionApplier.
+	projectPermissions ProjectPermissionApplier
 	// agentReadiness is late-bound by SetAgentReadiness.
 	agentReadiness      ports.AgentReadinessProvider
 	backgroundTaskUsage BackgroundTaskUsage
@@ -650,6 +656,18 @@ func (m *Manager) SetTerminalInputGate(gate TerminalInputGate) {
 // SetAgentReadiness completes daemon wiring before request handling begins.
 func (m *Manager) SetAgentReadiness(provider ports.AgentReadinessProvider) {
 	m.agentReadiness = provider
+}
+
+// ProjectPermissionApplier writes a project's remembered tool permissions into
+// a session workspace before its agent starts.
+type ProjectPermissionApplier interface {
+	ApplyToWorkspace(ctx context.Context, id domain.SessionID, workspacePath string) error
+}
+
+// SetProjectPermissionApplier completes daemon wiring before request handling
+// begins. Nil leaves workspaces with only what the agent wrote itself.
+func (m *Manager) SetProjectPermissionApplier(applier ProjectPermissionApplier) {
+	m.projectPermissions = applier
 }
 
 // BackgroundTaskUsage counts the provider calls AO makes on a session's behalf.
@@ -2791,7 +2809,13 @@ func (m *Manager) kill(ctx context.Context, id domain.SessionID, backgroundClean
 		}
 	}
 	if err := m.terminateReviewer(ctx, id, "cancelled by worker session termination"); err != nil {
-		return KillResult{}, fmt.Errorf("kill %s: reviewer: %w", id, err)
+		if !errors.Is(err, ErrReviewerPaneTeardown) {
+			return KillResult{}, fmt.Errorf("kill %s: reviewer: %w", id, err)
+		}
+		// Only the reviewer pane teardown failed; the review rows were already
+		// cleaned up. A stale reviewer pane must not keep the worker alive, and
+		// the next review launch replaces the pane.
+		m.logger.Warn("kill: reviewer pane teardown failed; continuing", "session", id, "error", err)
 	}
 	// Gate shut any shell terminal scoped to this session BEFORE the worktree
 	// goes away: an open shell whose cwd is that directory can otherwise
@@ -6962,6 +6986,13 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 	}); err != nil {
 		m.cleanupPreparedAgentWorkspace(ctx, agent, id, workspacePath, env)
 		return fmt.Errorf("install hooks: %w", err)
+	}
+	// The user's earlier "Always allow" choices for this project. A workspace
+	// without them only asks again, so a failure here must not stop the launch.
+	if m.projectPermissions != nil {
+		if err := m.projectPermissions.ApplyToWorkspace(ctx, id, workspacePath); err != nil {
+			m.logger.Warn("could not apply the project's remembered permissions", "session", id, "error", err)
+		}
 	}
 	if pl, ok := agent.(preLauncher); ok {
 		if err := pl.PreLaunch(ctx, ports.LaunchConfig{

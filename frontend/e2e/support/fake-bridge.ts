@@ -224,6 +224,7 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 					getRuntimeState: async () => ({ connected: false, connecting: false, rejected: false }),
 					nativeCompositionEnabled: true,
 					ensure: async (sessionId: string) => navState(`preview:${sessionId}`),
+					setSessionHost: async () => ({ routed: false }),
 					setBounds: () => undefined,
 					onBoundsApplied: () => () => undefined,
 					setOverlayOpen: () => undefined,
@@ -235,6 +236,8 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 					goForward: async (viewId: string) => navState(viewId),
 					reload: async (viewId: string) => navState(viewId),
 					stop: async (viewId: string) => navState(viewId),
+					trustCertificate: async (viewId: string) => navState(viewId),
+					certificates: { list: async () => [], remove: async () => [] },
 					getFindState: async (viewId: string) => ({
 						viewId,
 						tabId: "t1",
@@ -407,6 +410,10 @@ export async function installFakeBridge(page: Page, opts: FakeBridgeOptions = {}
 				},
 				// UpdatesSection calls featureBuilds.getActive() immediately on mount; an
 				// omitted namespace would surface as a swallowed React Query error.
+				dailyUpdate: {
+					get: async () => ({ state: "hidden" as const }),
+					apply: async () => ({ state: "hidden" as const }),
+				},
 				featureBuilds: {
 					list: async () => [],
 					getActive: async () => null,
@@ -1181,6 +1188,7 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 					getRuntimeState: async () => ({ connected: false, connecting: false, rejected: false }),
 					nativeCompositionEnabled: true,
 					ensure: async (sessionId: string) => navState(`preview:${sessionId}`),
+					setSessionHost: async () => ({ routed: false }),
 					setBounds: () => undefined,
 					onBoundsApplied: () => () => undefined,
 					setOverlayOpen: () => undefined,
@@ -1193,6 +1201,8 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 					goForward: async (viewId: string) => navState(viewId),
 					reload: async (viewId: string) => navState(viewId),
 					stop: async (viewId: string) => navState(viewId),
+					trustCertificate: async (viewId: string) => navState(viewId),
+					certificates: { list: async () => [], remove: async () => [] },
 					getFindState: async (viewId: string) => ({
 						viewId,
 						tabId: "t1",
@@ -1352,6 +1362,10 @@ export async function installFakeAgent(page: Page, opts: FakeAgentOptions = {}):
 				},
 				// UpdatesSection calls featureBuilds.getActive() immediately on mount; an
 				// omitted namespace would surface as a swallowed React Query error.
+				dailyUpdate: {
+					get: async () => ({ state: "hidden" as const }),
+					apply: async () => ({ state: "hidden" as const }),
+				},
 				featureBuilds: {
 					list: async () => [],
 					getActive: async () => null,

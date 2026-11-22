@@ -3,15 +3,18 @@ import { CatchBoundary, useNavigate } from "@tanstack/react-router";
 import { Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "@/components/app-icons";
+import { useHostConnection } from "../hooks/useHostConnection";
 import { useProjectOrchestratorAction } from "../hooks/useProjectOrchestratorAction";
-import { findLocalSession, paneOnScreen, useSessionSplitActions } from "../hooks/useSessionSplitActions";
-import { useWorkspaceQuery } from "../hooks/useWorkspaceQuery";
-import { projectNavigateTarget, sessionNavigateTarget } from "../lib/navigate-to-session";
+import { findRoutedSession, paneNavigateTarget, paneOnScreen, useSessionSplitActions } from "../hooks/useSessionSplitActions";
+import { useSplitWorkspaces } from "../hooks/useSplitWorkspaces";
+import { LOCAL_HOST, isLocal, type HostId } from "../lib/hosts";
+import { projectNavigateTarget } from "../lib/navigate-to-session";
 import { registerSessionDropTarget } from "../lib/pane-drag";
 import { containsPoint, edgeAt, halfOf, layoutBoxes, layoutCss, leafKeys, toClientRect, type ClientRect } from "../lib/pane-split";
 import {
 	closeSplitPane,
 	MAX_SPLIT_PANES,
+	paneHost,
 	paneKeyForSession,
 	paneRefFromDragKey,
 	resolvePane,
@@ -31,7 +34,9 @@ import { SplitDivider } from "./SplitDivider";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-export type SessionPaneViewProps = { sessionId: string; projectId?: string; cloudOrgId?: string };
+export type SessionPaneViewProps = { sessionId: string; projectId?: string; cloudOrgId?: string; hostId?: HostId };
+
+const hostOf = (hostId: string | undefined) => (hostId && !isLocal(hostId) ? hostId : undefined);
 
 /** The route a pane's session opens at: the scratchpad's sessions have no project in theirs. */
 function routeProjectId(workspace: WorkspaceSummary): string | undefined {
@@ -48,19 +53,20 @@ function routeProjectId(workspace: WorkspaceSummary): string | undefined {
 export function SessionSplitView({
 	split,
 	routedSessionId,
+	routedHostId,
 	routedPaneKey,
 	cloudOrgId,
 	renderSession,
 }: {
 	split: SessionSplit;
 	routedSessionId: string;
+	routedHostId?: HostId;
 	routedPaneKey: string;
 	cloudOrgId?: string;
 	renderSession: (props: SessionPaneViewProps) => ReactNode;
 }) {
 	const navigate = useNavigate();
-	const workspaceQuery = useWorkspaceQuery();
-	const workspaces = workspaceQuery.data;
+	const workspaces = useSplitWorkspaces();
 	const workspacesRef = useRef(workspaces);
 	workspacesRef.current = workspaces;
 	const screenRef = useRef<HTMLDivElement | null>(null);
@@ -68,8 +74,10 @@ export function SessionSplitView({
 	const boxes = useMemo(() => layoutBoxes(split.root).leaves, [split.root]);
 	const keys = useMemo(() => leafKeys(split.root), [split.root]);
 	const focusKey = split.focus && split.panes[split.focus] ? split.focus : routedPaneKey;
-	const routedRef = useRef({ sessionId: routedSessionId, paneKey: routedPaneKey });
-	routedRef.current = { sessionId: routedSessionId, paneKey: routedPaneKey };
+	const routedRef = useRef({ sessionId: routedSessionId, hostId: hostOf(routedHostId), paneKey: routedPaneKey });
+	routedRef.current = { sessionId: routedSessionId, hostId: hostOf(routedHostId), paneKey: routedPaneKey };
+	/** The routed session id, only for a pane on the routed session's computer. */
+	const routedFor = useCallback((ref: SessionPaneRef) => (paneHost(ref) === routedRef.current.hostId ? routedRef.current.sessionId : undefined), []);
 
 	// The route names the focused pane; following a link or the sidebar to
 	// another pane's session focuses that pane.
@@ -79,9 +87,15 @@ export function SessionSplitView({
 
 	const showPaneRoute = useCallback(
 		(pane: ResolvedPane, replace: boolean) => {
-			if (pane.kind !== "session" && pane.kind !== "ended") return;
-			if (pane.session.id === routedRef.current.sessionId) return;
-			void navigate({ ...sessionNavigateTarget(pane.workspace.id, pane.session.id), replace });
+			const target =
+				pane.kind === "session" || pane.kind === "ended"
+					? { project: pane.workspace.id, id: pane.session.id, host: hostOf(pane.session.hostId) }
+					: pane.kind === "remote"
+						? { project: pane.projectId, id: pane.sessionId, host: pane.hostId }
+						: undefined;
+			if (!target) return;
+			if (target.id === routedRef.current.sessionId && target.host === routedRef.current.hostId) return;
+			void navigate({ ...paneNavigateTarget(target.project, target.id, target.host), replace });
 		},
 		[navigate],
 	);
@@ -94,10 +108,10 @@ export function SessionSplitView({
 			state.focus(key);
 			// Focus moves between panes in place, so it replaces the history entry.
 			// A pane with no live session takes focus where the route already is.
-			const pane = resolvePane(ref, workspacesRef.current, routedRef.current.sessionId);
-			if (pane.kind === "session") showPaneRoute(pane, true);
+			const pane = resolvePane(ref, workspacesRef.current, routedFor(ref));
+			if (pane.kind === "session" || pane.kind === "remote") showPaneRoute(pane, true);
 		},
-		[showPaneRoute],
+		[routedFor, showPaneRoute],
 	);
 
 	// A press or keyboard focus inside a pane focuses it. Native listeners:
@@ -147,25 +161,30 @@ export function SessionSplitView({
 			for (const candidate of order) {
 				const ref = current.panes[candidate];
 				const pane = ref ? resolvePane(ref, workspacesRef.current) : undefined;
-				if (pane?.kind !== "session" && pane?.kind !== "ended") continue;
+				if (pane?.kind !== "session" && pane?.kind !== "ended" && pane?.kind !== "remote") continue;
 				if (remaining) useSessionSplitStore.getState().focus(candidate);
 				showPaneRoute(pane, true);
 				return;
 			}
 			const fallback = order[0] ? current.panes[order[0]] : undefined;
-			if (fallback) void navigate({ ...projectNavigateTarget(fallback.projectId), replace: true });
+			if (fallback) void navigate({ ...projectNavigateTarget(fallback.projectId, paneHost(fallback) ?? LOCAL_HOST), replace: true });
 		},
 		[navigate, showPaneRoute],
 	);
 
-	const keepsSplit = useCallback((sessionId: string | undefined) => {
+	const keepsSplit = useCallback((sessionId: string | undefined, hostId?: HostId) => {
 		const current = useSessionSplitStore.getState().split;
-		return Boolean(paneKeyForSession(current, findLocalSession(workspacesRef.current, sessionId)?.session));
+		const host = hostOf(hostId);
+		// A pane on a computer whose list is not loaded still keeps the split on screen.
+		if (current && sessionId && host && current.panes[sessionPaneKey({ kind: "session", sessionId, projectId: "", hostId: host })]) return true;
+		return Boolean(paneKeyForSession(current, findRoutedSession(workspacesRef.current, { sessionId, hostId: host })?.session));
 	}, []);
 
 	const resize = useCallback((path: string, ratio: number) => useSessionSplitStore.getState().resize(path, ratio), []);
 	// Panes stay in the order they were added, so moving one only moves its box.
 	const paneOrder = Object.keys(split.panes).filter((key) => keys.includes(key));
+	// The computer's name shows on a pane's tab once the panes come from different computers.
+	const mixedHosts = new Set(paneOrder.map((key) => paneHost(split.panes[key]!) ?? LOCAL_HOST)).size > 1;
 
 	return (
 		<div
@@ -194,7 +213,8 @@ export function SessionSplitView({
 						paneKey={key}
 						paneRef={ref}
 						renderSession={renderSession}
-						resolved={resolvePane(ref, workspaces, routedSessionId)}
+						resolved={resolvePane(ref, workspaces, routedFor(ref))}
+							showHost={mixedHosts}
 						showFocusRing={keys.length > 1}
 						style={css ? { position: "absolute", ...css } : undefined}
 					/>
@@ -213,6 +233,7 @@ function SplitPane({
 	resolved,
 	focused,
 	showFocusRing,
+	showHost,
 	edges,
 	style,
 	cloudOrgId,
@@ -225,10 +246,11 @@ function SplitPane({
 	resolved: ResolvedPane;
 	focused: boolean;
 	showFocusRing: boolean;
+	showHost: boolean;
 	edges: { top: boolean; left: boolean; right: boolean };
 	style?: CSSProperties;
 	cloudOrgId?: string;
-	keepsSplit: (sessionId: string | undefined) => boolean;
+	keepsSplit: (sessionId: string | undefined, hostId?: HostId) => boolean;
 	onClose: (key: string) => void;
 	renderSession: (props: SessionPaneViewProps) => ReactNode;
 }) {
@@ -236,24 +258,28 @@ function SplitPane({
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const pane = useMemo<SessionPaneValue>(() => ({ paneKey, focused, rootRef, keepsSplit }), [focused, keepsSplit, paneKey]);
 	const session = resolved.kind === "session" || resolved.kind === "ended" ? resolved.session : undefined;
-	const workspace = resolved.kind === "loading" || resolved.kind === "missing" ? undefined : resolved.workspace;
+	const workspace = "workspace" in resolved ? resolved.workspace : undefined;
+	const paneHostId = paneHost(paneRef);
+	const hostLabel = useHostConnection(paneHostId).label ?? paneHostId;
 	const projectName = workspace ? (workspace.id === STANDALONE_WORKSPACE_ID ? t("standalone.workspaceName") : workspace.name) : undefined;
 	const paneName = session?.title ?? projectName ?? t("sessionSplit.pane");
 	const close = useCallback(() => onClose(paneKey), [onClose, paneKey]);
 	// The session view subscribes to its own data; a streamed list update must
 	// not rebuild it from here.
-	const sessionId = resolved.kind === "session" ? resolved.session.id : undefined;
-	const sessionProjectId = resolved.kind === "session" ? routeProjectId(resolved.workspace) : undefined;
+	// A session on another computer renders even before its list loads: the
+	// session view resolves it itself and shows that computer's offline state.
+	const sessionId = resolved.kind === "session" ? resolved.session.id : resolved.kind === "remote" ? resolved.sessionId : undefined;
+	const sessionProjectId = resolved.kind === "session" ? routeProjectId(resolved.workspace) : resolved.kind === "remote" ? resolved.projectId : undefined;
 	const sessionView = useMemo(
-		() => (sessionId ? renderSession({ sessionId, projectId: sessionProjectId, cloudOrgId }) : null),
-		[cloudOrgId, renderSession, sessionId, sessionProjectId],
+		() => (sessionId ? renderSession({ sessionId, projectId: sessionProjectId, cloudOrgId, hostId: paneHostId }) : null),
+		[cloudOrgId, paneHostId, renderSession, sessionId, sessionProjectId],
 	);
 	const chrome = useMemo(
 		() => ({
-			leading: <PaneLead projectName={projectName} session={resolved.kind === "session" ? session : undefined} />,
+			leading: <PaneLead hostLabel={showHost ? hostLabel ?? t("remote.thisComputer") : undefined} projectName={projectName} session={resolved.kind === "session" ? session : undefined} />,
 			trailing: <ClosePaneButton label={t("sessionSplit.closePane", { name: paneName })} onClose={close} />,
 		}),
-		[close, paneName, projectName, resolved.kind, session, t],
+		[close, hostLabel, paneName, projectName, resolved.kind, session, showHost, t],
 	);
 	return (
 		<div
@@ -271,11 +297,11 @@ function SplitPane({
 			<SessionPaneContext.Provider value={pane}>
 				<SessionPaneChromeContext.Provider value={chrome}>
 					<SessionTopbarProvider>
-						{resolved.kind === "session" ? (
+						{sessionId ? (
 							<CatchBoundary errorComponent={LazyChunkErrorPanel} getResetKey={() => sessionId ?? ""}>
 								<Suspense fallback={null}>{sessionView}</Suspense>
 							</CatchBoundary>
-						) : resolved.kind === "loading" ? null : (
+						) : resolved.kind === "loading" || resolved.kind === "session" || resolved.kind === "remote" ? null : (
 							<EmptyPane paneRef={paneRef} resolved={resolved} />
 						)}
 					</SessionTopbarProvider>
@@ -287,11 +313,12 @@ function SplitPane({
 }
 
 /** The pane header's lead: the session's status as its sidebar row shows it, and its project. */
-function PaneLead({ session, projectName }: { session?: WorkspaceSession; projectName?: string }) {
+function PaneLead({ session, projectName, hostLabel }: { session?: WorkspaceSession; projectName?: string; hostLabel?: string }) {
 	return (
 		<span className="session-pane-lead flex min-w-0 max-w-40 shrink-0 items-center gap-1 pl-2 pr-1.5 text-caption text-passive" data-testid="session-pane-lead">
 			{session ? <SessionRowStatusGlyph session={session} /> : null}
 			{projectName ? <span className="truncate">{projectName}</span> : null}
+			{hostLabel ? <span className="truncate text-passive/70" data-testid="session-pane-host">{projectName ? `· ${hostLabel}` : hostLabel}</span> : null}
 		</span>
 	);
 }
@@ -311,7 +338,7 @@ function ClosePaneButton({ label, onClose }: { label: string; onClose: () => voi
 }
 
 /** A pane with no session to show: an orchestrator not running, or a session that ended or is gone. */
-function EmptyPane({ paneRef, resolved }: { paneRef: SessionPaneRef; resolved: Exclude<ResolvedPane, { kind: "session" } | { kind: "loading" }> }) {
+function EmptyPane({ paneRef, resolved }: { paneRef: SessionPaneRef; resolved: Exclude<ResolvedPane, { kind: "session" } | { kind: "remote" } | { kind: "loading" }> }) {
 	const { t } = useTranslation();
 	const title = resolved.kind === "ended" ? resolved.session.title : paneRef.kind === "orchestrator" ? t("shell.orchestrator") : "";
 	return (
@@ -320,6 +347,8 @@ function EmptyPane({ paneRef, resolved }: { paneRef: SessionPaneRef; resolved: E
 			<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
 				{resolved.kind === "no-orchestrator" ? (
 					<NoOrchestrator workspace={resolved.workspace} />
+				) : resolved.kind === "host-unavailable" ? (
+					<p className="text-sm text-muted-foreground" role="alert">{t("remote.hostOffline")}</p>
 				) : (
 					<p className="text-sm text-muted-foreground">
 						{resolved.kind === "ended" ? t("sessionSplit.ended") : t("sessionSplit.missing")}
@@ -334,7 +363,7 @@ function NoOrchestrator({ workspace }: { workspace: WorkspaceSummary }) {
 	const { t } = useTranslation();
 	const action = useProjectOrchestratorAction({ projectId: workspace.id, project: workspace, source: "sidebar" });
 	// A guest cannot start an orchestrator in someone else's project.
-	const canStart = !workspace.shared;
+	const canStart = !workspace.shared && !workspace.hostId;
 	return (
 		<>
 			<p className="text-sm text-muted-foreground">{t("sessionSplit.noOrchestrator")}</p>
@@ -359,22 +388,22 @@ function NoOrchestrator({ workspace }: { workspace: WorkspaceSummary }) {
  * edge of the session on screen, or of a pane of the split, it goes there.
  * Mounted wherever a local session is on screen.
  */
-export function useSessionRowDropTarget(routedSessionId: string | undefined, enabled: boolean): void {
-	const workspaceQuery = useWorkspaceQuery();
-	const workspacesRef = useRef(workspaceQuery.data);
-	workspacesRef.current = workspaceQuery.data;
+export function useSessionRowDropTarget(routedSessionId: string | undefined, enabled: boolean, routedHostId?: HostId): void {
+	const workspaces = useSplitWorkspaces();
+	const workspacesRef = useRef(workspaces);
+	workspacesRef.current = workspaces;
 	const { addBeside } = useSessionSplitActions(useCallback(() => workspacesRef.current, []));
-	const stateRef = useRef({ workspaces: workspaceQuery.data, routedSessionId, addBeside });
-	stateRef.current = { workspaces: workspaceQuery.data, routedSessionId, addBeside };
+	const stateRef = useRef({ workspaces, routed: { sessionId: routedSessionId, hostId: routedHostId }, addBeside });
+	stateRef.current = { workspaces, routed: { sessionId: routedSessionId, hostId: routedHostId }, addBeside };
 	useEffect(() => {
 		if (!enabled) return;
 		return registerSessionDropTarget({
 			canDrag: (key) => {
-				const { workspaces, routedSessionId: routed } = stateRef.current;
+				const { workspaces, routed } = stateRef.current;
 				return Boolean(paneRefFromDragKey(key) && paneOnScreen(useSessionSplitStore.getState().split, workspaces, routed));
 			},
 			resolve: (key, x, y) => {
-				const { workspaces, routedSessionId: routed } = stateRef.current;
+				const { workspaces, routed } = stateRef.current;
 				const ref = paneRefFromDragKey(key);
 				const split = useSessionSplitStore.getState().split;
 				const anchor = paneOnScreen(split, workspaces, routed);

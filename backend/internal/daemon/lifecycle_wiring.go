@@ -221,6 +221,13 @@ func (l *lifecycleStack) Stop() {
 // SaveAndTeardownAll is deliberately ABSENT from this interface so the daemon
 // cannot remove worktrees on shutdown. Explicit desktop quit may stop agent
 // processes; ordinary daemon replacement still preserves them for adoption.
+// projectPermissionBinder is the late-binding hook for a project's remembered
+// "Always allow" rules. The manager startSession returns provides it; a narrow
+// test double of sessionLifecycle need not.
+type projectPermissionBinder interface {
+	SetProjectPermissionApplier(sessionmanager.ProjectPermissionApplier)
+}
+
 type sessionLifecycle interface {
 	Reconcile(ctx context.Context) error
 	ReconcileStartupSafety(ctx context.Context) error

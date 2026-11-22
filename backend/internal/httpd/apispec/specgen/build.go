@@ -23,6 +23,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentauth"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/githubpat"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
+	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systeminstall"
 )
@@ -106,6 +107,8 @@ func Build() ([]byte, error) {
 			"Server-side unfurl of external links for the CSP-locked renderer"),
 		*(&openapi31.Tag{Name: "github"}).WithDescription(
 			"Local GitHub personal access token storage and repository listing"),
+		*(&openapi31.Tag{Name: "jira"}).WithDescription(
+			"Per-project Jira Cloud connection, ticket board and start-from-ticket"),
 	}
 
 	for _, op := range operations() {
@@ -173,6 +176,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersAgentAccountUsageQuery":                    "AgentAccountUsageQuery",
 	"ControllersAgentAccountResponse":                      "AgentAccountResponse",
 	"ControllersAgentAccountsResponse":                     "AgentAccountsResponse",
+	"ControllersAccountLimitsResponse":                     "AccountLimitsResponse",
 	"ControllersStartAgentAccountLoginRequest":             "StartAgentAccountLoginRequest",
 	"ControllersStartAgentAccountLoginResponse":            "StartAgentAccountLoginResponse",
 	"ControllersVerifyAgentAccountLoginResponse":           "VerifyAgentAccountLoginResponse",
@@ -215,6 +219,8 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersUpdateVersionRefreshRequest":               "UpdateVersionRefreshRequest",
 	"ControllersUpdateComputerUseRequest":                  "UpdateComputerUseRequest",
 	"ControllersUpdateSessionRetentionRequest":             "UpdateSessionRetentionRequest",
+	"ControllersUpdateUsageLimitResumeRequest":             "UpdateUsageLimitResumeRequest",
+	"DomainSessionUsageLimit":                              "SessionUsageLimit",
 	"ControllersUpdateOrchestratorWaitingRequest":          "UpdateOrchestratorWaitingRequest",
 	"ControllersDeclareOrchestratorWaitingRequest":         "DeclareOrchestratorWaitingRequest",
 	"ControllersDeclareOrchestratorWaitingResponse":        "DeclareOrchestratorWaitingResponse",
@@ -629,14 +635,19 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersOpenCodexAccountLoginTerminalResponse": "OpenCodexAccountLoginTerminalResponse",
 	"ControllersCodexAccountLoginTerminalResponse":     "CodexAccountLoginTerminalResponse",
 	// httpd/controllers — project cue wire envelopes
-	"ControllersCueIDParam":           "CueIDParam",
-	"ControllersCueProjectIDParam":    "CueProjectIDParam",
-	"ControllersCueDefinitionRequest": "CueDefinitionRequest",
-	"ControllersCueResponse":          "CueResponse",
-	"ControllersListCuesResponse":     "ListCuesResponse",
-	"ControllersInvokeCueRequest":     "InvokeCueRequest",
-	"ControllersInvokeCueResponse":    "InvokeCueResponse",
-	"ControllersCueEnvelope":          "CueEnvelope",
+	"ControllersCueIDParam":               "CueIDParam",
+	"ControllersCueProjectIDParam":        "CueProjectIDParam",
+	"ControllersLiveServerProjectIDParam": "LiveServerProjectIDParam",
+	"ControllersLiveServerResponse":       "LiveServerResponse",
+	"ControllersListLiveServersResponse":  "ListLiveServersResponse",
+	"ControllersLiveServerActionRequest":  "LiveServerActionRequest",
+	"ControllersLiveServerEnvelope":       "LiveServerEnvelope",
+	"ControllersCueDefinitionRequest":     "CueDefinitionRequest",
+	"ControllersCueResponse":              "CueResponse",
+	"ControllersListCuesResponse":         "ListCuesResponse",
+	"ControllersInvokeCueRequest":         "InvokeCueRequest",
+	"ControllersInvokeCueResponse":        "InvokeCueResponse",
+	"ControllersCueEnvelope":              "CueEnvelope",
 	// httpd/controllers — PR wire envelopes
 	"ControllersMergePRRequest":          "MergePRRequest",
 	"ControllersMergePRResponse":         "MergePRResponse",
@@ -725,6 +736,18 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	// httpd/controllers: GitHub PAT wire envelopes
 	"ControllersPutGitHubPATRequest": "PutGitHubPATRequest",
 	"GithubpatRepo":                  "GitHubRepo",
+	// httpd/controllers + service/jira: per-project Jira board wire envelopes
+	"ControllersJiraConnectRequest": "JiraConnectRequest",
+	"ControllersJiraIssueKeyParam":  "JiraIssueKeyParam",
+	"JiraConnection":                "JiraConnection",
+	"JiraTestResult":                "JiraTestResult",
+	"JiraBoard":                     "JiraBoard",
+	"JiraBoardColumn":               "JiraBoardColumn",
+	"JiraTicket":                    "JiraTicket",
+	"JiraTicketUser":                "JiraTicketUser",
+	"JiraTicketStatus":              "JiraTicketStatus",
+	"JiraTicketSession":             "JiraTicketSession",
+	"JiraStartResult":               "JiraStartResult",
 }
 
 // markRequestBodyRequired sets requestBody.required: true on the operation's
@@ -837,6 +860,7 @@ func operations() []operation {
 	ops = append(ops, browserOperations()...)
 	ops = append(ops, shellTerminalOperations()...)
 	ops = append(ops, cueOperations()...)
+	ops = append(ops, liveServerOperations()...)
 	ops = append(ops, systemOperations()...)
 	ops = append(ops, computerUseOperations()...)
 	ops = append(ops, identityOperations()...)
@@ -844,6 +868,7 @@ func operations() []operation {
 	ops = append(ops, telemetryIdentityOperations()...)
 	ops = append(ops, linkPreviewOperations()...)
 	ops = append(ops, sharedBrowserProfileOperations()...)
+	ops = append(ops, jiraOperations()...)
 	return ops
 }
 
@@ -1367,6 +1392,17 @@ func shellTerminalOperations() []operation {
 			method: http.MethodPatch, path: "/api/v1/settings/autopilot", id: "updateAutopilotSettings", tag: "settings",
 			summary: "Choose how many iterations an Autopilot task run may take before it parks itself",
 			reqBody: controllers.UpdateAutopilotSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPatch, path: "/api/v1/settings/usage-limit-resume", id: "updateUsageLimitResume", tag: "settings",
+			summary: "Choose whether AO continues sessions after a usage limit resets, and how many at once",
+			reqBody: controllers.UpdateUsageLimitResumeRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
@@ -2365,6 +2401,11 @@ func agentOperations() []operation {
 			resps: []respUnit{{http.StatusOK, controllers.AgentAccountsResponse{}}, {http.StatusNotImplemented, envelope.APIError{}}},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/usage/account-limits", id: "getUsageAccountLimits", tag: "usage",
+			summary: "Read the accounts' limits and a session's accounts, read-only, for another computer's desktop", pathParams: []any{controllers.AccountLimitsQuery{}},
+			resps: []respUnit{{http.StatusOK, controllers.AccountLimitsResponse{}}, {http.StatusNotImplemented, envelope.APIError{}}},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/agents/accounts/usage", id: "getAgentAccountUsage", tag: "agents",
 			summary: "Sum each account's model usage in AO sessions", pathParams: []any{controllers.AgentAccountUsageQuery{}},
 			resps: []respUnit{{http.StatusOK, controllers.AgentAccountUsageResponse{}}, {http.StatusNotImplemented, envelope.APIError{}}},
@@ -3216,6 +3257,27 @@ func projectOperations() []operation {
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/permission-rules", id: "listProjectPermissionRules", tag: "projects",
+			summary:    "List the tool permissions users chose \"Always allow\" for in this project",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListProjectPermissionRulesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/projects/{id}/permission-rules/{ruleId}", id: "revokeProjectPermissionRule", tag: "projects",
+			summary:    "Revoke a remembered permission rule for future sessions and live Claude Code sessions of the project",
+			pathParams: []any{controllers.ProjectPermissionRuleIDParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
 		{
@@ -4280,6 +4342,13 @@ func autopilotOperations() []operation {
 				http.StatusForbidden, http.StatusNotFound, http.StatusInternalServerError, http.StatusNotImplemented),
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/autopilot/items/{eventId}/undo", id: "undoAutopilotDecision", tag: "autopilot",
+			summary:    "Ask the agent to undo one of its recorded Autopilot decisions",
+			pathParams: []any{controllers.AutopilotItemIDParam{}},
+			resps: with(controllers.ResolveAutopilotItemResponse{},
+				http.StatusForbidden, http.StatusNotFound, http.StatusInternalServerError, http.StatusNotImplemented, http.StatusServiceUnavailable),
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/autopilot", id: "getAutopilot", tag: "autopilot",
 			summary:    "Read a session's Autopilot run, its log and the return report",
 			pathParams: []any{controllers.SessionIDParam{}},
@@ -4340,6 +4409,105 @@ func autopilotOperations() []operation {
 			reqBody:    controllers.AutopilotParkRequest{},
 			resps: with(controllers.AutopilotParkResponse{},
 				http.StatusBadRequest, http.StatusForbidden, http.StatusConflict, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+	}
+}
+// jiraOperations registers the per-project Jira connection, board and
+// start-from-ticket routes. Upstream Jira failures are 4xx/5xx envelopes with
+// stable JIRA_* codes; a rejected Jira login is 422, never 401.
+func jiraOperations() []operation {
+	idParam := []any{controllers.ProjectIDParam{}}
+	jiraErrors := []respUnit{
+		{http.StatusBadRequest, envelope.APIError{}},
+		{http.StatusNotFound, envelope.APIError{}},
+		{http.StatusConflict, envelope.APIError{}},
+		{http.StatusUnprocessableEntity, envelope.APIError{}},
+		{http.StatusInternalServerError, envelope.APIError{}},
+		{http.StatusBadGateway, envelope.APIError{}},
+		{http.StatusServiceUnavailable, envelope.APIError{}},
+	}
+	with := func(ok respUnit) []respUnit { return append([]respUnit{ok}, jiraErrors...) }
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/jira", id: "getProjectJira", tag: "jira",
+			summary:    "Report whether a project is connected to Jira (never returns the token)",
+			pathParams: idParam,
+			resps:      with(respUnit{http.StatusOK, jirasvc.Connection{}}),
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/projects/{id}/jira", id: "connectProjectJira", tag: "jira",
+			summary:    "Verify and store a project's Jira connection",
+			pathParams: idParam,
+			reqBody:    controllers.JiraConnectRequest{},
+			resps:      with(respUnit{http.StatusOK, jirasvc.Connection{}}),
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/projects/{id}/jira", id: "disconnectProjectJira", tag: "jira",
+			summary:    "Remove a project's Jira connection, token and ticket links",
+			pathParams: idParam,
+			resps:      with(respUnit{http.StatusOK, map[string]string{"status": "ok"}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{id}/jira/test", id: "testProjectJira", tag: "jira",
+			summary:    "Check Jira credentials, project and query without saving them",
+			pathParams: idParam,
+			reqBody:    controllers.JiraConnectRequest{},
+			resps:      with(respUnit{http.StatusOK, jirasvc.TestResult{}}),
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/jira/board", id: "getProjectJiraBoard", tag: "jira",
+			summary:    "List the project's Jira tickets grouped into its board columns",
+			pathParams: idParam,
+			resps:      with(respUnit{http.StatusOK, jirasvc.Board{}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{id}/jira/tickets/{issueKey}/start", id: "startProjectJiraTicket", tag: "jira",
+			summary:    "Send a Jira ticket to the project's orchestrator as a new task",
+			pathParams: []any{controllers.ProjectIDParam{}, controllers.JiraIssueKeyParam{}},
+			resps:      with(respUnit{http.StatusAccepted, jirasvc.StartResult{}}),
+		},
+	}
+}
+
+// liveServerOperations declares the project live-server surface: the dev
+// servers running for a project, with health, plus stop and restart.
+func liveServerOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{projectId}/live-servers", id: "listLiveServers", tag: "liveServers",
+			summary:    "List the dev servers running for a project, with an HTTP health reading each",
+			pathParams: []any{controllers.LiveServerProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLiveServersResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{projectId}/live-servers/stop", id: "stopLiveServer", tag: "liveServers",
+			summary:    "Stop one running dev server",
+			pathParams: []any{controllers.LiveServerProjectIDParam{}},
+			reqBody:    controllers.LiveServerActionRequest{},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/projects/{projectId}/live-servers/restart", id: "restartLiveServer", tag: "liveServers",
+			summary:    "Restart a dev server that AO started from .ao/launch.json",
+			pathParams: []any{controllers.LiveServerProjectIDParam{}},
+			reqBody:    controllers.LiveServerActionRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.LiveServerEnvelope{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
 		},
 	}
 }

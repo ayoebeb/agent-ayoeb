@@ -11,6 +11,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite/sqlitetest"
 )
@@ -3381,5 +3382,64 @@ func TestFailedReviewLaunchKeepsArchivedReviewerHidden(t *testing.T) {
 				t.Fatalf("failed trigger reopened archive: %+v, %v", saved, err)
 			}
 		})
+	}
+}
+
+func TestReviewerSelectionFillsModelFromSameHarnessWorker(t *testing.T) {
+	eng := newEngineForTest(&fakeStore{}, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, &fakeLauncher{})
+	eng.projects = fakeProjects{cfg: domain.ProjectConfig{
+		Reviewers: []domain.ReviewerConfig{{Harness: domain.ReviewerCodex, AgentConfig: domain.AgentConfig{Model: "gpt-6-astra", Effort: "xhigh"}}},
+		Worker:    domain.RoleOverride{Harness: domain.HarnessClaudeCode, AgentConfig: domain.AgentConfig{Model: "claude-sonnet-5-5"}},
+	}}
+	worker := domain.SessionRecord{ReviewerHarness: domain.ReviewerClaudeCode}
+	got, cfg, err := eng.reviewerSelection(context.Background(), worker)
+	if err != nil || got != domain.ReviewerClaudeCode || cfg.Model != "claude-sonnet-5-5" {
+		t.Fatalf("selection = (%q, %+v, %v), want claude-code + claude-sonnet-5-5", got, cfg, err)
+	}
+	got, cfg, _ = eng.reviewerSelection(context.Background(), domain.SessionRecord{})
+	if got != domain.ReviewerCodex || cfg.Model != "gpt-6-astra" {
+		t.Fatalf("project reviewer selection = (%q, %+v), want codex + gpt-6-astra", got, cfg)
+	}
+}
+
+func TestTriggerHarnessOverrideFillsModelFromSameHarnessWorker(t *testing.T) {
+	store := &fakeStore{}
+	launcher := &fakeLauncher{handle: "review-mer-1"}
+	projects := fakeProjects{cfg: domain.ProjectConfig{
+		Reviewers: []domain.ReviewerConfig{{Harness: domain.ReviewerCodex, AgentConfig: domain.AgentConfig{Model: "gpt-6-astra"}}},
+		Worker:    domain.RoleOverride{Harness: domain.HarnessClaudeCode, AgentConfig: domain.AgentConfig{Model: "claude-sonnet-5-5"}},
+	}}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), projects, launcher)
+
+	if _, err := eng.TriggerWithOptions(context.Background(), "mer-1", TriggerOptions{Harness: domain.ReviewerClaudeCode}); err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if got := launcher.gotSpec.AgentConfig.Model; launcher.gotSpec.Harness != domain.ReviewerClaudeCode || got != "claude-sonnet-5-5" {
+		t.Fatalf("launched = (%q, %q), want claude-code + claude-sonnet-5-5", launcher.gotSpec.Harness, got)
+	}
+}
+
+// A reviewer pane that cannot be destroyed must not stop worker termination
+// from cancelling runs and clearing the handle; the failure is reported last.
+func TestTerminateReviewerPaneDestroyFailureStillCleansUp(t *testing.T) {
+	store := &fakeStore{
+		review: &domain.Review{ID: "rev-1", SessionID: "mer-1", Harness: domain.ReviewerCodex, ReviewerHandleID: "review-mer-1"},
+		runs: []domain.ReviewRun{{
+			ID: "run-1", ReviewID: "rev-1", SessionID: "mer-1",
+			Status: domain.ReviewRunRunning, Verdict: domain.VerdictNone,
+		}},
+	}
+	launcher := &fakeLauncher{destroyErr: errors.New("pty-host pid 5548 still alive after teardown")}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	res, err := eng.TerminateReviewer(context.Background(), "mer-1", "")
+	if !errors.Is(err, sessionmanager.ErrReviewerPaneTeardown) {
+		t.Fatalf("TerminateReviewer err = %v, want ErrReviewerPaneTeardown", err)
+	}
+	if len(res.CancelledRuns) != 1 || store.runs[0].Status != domain.ReviewRunCancelled {
+		t.Fatalf("runs not cancelled: result=%+v runs=%+v", res, store.runs)
+	}
+	if store.review.ReviewerHandleID != "" {
+		t.Fatalf("reviewer handle = %q, want cleared", store.review.ReviewerHandleID)
 	}
 }

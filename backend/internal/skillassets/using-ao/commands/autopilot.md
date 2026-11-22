@@ -43,7 +43,8 @@ ao autopilot resume [--session <id>]
    reminds you to decide. Do not use a question tool: a form nobody answers
    parks the run.
 5. **Permission prompts** inside your workspace are answered for you, and for
-   the workers you start. Keep at most 3 workers running at once.
+   the workers you start. Keep at most 2 workers running at once, and start every worker and review on a Sonnet
+   model, never Opus.
 6. **Finish with `ao autopilot done --evidence "..."`** only when every
    criterion is met and you have verified it: run the tests and builds that
    prove it and say what you ran and what it showed. Evidence is your own
@@ -88,6 +89,10 @@ ao autopilot park --limit money --item "Upgrade the CI plan" --why "The free min
 The human gets one notification for it, it is recorded in the log, and you carry
 on with everything else. Parking the same open item again does nothing. A
 `decide` whose choice would cross a limit is refused: park it instead.
+
+The human can press **Undo** on any recorded decision. You then get a message with that
+decision: put back what it changed, or take the other option, record the
+replacement with `ao autopilot decide`, and carry on.
 
 The permission policy enforces the same list for the Chat sessions it answers:
 it allows anything inside the workspace (edits, tests, builds, git on your

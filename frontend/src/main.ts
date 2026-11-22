@@ -1,3 +1,4 @@
+import { devAcpRuntimeDir } from "./main/acp-runtime-dir";
 import { SideCloseRecovery } from "./main/side-close";
 import { SideLaunchRecovery } from "./main/side-launch-recovery";
 import { syncMacWindowButtons } from "./main/window-chrome";
@@ -207,6 +208,7 @@ import { repairBrowserProfileCookies } from "./main/browser-cookie-repair";
 import { browserProfilePartition } from "./shared/browser-profiles";
 import { createBrowserProfileStore } from "./main/browser-profile-store";
 import { BrowserHistoryStore } from "./main/browser-history-store";
+import { CertificateTrustStore } from "./main/browser-certificate-trust";
 import { createAwakeTrayMonitor } from "./main/awake-tray";
 import { createAwakeDownloadBridge } from "./main/awake-download-bridge";
 import { createBrowserDownloadManager } from "./main/browser-download-manager";
@@ -268,10 +270,13 @@ import { buildLinuxAppMenuTemplate, buildMacAppMenuTemplate, buildWindowsAppMenu
 import { ancestorRepositorySetupWarning, resolveCheckedOutBranch, scanImportFolder } from "./main/import-folder-scan";
 import { parseOpenFolderPathArg } from "./main/open-folder-arg";
 import { registerRemotesIpc, remotesFilePath } from "./main/remotes-main";
+import { createDailyUpdateController } from "./main/daily-update";
 import { sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
 import { createLocalHostIdentity, readRemoteIdentity } from "./main/remote-request";
 import { RemoteRegistry } from "./main/remote-registry";
 import { startRemoteProxy } from "./main/remote-proxy";
+import { newLoopbackCredential, startLoopbackProxy } from "./main/loopback-proxy";
+import { LoopbackRoutes } from "./main/loopback-routes";
 import { captureMainError, reportDaemonFailure, ExpectedIpcError, installIpcErrorCapture, setMainErrorSink } from "./main/main-error-capture";
 
 // Every ipcMain.handle registered from here on reports unexpected throws.
@@ -1258,6 +1263,8 @@ async function createWindowInternal(): Promise<void> {
 		isCloseShellTerminalShortcutEnabled: () => closeShellTerminalShortcutEnabled,
 		browserProfileStore,
 		browserHistoryStore,
+		// Lives next to the other browser state under ~/.ao (browserProfileStateDir).
+		certificateTrust: new CertificateTrustStore(browserProfileStateDir()),
 		browserDownloadManager: createBrowserDownloadManager({
 			downloadsDirectory: app.getPath("downloads"),
 			historyPath: path.join(desktopDataDir, "browser-downloads.json"),
@@ -1265,6 +1272,7 @@ async function createWindowInternal(): Promise<void> {
 			notify: (state) => { awakeDownloads.update(state); shellWebContents.send("browser:downloadsChanged", state); },
 		}),
 		clearBrowserProfileData: clearElectronBrowserProfileData,
+		loopbackRoutes,
 		prepareBrowserPartition: (partition) =>
 			applyBrowserIdentity(session.fromPartition(partition), {
 				chromeVersion: process.versions.chrome,
@@ -1841,7 +1849,7 @@ function daemonEnv(forceKeep = keepDaemonAlive(process.env)): NodeJS.ProcessEnv 
 			process.env.AO_ACP_RUNTIME_DIR ??
 			(app.isPackaged
 				? path.join(process.resourcesPath, "acp-runtime")
-				: path.join(app.getAppPath(), "resources", "acp-runtime")),
+				: devAcpRuntimeDir(app.getAppPath())),
 		...(bundledTmuxBinary ? { AO_TMUX_BINARY: bundledTmuxBinary, AO_TMUX_SOCKET_NAME: "ao" } : {}),
 		// The packaged macOS app ships cloudflared, so turning on remote access
 		// never waits for an install. An explicit AO_CLOUDFLARED_PATH still wins.
@@ -2272,7 +2280,7 @@ function daemonLaunchEnv(): NodeJS.ProcessEnv {
 // and a no-op when the runtime is intact. Dev only: a packaged runtime is signed.
 async function repairDevAcpRuntime(): Promise<void> {
 	if (app.isPackaged || process.env.AO_ACP_RUNTIME_DIR) return;
-	const runtimeDir = path.join(app.getAppPath(), "resources", "acp-runtime");
+	const runtimeDir = devAcpRuntimeDir(app.getAppPath());
 	const adapter = path.join(
 		runtimeDir,
 		"node_modules",
@@ -2286,7 +2294,7 @@ async function repairDevAcpRuntime(): Promise<void> {
 	if (!existsSync(script)) return;
 	console.warn(`[ao] ACP runtime missing at ${runtimeDir}; rebuilding`);
 	await new Promise<void>((resolve) => {
-		const child = spawn(process.execPath, [script], {
+		const child = spawn(process.execPath, [script, "--dev"], {
 			cwd: app.getAppPath(),
 			env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
 			stdio: "inherit",
@@ -3528,6 +3536,33 @@ const remoteRegistry = new RemoteRegistry((entry) => {
 	const devUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined" ? undefined : MAIN_WINDOW_VITE_DEV_SERVER_URL;
 	return startRemoteProxy(entry, devUrl ? new URL(devUrl).origin : RENDERER_ORIGIN);
 });
+// A remote session's Browser tabs open that computer's localhost dev servers:
+// its loopback traffic goes through a routing proxy over the remote connection
+// (main/loopback-proxy.ts). Chromium bypasses proxies for loopback unless the
+// bypass list says "<-loopback>", and a PAC script cannot lift that, so a
+// routed partition uses a fixed proxy that dials everything else from this PC.
+const loopbackCredential = newLoopbackCredential();
+const loopbackRoutes = new LoopbackRoutes({
+	credential: loopbackCredential,
+	startProxy: (hostId) => startLoopbackProxy({
+		hostId,
+		credential: loopbackCredential,
+		openStream: (host, port) => remoteRegistry.openLoopbackStream(hostId, host, port),
+	}),
+	applyProxy: (partition, address) => session.fromPartition(partition).setProxy(
+		address
+			? { mode: "fixed_servers", proxyRules: `http://${address}`, proxyBypassRules: "<-loopback>" }
+			: { mode: "system" },
+	),
+});
+// Only our own routing proxies get the credential; any other proxy's challenge is left alone.
+app.on("login", (event, _webContents, _details, authInfo, callback) => {
+	if (!authInfo.isProxy) return;
+	const credential = loopbackRoutes.credentialFor(authInfo.host, authInfo.port);
+	if (!credential) return;
+	event.preventDefault();
+	callback(credential.username, credential.password);
+});
 setPasswordCipher(() => protectedStorageAvailable() ? {
 	encrypt: (text) => safeStorage.encryptString(text).toString("base64"),
 	decrypt: (sealed) => safeStorage.decryptString(Buffer.from(sealed, "base64")),
@@ -3902,6 +3937,12 @@ ipcMain.handle("featureBuilds:list", () => listFeatureBuilds());
 ipcMain.handle("featureBuilds:getActive", () => getActiveFeatureBuild());
 
 ipcMain.handle("updates:getStatus", (): UpdateStatus => getUpdateStatus());
+
+// The daily Ayo's "update ready" notice. AO_DAILY_DIR is set only by the daily
+// scripts, so a packaged or dev run never shows it.
+const dailyUpdate = createDailyUpdateController({ dailyDir: process.env.AO_DAILY_DIR });
+ipcMain.handle("dailyUpdate:get", () => dailyUpdate.getState());
+ipcMain.handle("dailyUpdate:apply", () => dailyUpdate.apply());
 ipcMain.handle("updates:check", async (_event, options?: UpdateCheckOptions) => {
 	const runFile = runFilePath();
 	if (!runFile) return;
@@ -4631,6 +4672,7 @@ app.on("before-quit", (event) => {
 			};
 			const cleanup = Promise.all([
 				disposeAllBrowserViewHosts(),
+				loopbackRoutes.closeAll(),
 				remoteRegistry.closeAll(),
 				cloudAgentProxy.close(),
 				telemetryPolicyController?.close() ?? Promise.resolve(),
