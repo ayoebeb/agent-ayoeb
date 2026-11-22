@@ -4335,13 +4335,14 @@ func (c *Controller) announceApproval(_ context.Context, event ports.ChatEvent, 
 		Decisions: append([]ports.ChatDecisionOption(nil), event.Decisions...),
 	}
 	observer, id := c.approvals, c.sessionID
+	//nolint:gosec // G118: deliberately not the event's context, which carries the closed projection transaction (see above)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				c.log.Error("chat: approval observer panicked", "session", id, "panic", r)
 			}
 		}()
-		observer.ApprovalRequested(context.Background(), id, notice) //nolint:gosec // G118: deliberately not the event's context, which carries the closed projection transaction (see above)
+		observer.ApprovalRequested(context.Background(), id, notice)
 	}()
 }
 
