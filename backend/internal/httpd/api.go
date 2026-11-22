@@ -304,8 +304,6 @@ func serveWithSetupBudget(next http.Handler, w http.ResponseWriter, req *http.Re
 	}
 }
 
-// Register mounts the bounded /api/v1 REST surface. Long-lived surfaces such
-// as muxed terminal streams stay outside this timeout group.
 // autopilotSettings is the Autopilot service seen as the settings controller's
 // Autopilot preference, when the service provides it.
 func autopilotSettings(svc controllers.AutopilotService) controllers.AutopilotSettings {
@@ -313,6 +311,8 @@ func autopilotSettings(svc controllers.AutopilotService) controllers.AutopilotSe
 	return settings
 }
 
+// Register mounts the bounded /api/v1 REST surface. Long-lived surfaces such
+// as muxed terminal streams stay outside this timeout group.
 func (a *API) Register(root chi.Router) {
 	timeout := a.cfg.RequestTimeout
 	if timeout <= 0 {
