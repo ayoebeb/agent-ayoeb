@@ -79,7 +79,8 @@ ALTER TABLE app_settings ADD COLUMN autopilot_max_iterations INTEGER NOT NULL DE
     CHECK (autopilot_max_iterations BETWEEN 1 AND 500);
 
 -- SQLite cannot widen a CHECK constraint in place. Rebuild the notifications
--- table to add autopilot_parked: Autopilot parked one item (a hard limit it must
+-- table to add autopilot_parked, keeping every earlier kind (usage_limit
+-- included): Autopilot parked one item (a hard limit it must
 -- not cross, or a run it could not finish) and needs the user.
 -- +goose StatementBegin
 CREATE TABLE notifications_next (
@@ -90,7 +91,7 @@ CREATE TABLE notifications_next (
     type TEXT NOT NULL CHECK (type IN (
         'needs_input', 'ready_to_merge', 'pr_merged', 'pr_closed_unmerged',
         'review_completed', 'review_changes_requested', 'orchestrator_waiting',
-        'autopilot_parked'
+        'usage_limit', 'autopilot_parked'
     )),
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',
@@ -141,7 +142,8 @@ CREATE TABLE notifications_previous (
     pr_url TEXT NOT NULL DEFAULT '',
     type TEXT NOT NULL CHECK (type IN (
         'needs_input', 'ready_to_merge', 'pr_merged', 'pr_closed_unmerged',
-        'review_completed', 'review_changes_requested', 'orchestrator_waiting'
+        'review_completed', 'review_changes_requested', 'orchestrator_waiting',
+        'usage_limit'
     )),
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',

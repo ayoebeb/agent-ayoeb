@@ -19,11 +19,13 @@ type Verdict struct {
 	Limit domain.HardLimit
 	// Reason is one plain sentence for the log.
 	Reason string
-	// MergeRef is set when the request is `gh pr merge`: the service decides it
-	// against the stored PR facts, because a merge is allowed once AO review
-	// approved the exact head and checks are green.
-	MergeRef string
-	// Merge reports that the request is a merge, whatever MergeRef holds.
+	// MergeRefs lists every `gh pr merge` target the request holds (an empty
+	// string means the current branch's pull request): the service decides each
+	// one against the stored PR facts, because a merge is allowed once AO review
+	// approved the exact head and checks are green. A compound request is allowed
+	// only if every one of them is.
+	MergeRefs []string
+	// Merge reports that the request holds at least one merge.
 	Merge bool
 }
 
@@ -40,14 +42,18 @@ type Action struct {
 	Paths []string
 	// Workspace is the session's own workspace root.
 	Workspace string
+	// Cwd is the directory the provider says the command runs in; empty means
+	// the workspace.
+	Cwd string
 	// Summary is the provider's one-line label for the request.
 	Summary string
 }
 
-// ParseApproval reads the tool, kind, command and paths out of the provider
-// payload a chat approval carries (`input`, `providerToolName`, `toolKind`,
-// `subjectKind`). It never fails: an unreadable payload yields an Action with
-// only the summary, which the policy treats as an unknown tool and allows.
+// ParseApproval reads the tool, kind, command, directory and paths out of the
+// provider payload a chat approval carries: the ACP shape (`input`,
+// `providerToolName`, `toolKind`, `subjectKind`) and the Codex shape (`method`,
+// `command`, `rawCommand`, `cwd`). It never fails: a payload it cannot read
+// yields an Action with nothing identified, which Evaluate refuses.
 func ParseApproval(summary string, detail []byte, workspace string) Action {
 	a := Action{Summary: strings.TrimSpace(summary), Workspace: workspace}
 	var doc map[string]any
@@ -61,9 +67,43 @@ func ParseApproval(summary string, detail []byte, workspace string) Action {
 	if a.Tool == "" {
 		a.Tool = firstString(doc["toolName"], doc["tool"])
 	}
+	a.Cwd = firstString(doc["cwd"])
+	// Codex names the request by its JSON-RPC method and puts the command at the
+	// top level: `rawCommand` is the full original, `command` the unwrapped script.
+	method := strings.ToLower(firstString(doc["method"]))
+	if raw := firstString(doc["rawCommand"], doc["command"]); raw != "" {
+		a.Command = raw
+		if a.Tool == "" && a.Kind == "" {
+			a.Kind = "execute"
+		}
+	}
+	switch {
+	case strings.Contains(method, "commandexecution") || strings.Contains(method, "execcommand"):
+		if a.Kind == "" {
+			a.Kind = "execute"
+		}
+	case strings.Contains(method, "filechange") || strings.Contains(method, "applypatch"):
+		if a.Kind == "" {
+			a.Kind = "edit"
+		}
+		for _, key := range []string{"paths", "files"} {
+			if list, ok := doc[key].([]any); ok {
+				for _, item := range list {
+					if p, ok := item.(string); ok && strings.TrimSpace(p) != "" {
+						a.Paths = append(a.Paths, strings.TrimSpace(p))
+					}
+				}
+			}
+		}
+		if root := firstString(doc["grantRoot"]); root != "" {
+			a.Paths = append(a.Paths, root)
+		}
+	}
 	switch in := doc["input"].(type) {
 	case map[string]any:
-		a.Command = firstString(in["command"], in["cmd"], in["script"])
+		if cmd := firstString(in["command"], in["cmd"], in["script"]); cmd != "" {
+			a.Command = cmd
+		}
 		for _, key := range []string{"file_path", "path", "notebook_path", "filePath", "target_file", "old_path", "new_path"} {
 			if p, ok := in[key].(string); ok && strings.TrimSpace(p) != "" {
 				a.Paths = append(a.Paths, strings.TrimSpace(p))
@@ -102,14 +142,23 @@ func firstString(values ...any) string {
 // never waits on a prompt the policy can answer.
 func Evaluate(a Action) Verdict {
 	switch {
+	case a.Tool == "" && a.Kind == "" && a.Command == "" && len(a.Paths) == 0:
+		// Nothing in the request says what it does, so it cannot be judged.
+		return Verdict{Reason: "The request does not say what it does, so AO cannot check it against the hard limits."}
 	case isShellTool(a.Tool, a.Kind):
-		return evaluateCommand(a.Command, a.Workspace)
+		if strings.TrimSpace(a.Command) == "" {
+			return Verdict{Reason: "The request runs a command AO could not read."}
+		}
+		return evaluateCommandIn(a.Command, a.Workspace, a.Cwd)
 	case isMCPTool(a.Tool):
 		if limit, ok := classifyMCPTool(a.Tool); ok {
 			return deny(limit, "The tool "+a.Tool+" would "+limit.Description()+".")
 		}
 		return allow("An MCP tool with no hard-limit effect.")
 	case isDeleteTool(a.Tool, a.Kind):
+		if len(a.Paths) == 0 {
+			return Verdict{Reason: "The request deletes files without saying which."}
+		}
 		for _, p := range a.Paths {
 			if limit, ok := credentialStorePath(p); ok {
 				return deny(limit, "The request touches a credential store: "+p+".")
@@ -120,6 +169,9 @@ func Evaluate(a Action) Verdict {
 		}
 		return allow("Deletes only inside the workspace.")
 	case isWriteTool(a.Tool, a.Kind):
+		if len(a.Paths) == 0 {
+			return Verdict{Reason: "The request changes files without saying which, so AO cannot tell they stay inside the workspace."}
+		}
 		for _, p := range a.Paths {
 			if limit, ok := credentialStorePath(p); ok {
 				return deny(limit, "The request touches a credential store: "+p+".")
@@ -205,6 +257,31 @@ func credentialStorePath(p string) (domain.HardLimit, bool) {
 	return "", false
 }
 
+// deletionOutside says why a deletion target is not safely inside the workspace,
+// or returns "" when it is. A relative target is placed against the directory the
+// command really runs in (after any `cd`), and one that cannot be placed is
+// refused rather than assumed to be the workspace.
+func deletionOutside(env cmdEnv, p string) string {
+	p = strings.TrimSpace(strings.Trim(p, `"'`))
+	if p == "" {
+		return ""
+	}
+	if strings.HasPrefix(p, "~") || strings.HasPrefix(p, "$") || strings.HasPrefix(p, "%") {
+		return "which AO cannot place inside the workspace."
+	}
+	if !isAbsolute(normalizePath(p)) {
+		abs := resolveIn(env.dir, p)
+		if abs == "" {
+			return "from a directory AO cannot determine, so it cannot be shown to stay inside the workspace."
+		}
+		p = abs
+	}
+	if !insideWorkspace(env.workspace, p) {
+		return "which is outside the workspace."
+	}
+	return ""
+}
+
 // insideWorkspace reports whether p resolves to the workspace or something below
 // it. A relative path is taken as relative to the workspace. A path that starts
 // with ~, $VAR or %VAR% cannot be resolved here, so it counts as outside: the
@@ -248,12 +325,75 @@ func caseInsensitive(p string) bool { return driveLetter.MatchString(p) }
 
 // ---- shell commands ----
 
-var segmentSplit = regexp.MustCompile(`\s*(?:&&|\|\||;|\||\r?\n)\s*`)
+// splitSegments cuts a command line at its separators (&&, ||, ;, |, newline),
+// but not inside quotes: `bash -c "cd x && rm y"` is one command whose argument is
+// a script, which innerCommands then reads as a whole.
+func splitSegments(command string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	runes := []rune(command)
+	flush := func() {
+		if seg := strings.TrimSpace(cur.String()); seg != "" {
+			out = append(out, seg)
+		}
+		cur.Reset()
+	}
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case quote != 0:
+			cur.WriteRune(r)
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+			cur.WriteRune(r)
+		case r == ';' || r == '\n' || r == '\r':
+			flush()
+		case r == '&' && i+1 < len(runes) && runes[i+1] == '&':
+			flush()
+			i++
+		case r == '|':
+			flush()
+			if i+1 < len(runes) && runes[i+1] == '|' {
+				i++
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return out
+}
 
 // evaluateCommand reads every command of a pipeline or list, so a forbidden step
 // hidden behind `&&` or `;` is still found.
 func evaluateCommand(command, workspace string) Verdict {
-	return evaluateCommandDepth(command, workspace, 0)
+	return evaluateCommandIn(command, workspace, "")
+}
+
+// cmdEnv is where a command runs: the session's workspace, and the directory
+// the shell is in. dir is empty when it cannot be known (after `cd "$X"`, `cd -`
+// or `cd ~`), in which case a relative destructive target cannot be placed.
+type cmdEnv struct {
+	workspace string
+	dir       string
+}
+
+// evaluateCommandIn judges a command that starts in cwd (the workspace when cwd
+// is empty).
+func evaluateCommandIn(command, workspace, cwd string) Verdict {
+	dir := strings.TrimSpace(cwd)
+	if dir == "" {
+		dir = workspace
+	}
+	dir = normalizePath(dir)
+	if dir != "" && !isAbsolute(dir) {
+		dir = path.Join(normalizePath(workspace), dir)
+	}
+	return evaluateCommandDepth(command, cmdEnv{workspace: workspace, dir: dir}, 0)
 }
 
 // maxNesting bounds how deep a command inside a command (a shell -c string, an
@@ -261,7 +401,13 @@ func evaluateCommand(command, workspace string) Verdict {
 // unreadable rather than waved through.
 const maxNesting = 4
 
-func evaluateCommandDepth(command, workspace string, depth int) Verdict {
+// innerRun is a command found inside another, with the directory it starts in.
+type innerRun struct {
+	command string
+	dir     string
+}
+
+func evaluateCommandDepth(command string, env cmdEnv, depth int) Verdict {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return allow("An empty command.")
@@ -272,18 +418,30 @@ func evaluateCommandDepth(command, workspace string, depth int) Verdict {
 	if limit, ok := messagingEndpoint(command); ok {
 		return deny(limit, "The command sends a message through an outside service.")
 	}
-	nested := substitutions(command)
-	var merge Verdict
-	for _, segment := range segmentSplit.Split(command, -1) {
+	var nested []innerRun
+	for _, sub := range substitutions(command) {
+		nested = append(nested, innerRun{sub, env.dir})
+	}
+	// merges collects every `gh pr merge` target of the request, so the service
+	// can judge each one: a later approved merge must not authorize an earlier one.
+	var merges []string
+	for _, segment := range splitSegments(command) {
 		tokens := tokenize(segment)
 		tokens = stripWrappers(tokens)
+		tokens = stripSubshell(tokens)
 		if len(tokens) == 0 {
 			continue
 		}
-		nested = append(nested, innerCommands(tokens)...)
-		v := classifySegment(tokens, workspace)
+		if dir, changed := changeDirectory(tokens, env); changed {
+			env.dir = dir
+			continue
+		}
+		for _, inner := range innerCommands(tokens) {
+			nested = append(nested, innerRun{inner, env.dir})
+		}
+		v := classifySegment(tokens, env)
 		if v.Merge {
-			merge = v
+			merges = append(merges, v.MergeRefs...)
 			continue
 		}
 		if !v.Allow {
@@ -294,16 +452,74 @@ func evaluateCommandDepth(command, workspace string, depth int) Verdict {
 		return Verdict{Reason: "The command nests other commands too deeply to read."}
 	}
 	for _, inner := range nested {
-		if v := evaluateCommandDepth(inner, workspace, depth+1); !v.Allow && !v.Merge {
+		v := evaluateCommandDepth(inner.command, cmdEnv{workspace: env.workspace, dir: inner.dir}, depth+1)
+		switch {
+		case v.Merge:
+			merges = append(merges, v.MergeRefs...)
+		case !v.Allow:
 			return v
-		} else if v.Merge {
-			merge = v
 		}
 	}
-	if merge.Merge {
-		return merge
+	if len(merges) > 0 {
+		return Verdict{Merge: true, MergeRefs: merges, Reason: "A merge is decided against the PR's review and checks."}
 	}
 	return allow("A command with no hard-limit effect.")
+}
+
+// stripSubshell drops the "(" or "{" that opens a group, so `(cd x && rm y)` is
+// read like `cd x && rm y`.
+func stripSubshell(tokens []string) []string {
+	for len(tokens) > 0 {
+		head := strings.TrimLeft(tokens[0], "({")
+		if head == tokens[0] {
+			break
+		}
+		if head == "" {
+			tokens = tokens[1:]
+			continue
+		}
+		tokens = append([]string{head}, tokens[1:]...)
+	}
+	return tokens
+}
+
+// changeDirectory follows `cd`, `pushd`, `chdir` and PowerShell's `Set-Location`.
+// It reports the new directory ("" when it cannot be known) and whether the
+// segment was a directory change at all.
+func changeDirectory(tokens []string, env cmdEnv) (string, bool) {
+	switch baseProgram(tokens[0]) {
+	case "cd", "chdir", "pushd", "set-location", "sl":
+	case "popd":
+		return "", true
+	default:
+		return "", false
+	}
+	target := ""
+	for _, a := range tokens[1:] {
+		if isFlagToken(a) {
+			continue
+		}
+		target = a
+		break
+	}
+	target = strings.TrimSpace(target)
+	if target == "" || target == "-" || strings.ContainsAny(target[:1], "~$%") || strings.ContainsAny(target, "$`") {
+		return "", true
+	}
+	return resolveIn(env.dir, target), true
+}
+
+// resolveIn places p relative to dir. It returns "" when the result cannot be
+// known: a relative p with no known dir.
+func resolveIn(dir, p string) string {
+	p = normalizePath(p)
+	if isAbsolute(p) {
+		return p
+	}
+	if dir == "" {
+		return ""
+	}
+	return path.Clean(dir + "/" + p)
 }
 
 var (
@@ -475,7 +691,7 @@ func containsAny(tokens []string, words ...string) bool {
 
 var cloudCLIs = map[string]bool{"aws": true, "gcloud": true, "az": true, "doctl": true, "heroku": true, "vercel": true, "flyctl": true, "fly": true}
 
-func classifySegment(tokens []string, workspace string) Verdict {
+func classifySegment(tokens []string, env cmdEnv) Verdict {
 	prog := baseProgram(tokens[0])
 	if strings.HasPrefix(prog, "mkfs.") {
 		prog = "mkfs"
@@ -528,8 +744,8 @@ func classifySegment(tokens []string, workspace string) Verdict {
 			if isFlagToken(a) {
 				continue
 			}
-			if !insideWorkspace(workspace, a) {
-				return deny(domain.HardLimitDataDelete, "The command deletes "+a+", which is outside the workspace.")
+			if reason := deletionOutside(env, a); reason != "" {
+				return deny(domain.HardLimitDataDelete, "The command deletes "+a+", "+reason)
 			}
 		}
 	case "find":
@@ -538,8 +754,8 @@ func classifySegment(tokens []string, workspace string) Verdict {
 				if strings.HasPrefix(a, "-") || a == "(" || a == "!" {
 					break
 				}
-				if !insideWorkspace(workspace, a) {
-					return deny(domain.HardLimitDataDelete, "The command deletes files under "+a+", outside the workspace.")
+				if reason := deletionOutside(env, a); reason != "" {
+					return deny(domain.HardLimitDataDelete, "The command deletes files under "+a+", "+reason)
 				}
 			}
 		}
@@ -763,7 +979,7 @@ func classifyGH(args, lower []string) Verdict {
 					break
 				}
 			}
-			return Verdict{Merge: true, MergeRef: ref, Reason: "A merge is decided against the PR's review and checks."}
+			return Verdict{Merge: true, MergeRefs: []string{ref}, Reason: "A merge is decided against the PR's review and checks."}
 		case "comment", "review":
 			return deny(domain.HardLimitMessaging, "The command posts on a pull request other people read.")
 		}

@@ -44,7 +44,16 @@ func (s *Service) HandleApproval(ctx context.Context, id domain.SessionID, n App
 	action := ParseApproval(n.Summary, n.Detail, rec.Metadata.WorkspacePath)
 	verdict := Evaluate(action)
 	if verdict.Merge {
-		verdict = s.mergeVerdict(ctx, run, rec, verdict.MergeRef)
+		// Every merge of the request must pass: one approved pull request never
+		// authorizes another that AO has not reviewed.
+		merged := allow("Every merge in the request has an approved AO review of its exact head and green checks.")
+		for _, ref := range verdict.MergeRefs {
+			if v := s.mergeVerdict(ctx, run, rec, ref); !v.Allow {
+				merged = v
+				break
+			}
+		}
+		verdict = merged
 	}
 	decision, ok := pickDecision(n.Decisions, verdict.Allow)
 	if !ok {

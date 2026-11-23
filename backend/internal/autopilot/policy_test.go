@@ -134,11 +134,11 @@ func TestEvaluateReadsEveryStepOfAChain(t *testing.T) {
 
 func TestEvaluateLeavesAMergeToThePRFacts(t *testing.T) {
 	v := Evaluate(bash("gh pr merge 42 --squash"))
-	if v.Allow || !v.Merge || v.MergeRef != "42" {
+	if v.Allow || !v.Merge || len(v.MergeRefs) != 1 || v.MergeRefs[0] != "42" {
 		t.Fatalf("merge verdict = %+v, want a merge request for PR 42", v)
 	}
 	v = Evaluate(bash("gh pr merge https://github.com/o/r/pull/9 --auto"))
-	if !v.Merge || v.MergeRef != "https://github.com/o/r/pull/9" {
+	if !v.Merge || len(v.MergeRefs) != 1 || v.MergeRefs[0] != "https://github.com/o/r/pull/9" {
 		t.Fatalf("merge by URL = %+v", v)
 	}
 	// A refusal in another step still wins over the merge.
@@ -233,10 +233,11 @@ func TestParseApprovalReadsTheProviderPayload(t *testing.T) {
 		t.Fatalf("edit parsed = %+v", edit)
 	}
 
-	// An unreadable payload never blocks the agent: it is an unknown tool.
+	// A payload AO cannot read says nothing about what it does, so it is refused
+	// (without naming a hard limit) instead of being waved through.
 	garbage := ParseApproval("Something", []byte("not json"), testWorkspace)
-	if v := Evaluate(garbage); !v.Allow {
-		t.Fatalf("garbage payload = %+v, want allow", v)
+	if v := Evaluate(garbage); v.Allow || v.Limit != "" {
+		t.Fatalf("garbage payload = %+v, want a plain refusal", v)
 	}
 	// A shell tool whose payload has no command falls back to its label.
 	labeled := ParseApproval("Run `sudo reboot`", []byte(`{"toolKind":"execute"}`), testWorkspace)

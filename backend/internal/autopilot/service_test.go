@@ -27,9 +27,20 @@ type fakeMessenger struct {
 	mu   sync.Mutex
 	sent []sent
 	fail error
+	// hold, when set, parks every send of an "Autopilot iteration" message until
+	// it is closed; inSend is told when one is parked.
+	hold   chan struct{}
+	inSend chan struct{}
 }
 
 func (m *fakeMessenger) Send(_ context.Context, id domain.SessionID, msg string) error {
+	m.mu.Lock()
+	hold, inSend := m.hold, m.inSend
+	m.mu.Unlock()
+	if hold != nil && strings.Contains(msg, "Autopilot iteration") {
+		inSend <- struct{}{}
+		<-hold
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.fail != nil {
@@ -100,9 +111,20 @@ func (i *fakeInterrupter) Interrupt(_ context.Context, id domain.SessionID) erro
 type fakeProgress struct {
 	mu sync.Mutex
 	fp map[domain.SessionID]string
+	// gate, when set, holds every Fingerprint call until it is closed; entered
+	// is told when a call has started waiting.
+	gate    chan struct{}
+	entered chan struct{}
 }
 
 func (p *fakeProgress) Fingerprint(_ context.Context, rec domain.SessionRecord) (string, error) {
+	p.mu.Lock()
+	gate, entered := p.gate, p.entered
+	p.mu.Unlock()
+	if gate != nil {
+		entered <- struct{}{}
+		<-gate
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.fp[rec.ID], nil
@@ -649,6 +671,77 @@ func TestStopEndsTheRunInterruptsTheTurnAndTellsTheAgent(t *testing.T) {
 	}
 	if again, err := e.svc.Stop(e.ctx, orch.ID); err != nil || again {
 		t.Fatalf("second stop = %v, %v, want false nil", again, err)
+	}
+}
+
+// Stop must win over an iteration that was still being prepared: the Git
+// fingerprint of the workspace was in flight when the user pressed Stop.
+func TestStopDropsAnIterationThatWasBeingPrepared(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	e.start(orch.ID, "task")
+	e.progress.gate, e.progress.entered = make(chan struct{}), make(chan struct{})
+	e.progress.set(orch.ID, "A")
+
+	judged := make(chan struct{})
+	go func() {
+		defer close(judged)
+		e.turnEnds(orch.ID)
+	}()
+	<-e.progress.entered // the turn is judged and the fingerprint is in flight
+	if stopped, err := e.svc.Stop(e.ctx, orch.ID); err != nil || !stopped {
+		t.Fatalf("stop = %v, %v", stopped, err)
+	}
+	before := len(e.msgs.to(orch.ID))
+	close(e.progress.gate)
+	<-judged
+
+	msgs := e.msgs.to(orch.ID)
+	if len(msgs) != before {
+		t.Fatalf("a message went out after Stop: %q", msgs[before:])
+	}
+	if last := msgs[len(msgs)-1]; !strings.Contains(last, "stopped by the user") {
+		t.Fatalf("the last message must be the stop notice, got %q", last)
+	}
+	if run := e.run(orch.ID); run.State != domain.AutopilotStopped || run.Iteration != 0 {
+		t.Fatalf("run = %+v, want stopped at iteration 0", run)
+	}
+}
+
+// A continuation that is already going out when Stop arrives is followed by the
+// stop notice, never the other way round.
+func TestStopNoticeFollowsAContinuationAlreadyGoingOut(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	e.start(orch.ID, "task")
+	e.msgs.hold, e.msgs.inSend = make(chan struct{}), make(chan struct{})
+	e.progress.set(orch.ID, "A")
+
+	judged := make(chan struct{})
+	go func() {
+		defer close(judged)
+		e.turnEnds(orch.ID)
+	}()
+	<-e.msgs.inSend // the continuation is being delivered
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		if ok, err := e.svc.Stop(e.ctx, orch.ID); err != nil || !ok {
+			t.Errorf("stop = %v, %v", ok, err)
+		}
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("Stop sent its notice while a continuation was still going out")
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(e.msgs.hold)
+	<-judged
+	<-stopped
+
+	msgs := e.msgs.to(orch.ID)
+	if last := msgs[len(msgs)-1]; !strings.Contains(last, "stopped by the user") {
+		t.Fatalf("the stop notice must come last, got %q", last)
 	}
 }
 

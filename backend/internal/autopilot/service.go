@@ -175,6 +175,46 @@ type Service struct {
 	// judging holds the sessions whose turn end is being judged, so the hook and
 	// the watchdog cannot both send the next message for one turn.
 	judging map[domain.SessionID]bool
+	// delivery fences the messages that tell a session to carry on against Stop:
+	// one lock per session, held while a message goes out and while Stop ends the
+	// run, so no continuation can land after Stop.
+	delivery map[domain.SessionID]*sync.Mutex
+}
+
+// lockDelivery takes the session's delivery fence and returns its release.
+func (s *Service) lockDelivery(id domain.SessionID) func() {
+	s.mu.Lock()
+	m, ok := s.delivery[id]
+	if !ok {
+		m = &sync.Mutex{}
+		s.delivery[id] = m
+	}
+	s.mu.Unlock()
+	m.Lock()
+	return m.Unlock
+}
+
+// deliverIteration sends a "continue the task" message, but only while the run is
+// still running. The check and the send happen under the delivery fence, and Stop
+// takes the same fence after it ends the run, so a message that was being
+// prepared while the user pressed Stop is dropped, and one already going out is
+// followed (never preceded) by Stop's notice. It reports whether the message went.
+func (s *Service) deliverIteration(ctx context.Context, run domain.AutopilotRun, msg string) (bool, error) {
+	unlock := s.lockDelivery(run.SessionID)
+	defer unlock()
+	cur, ok, err := s.store.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		return false, fmt.Errorf("autopilot: read run: %w", err)
+	}
+	if !ok || cur.State != domain.AutopilotRunning {
+		return false, nil
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	if err := s.messenger.Send(sendCtx, run.SessionID, msg); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // New constructs the service.
@@ -183,7 +223,7 @@ func New(d Deps) *Service {
 		store: d.Store, messenger: d.Messenger, interrupter: d.Interrupter, notifier: d.Notifier,
 		progress: d.Progress, approvals: d.Approvals, usageLimited: d.UsageLimited, verifyTests: d.VerifyTests,
 		clock: d.Clock, newID: d.NewID, log: d.Logger, idleGrace: d.IdleGrace, minNudgeGap: d.MinNudgeGap,
-		background: d.Background, judging: map[domain.SessionID]bool{},
+		background: d.Background, judging: map[domain.SessionID]bool{}, delivery: map[domain.SessionID]*sync.Mutex{},
 	}
 	if s.clock == nil {
 		s.clock = func() time.Time { return time.Now().UTC() }
@@ -438,8 +478,10 @@ func (s *Service) stop(ctx context.Context, id domain.SessionID, reason domain.A
 	s.mu.Unlock()
 	s.resolveParkedNotifications(ctx, run)
 
-	// The run is already ended, so nothing below can restart it. Cutting the
-	// session's current turn and telling it to stop is best-effort.
+	// The run is already ended, so nothing below can restart it. Wait for any
+	// continuation that was already going out, then cut the session's current
+	// turn and tell it to stop; both are best-effort.
+	defer s.lockDelivery(id)()
 	if s.interrupter != nil {
 		if err := s.interrupter.Interrupt(ctx, id); err != nil {
 			s.log.Warn("autopilot: interrupt on stop", "session", id, "err", err)
@@ -500,10 +542,13 @@ func (s *Service) sendIteration(ctx context.Context, run domain.AutopilotRun, le
 	if lead != "" {
 		msg = resumeMessage(run, run.Iteration+1, lead)
 	}
-	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
-	defer cancel()
-	if err := s.messenger.Send(sendCtx, run.SessionID, msg); err != nil {
+	sent, err := s.deliverIteration(ctx, run, msg)
+	if err != nil {
 		return err
+	}
+	if !sent {
+		// The run was stopped before the message went out.
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

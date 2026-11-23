@@ -212,11 +212,14 @@ func (s *Service) judgeRun(ctx context.Context, run domain.AutopilotRun, force b
 		return
 	}
 
-	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
-	defer cancel()
-	if err := s.messenger.Send(sendCtx, run.SessionID, iterationMessage(next, next.Iteration+1)); err != nil {
+	sent, err := s.deliverIteration(ctx, run, iterationMessage(next, next.Iteration+1))
+	if err != nil {
 		// Nothing is recorded, so the watchdog tries again.
 		s.log.Warn("autopilot: send the next iteration", "session", run.SessionID, "err", err)
+		return
+	}
+	if !sent {
+		// The user stopped the run while this iteration was being prepared.
 		return
 	}
 	s.mu.Lock()
