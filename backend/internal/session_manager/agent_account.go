@@ -92,6 +92,126 @@ func (m *Manager) StartAccountTransition(
 	return transition, nil
 }
 
+// WorkerAccountMove is what happened to one worker when its orchestrator's
+// account switched: moved (Transition set), skipped on purpose (Skipped set), or
+// failed (Err set).
+type WorkerAccountMove struct {
+	SessionID  domain.SessionID
+	Transition *domain.SessionInterfaceTransition
+	Skipped    string
+	Err        error
+}
+
+// Skip reasons of WorkerAccountMove.
+const (
+	WorkerMoveSkipAlreadyThere = "already_on_account"
+	WorkerMoveSkipInProgress   = "move_in_progress"
+)
+
+// StartWorkerAccountTransitions moves every live worker of the orchestrator's
+// project that runs on the orchestrator's harness to accountID, through the same
+// transition (and the same conversation) as a single-session move. A worker that
+// is already there, terminated, exited, of another harness, or in another
+// project is left alone. An id that is not an orchestrator moves nothing.
+func (m *Manager) StartWorkerAccountTransitions(
+	ctx context.Context,
+	orchestratorID domain.SessionID,
+	accountID string,
+	policy domain.SessionInterfaceTransitionPolicy,
+) ([]WorkerAccountMove, error) {
+	rec, found, err := m.store.GetSession(ctx, orchestratorID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrNotFound
+	}
+	if rec.Kind != domain.KindOrchestrator {
+		return nil, nil
+	}
+	siblings, err := m.store.ListSessions(ctx, rec.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	var out []WorkerAccountMove
+	for _, w := range siblings {
+		if w.ID == rec.ID || w.Kind != domain.KindWorker || w.IsTerminated ||
+			w.Activity.State == domain.ActivityExited || w.Harness != rec.Harness {
+			continue
+		}
+		transition, err := m.StartAccountTransition(ctx, w.ID, accountID, policy)
+		switch {
+		case err == nil:
+			out = append(out, WorkerAccountMove{SessionID: w.ID, Transition: &transition})
+		case errors.Is(err, ports.ErrAgentAccountUnchanged):
+			out = append(out, WorkerAccountMove{SessionID: w.ID, Skipped: WorkerMoveSkipAlreadyThere})
+		case errors.Is(err, ErrInterfaceTransitionInProgress):
+			out = append(out, WorkerAccountMove{SessionID: w.ID, Skipped: WorkerMoveSkipInProgress})
+		default:
+			out = append(out, WorkerAccountMove{SessionID: w.ID, Err: err})
+		}
+	}
+	return out, nil
+}
+
+// SetAccountMovedHook registers what runs after a session's account move has
+// completed and the agent runs on the new account (for example, continuing a
+// turn that stopped on the old account's usage limit). It runs on the handoff's
+// background goroutine and must not block for long.
+func (m *Manager) SetAccountMovedHook(hook func(context.Context, domain.SessionInterfaceTransition)) {
+	m.accountMovedMu.Lock()
+	defer m.accountMovedMu.Unlock()
+	m.accountMoved = hook
+}
+
+func (m *Manager) runAccountMovedHook(transition domain.SessionInterfaceTransition) {
+	if !transition.AccountMove() {
+		return
+	}
+	m.accountMovedMu.Lock()
+	hook := m.accountMoved
+	m.accountMovedMu.Unlock()
+	if hook == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), interfaceTransitionStepLimit)
+	defer cancel()
+	hook(ctx, transition)
+}
+
+// inheritedSpawnAccount is the non-default account the project's live
+// orchestrator uses for harness's provider, or "" when there is none. A new
+// worker starts there so it does not land on an account the orchestrator left.
+func (m *Manager) inheritedSpawnAccount(ctx context.Context, project domain.ProjectID, harness domain.AgentHarness) string {
+	lookup, ok := m.agentAccounts.(interface {
+		NonDefaultSessionAccountID(context.Context, domain.SessionID, domain.AgentHarness) (string, error)
+	})
+	if !ok || project == "" {
+		return ""
+	}
+	recs, err := m.store.ListSessions(ctx, project)
+	if err != nil {
+		return ""
+	}
+	var newest domain.SessionRecord
+	for _, r := range recs {
+		if r.Kind != domain.KindOrchestrator || r.IsTerminated || r.Activity.State == domain.ActivityExited {
+			continue
+		}
+		if newest.ID == "" || r.CreatedAt.After(newest.CreatedAt) {
+			newest = r
+		}
+	}
+	if newest.ID == "" {
+		return ""
+	}
+	id, err := lookup.NonDefaultSessionAccountID(ctx, newest.ID, harness)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
 // preflightAccountTarget checks, while the source still runs, that the target
 // account can resume this conversation.
 func (m *Manager) preflightAccountTarget(

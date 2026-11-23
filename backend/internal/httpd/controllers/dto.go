@@ -616,6 +616,11 @@ type SpawnSessionRequest struct {
 	// Effort is the optional reasoning level for the selected model.
 	Effort string `json:"effort,omitempty" maxLength:"32"`
 
+	// AgentAccountID starts the agent on this Claude or Codex account. Omitted, a
+	// worker starts on the account its project's orchestrator uses, or the
+	// provider's default.
+	AgentAccountID string `json:"agentAccountId,omitempty" maxLength:"128"`
+
 	// RequestedOutput asks for a specific deliverable. artifact tells the worker to
 	// write a file in its artifact directory instead of opening a PR. Omitted is
 	// the ordinary task flow.
@@ -4317,6 +4322,29 @@ type SwitchSessionAgentAccountRequest struct {
 	// StopTurn cancels a turn in progress, for an agent stuck waiting on the old
 	// account's limit. Otherwise the move waits for the turn to finish.
 	StopTurn bool `json:"stopTurn,omitempty"`
+	// IncludeWorkers moves an orchestrator's live workers (same project, same
+	// agent) to the account with it. It defaults to true for an orchestrator and
+	// is ignored for any other session.
+	IncludeWorkers *bool `json:"includeWorkers,omitempty"`
+}
+
+// SessionAccountWorkerMove is one worker's outcome of an orchestrator's account switch.
+type SessionAccountWorkerMove struct {
+	SessionID domain.SessionID `json:"sessionId"`
+	// Status is moving (a handoff started), skipped (nothing to do) or failed.
+	Status     string                          `json:"status" enum:"moving,skipped,failed"`
+	Reason     string                          `json:"reason,omitempty"`
+	Transition *SessionInterfaceTransitionView `json:"transition,omitempty"`
+}
+
+// SwitchSessionAgentAccountResponse acknowledges an account switch. Transition
+// is absent when the session was already on the account and only its workers moved.
+type SwitchSessionAgentAccountResponse struct {
+	OK           bool                            `json:"ok"`
+	SessionID    domain.SessionID                `json:"sessionId"`
+	Transition   *SessionInterfaceTransitionView `json:"transition,omitempty"`
+	Workers      []SessionAccountWorkerMove      `json:"workers"`
+	MovedWorkers int                             `json:"movedWorkers"`
 }
 
 // SessionImportRequest carries opaque handles returned by the local preview.
@@ -4327,4 +4355,73 @@ type SessionImportRequest struct {
 // SessionImportResponse retains an outcome for every selected history.
 type SessionImportResponse struct {
 	Results []sessionimport.Result `json:"results"`
+}
+
+// UsageLimitPromptOption is an account the owner can switch stopped sessions to.
+type UsageLimitPromptOption struct {
+	AccountID           string     `json:"accountId"`
+	Email               string     `json:"email,omitempty"`
+	Plan                string     `json:"plan,omitempty"`
+	Device              bool       `json:"device"`
+	FiveHourUsedPercent *float64   `json:"fiveHourUsedPercent,omitempty" minimum:"0" maximum:"100"`
+	FiveHourResetsAt    *time.Time `json:"fiveHourResetsAt,omitempty"`
+	WeeklyUsedPercent   *float64   `json:"weeklyUsedPercent,omitempty" minimum:"0" maximum:"100"`
+	WeeklyResetsAt      *time.Time `json:"weeklyResetsAt,omitempty"`
+	// Full means a window of the account is used up, so it cannot take the sessions.
+	Full bool `json:"full"`
+}
+
+// UsageLimitPromptSession is a session that stopped on the limit.
+type UsageLimitPromptSession struct {
+	SessionID   domain.SessionID `json:"sessionId"`
+	DisplayName string           `json:"displayName,omitempty"`
+	Kind        string           `json:"kind" enum:"worker,orchestrator"`
+	ProjectID   domain.ProjectID `json:"projectId,omitempty"`
+}
+
+// UsageLimitPromptResponse is one open switch-or-wait question.
+type UsageLimitPromptResponse struct {
+	ID           string                    `json:"id"`
+	Provider     string                    `json:"provider"`
+	WindowLabel  string                    `json:"windowLabel,omitempty"`
+	AccountID    string                    `json:"accountId"`
+	AccountEmail string                    `json:"accountEmail,omitempty"`
+	ResetsAt     *time.Time                `json:"resetsAt,omitempty"`
+	CreatedAt    time.Time                 `json:"createdAt"`
+	Sessions     []UsageLimitPromptSession `json:"sessions"`
+	Options      []UsageLimitPromptOption  `json:"options"`
+}
+
+// UsageLimitPromptsResponse lists the questions waiting for the owner.
+type UsageLimitPromptsResponse struct {
+	Prompts []UsageLimitPromptResponse `json:"prompts"`
+}
+
+// UsageLimitPromptIDParam documents a prompt route identifier.
+type UsageLimitPromptIDParam struct {
+	PromptID string `path:"promptId" description:"Usage-limit prompt identifier."`
+}
+
+// SwitchUsageLimitPromptRequest answers a prompt with the account to move to.
+type SwitchUsageLimitPromptRequest struct {
+	AccountID string `json:"accountId" minLength:"1"`
+}
+
+// UsageLimitPromptFailure is a session that could not be moved.
+type UsageLimitPromptFailure struct {
+	SessionID domain.SessionID `json:"sessionId"`
+	Reason    string           `json:"reason"`
+}
+
+// SwitchUsageLimitPromptResponse says which stopped sessions started moving
+// (each continues its interrupted turn once its move completes).
+type SwitchUsageLimitPromptResponse struct {
+	OK     bool                      `json:"ok"`
+	Moved  []domain.SessionID        `json:"moved"`
+	Failed []UsageLimitPromptFailure `json:"failed"`
+}
+
+// WaitUsageLimitPromptResponse acknowledges a "wait for the reset" answer.
+type WaitUsageLimitPromptResponse struct {
+	OK bool `json:"ok"`
 }

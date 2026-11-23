@@ -157,6 +157,9 @@ func usageLimitBody(intent Intent) string {
 	default:
 		fmt.Fprintf(&out, "It resets at %s. Automatic resume is off, so continue them yourself.", FormatUsageLimitReset(intent.UsageLimitResetsAt, intent.CreatedAt))
 	}
+	if intent.UsageLimitSwitchPrompt {
+		out.WriteString(" Open Orchestrator to switch them to another account or wait for the reset.")
+	}
 	return out.String()
 }
 

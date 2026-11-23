@@ -993,6 +993,93 @@ func (s *Service) SessionAccountID(ctx context.Context, id domain.SessionID, har
 	return account.ID, err
 }
 
+// NonDefaultSessionAccountID is the account the session is pinned to for
+// harness's provider when that is not the provider's default, or "" otherwise
+// (default, unpinned, or no accounts for the harness). A worker spawned next to
+// the session inherits it.
+func (s *Service) NonDefaultSessionAccountID(ctx context.Context, id domain.SessionID, harness domain.AgentHarness) (string, error) {
+	p, ok := domain.AgentAccountProviderFor(harness)
+	if !ok || s.providers[p] == nil {
+		return "", nil
+	}
+	account, bound, err := s.SessionAccount(ctx, id, p)
+	if err != nil || !bound {
+		return "", err
+	}
+	def, err := s.defaultID(ctx, p)
+	if err != nil || def == account.ID {
+		return "", err
+	}
+	return account.ID, nil
+}
+
+// FiveHourWindowID names the Claude 5-hour limit window in a reading.
+const FiveHourWindowID = "five_hour"
+
+// accountUsedPercent is how much of the account's 5-hour window is used (or of
+// its tightest window when the provider reports no 5-hour one). ok is false when
+// no reading says: never read, failed, or no window.
+func accountUsedPercent(limits *domain.AgentAccountLimits) (used float64, ok bool) {
+	if limits == nil {
+		return 0, false
+	}
+	for _, w := range limits.Windows {
+		if w.ID == FiveHourWindowID {
+			return w.UsedPercent, true
+		}
+	}
+	for _, w := range limits.Windows {
+		if !ok || w.UsedPercent > used {
+			used, ok = w.UsedPercent, true
+		}
+	}
+	return used, ok
+}
+
+// HasHeadroom reports whether accountID has usage left, from the last reading.
+// An account with no reading counts as having room: not knowing is not a limit.
+func (s *Service) HasHeadroom(ctx context.Context, accountID string) bool {
+	r := s.cachedReading(accountID)
+	if r == nil || r.limits == nil {
+		return true
+	}
+	for _, w := range r.limits.Windows {
+		if w.UsedPercent >= 100 && (w.ResetsAt == nil || w.ResetsAt.After(s.now())) {
+			return false
+		}
+	}
+	return true
+}
+
+// MostHeadroomAccount picks, among the signed-in accounts of harness's provider
+// other than exclude, the one with the most 5-hour headroom (lowest percent
+// used). Accounts with a full window, no sign-in, or no reading of limits are
+// not picked; "" means none qualifies.
+func (s *Service) MostHeadroomAccount(ctx context.Context, harness domain.AgentHarness, exclude string) string {
+	p, ok := domain.AgentAccountProviderFor(harness)
+	if !ok || s.providers[p] == nil {
+		return ""
+	}
+	views, err := s.List(ctx, false)
+	if err != nil {
+		return ""
+	}
+	best, bestUsed := "", 101.0
+	for _, v := range views {
+		if v.Account.Provider != p || v.Account.ID == exclude || !v.SignedIn || !v.LoggedIn || s.beingRemoved(v.Account.ID) {
+			continue
+		}
+		used, ok := accountUsedPercent(v.Limits)
+		if !ok || !s.HasHeadroom(ctx, v.Account.ID) {
+			continue
+		}
+		if used < bestUsed {
+			best, bestUsed = v.Account.ID, used
+		}
+	}
+	return best
+}
+
 // SessionLimits reads only the session's pinned account. A refresh bypasses the
 // display cache; a binding or identity change never falls back to the default.
 func (s *Service) SessionLimits(ctx context.Context, id domain.SessionID, harness domain.AgentHarness, refresh bool) (string, domain.AgentAccountLimits, error) {

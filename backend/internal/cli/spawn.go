@@ -37,6 +37,7 @@ type spawnOptions struct {
 	noTakeover      bool
 	skipAgentCheck  bool
 	trackerProvider string
+	account         string
 }
 
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
@@ -53,6 +54,7 @@ type spawnRequest struct {
 	Prompt              string `json:"prompt,omitempty"`
 	Model               string `json:"model,omitempty"`
 	Effort              string `json:"effort,omitempty"`
+	AgentAccountID      string `json:"agentAccountId,omitempty"`
 	RequestedOutput     string `json:"requestedOutput,omitempty"`
 	DisplayName         string `json:"displayName"`
 	DisplayNameExplicit bool   `json:"displayNameExplicit,omitempty"`
@@ -167,6 +169,18 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 			}
+			accountID := ""
+			if strings.TrimSpace(opts.account) != "" {
+				accounts, err := ctx.fetchAgentAccounts(cmd.Context(), false)
+				if err != nil {
+					return err
+				}
+				account, err := resolveAgentAccount(accounts, opts.account, accountProviderForHarness(opts.harness))
+				if err != nil {
+					return usageError{err}
+				}
+				accountID = account.ID
+			}
 			claimRef := ""
 			if opts.claimPR != "" {
 				claimRef, err = ctx.resolvePRRef(cmd.Context(), opts.claimPR, project)
@@ -186,6 +200,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 				Prompt:              opts.prompt,
 				Model:               strings.TrimSpace(opts.model),
 				Effort:              strings.TrimSpace(opts.effort),
+				AgentAccountID:      accountID,
 				RequestedOutput:     opts.output,
 				DisplayName:         name,
 				DisplayNameExplicit: true,
@@ -256,6 +271,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.prompt, "prompt", "", "Initial prompt for the agent")
 	f.StringVar(&opts.model, "model", "", "Agent model override for this session only (e.g. sonnet, gpt-5.6-sol); overrides project/role config without changing it")
 	f.StringVar(&opts.output, "output", "", "Deliverable for the session: artifact asks the agent to write a file in its artifact directory instead of opening a PR (default: ordinary task)")
+	f.StringVar(&opts.account, "account", "", "Claude or Codex account to start on: an account id or the start of its email (see `ao agent accounts`). Default: the account your project's orchestrator uses, else the provider's default")
 	f.StringVar(&opts.effort, "effort", "", "Reasoning effort override for this session only (e.g. low, medium, high); empty defers to the agent/model default")
 	f.StringVar(&opts.issue, "issue", "", "Issue id to associate with the session")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "github", "Issue tracker provider: github or gitlab (default: github)")

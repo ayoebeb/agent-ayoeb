@@ -13,6 +13,7 @@ import { createAppRouter } from "./router";
 import { TelemetryBoundary } from "./components/TelemetryBoundary";
 import { CloudOnboardingGate } from "./components/CloudOnboardingGate";
 import { CloudNotificationRuntime } from "./components/CloudNotificationRuntime";
+import { UsageLimitPromptDialog } from "./components/UsageLimitPromptDialog";
 import { TelemetryIdentityRuntime } from "./components/TelemetryIdentityRuntime";
 import { applyAnalyticsOptOut, applyRendererTelemetryPolicy, bindRendererErrorHandlers, clearRendererTelemetryQueues, initTelemetry, isDeniedEvent } from "./lib/telemetry";
 import { aoBridge } from "./lib/bridge";
@@ -135,6 +136,7 @@ async function renderApp(): Promise<void> {
 					<TelemetryIdentityRuntime />
 					<RouterProvider router={router} />
 					<CloudOnboardingGate />
+					<UsageLimitPromptDialog />
 				</QueryClientProvider>
 			</TelemetryBoundary>
 		</I18nextProvider>,

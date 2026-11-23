@@ -45,6 +45,13 @@ var ErrSessionGone = errors.New("session cannot receive the resume message")
 // Store is the persistence the watcher needs.
 type Store interface {
 	ListLimitStopCandidates(ctx context.Context, completedSince time.Time) ([]domain.LimitStopTurn, error)
+	ListLatestFailedTurns(ctx context.Context, ids []domain.SessionID) ([]domain.LimitStopTurn, error)
+	InsertUsageLimitPrompt(ctx context.Context, p domain.UsageLimitPrompt) (bool, error)
+	ListOpenUsageLimitPrompts(ctx context.Context) ([]domain.UsageLimitPrompt, error)
+	GetUsageLimitPrompt(ctx context.Context, id string) (domain.UsageLimitPrompt, bool, error)
+	DecideUsageLimitPrompt(ctx context.Context, id, state, targetAccountID string, at time.Time) (bool, error)
+	ReopenUsageLimitPrompt(ctx context.Context, id string) error
+	ListUsageLimitPromptStops(ctx context.Context, windowKey string) ([]domain.UsageLimitStop, error)
 	InsertUsageLimitStop(ctx context.Context, stop domain.UsageLimitStop) (bool, error)
 	ListPendingUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error)
 	ListUnreportedUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error)
@@ -85,11 +92,21 @@ type Sender interface {
 	SendSemantic(ctx context.Context, id domain.SessionID, message, key string) error
 }
 
-// Deps configures a Service. Accounts, Notifier and Reporter are optional.
+// Headroom says whether an account has usage left, from its last limits reading.
+type Headroom interface {
+	HasHeadroom(ctx context.Context, accountID string) bool
+}
+
+// Deps configures a Service. Accounts, Headroom, Notifier and Reporter are optional.
 type Deps struct {
 	Store    Store
 	Settings Settings
 	Accounts Accounts
+	Headroom Headroom
+	// Lister and Mover turn on the owner prompt: which accounts could take the
+	// stopped sessions, and how to move them. Without them AO only notifies.
+	Lister   AccountLister
+	Mover    SessionMover
 	Notifier Notifier
 	Reporter Reporter
 	Sender   Sender
@@ -104,6 +121,9 @@ type Service struct {
 	store    Store
 	settings Settings
 	accounts Accounts
+	headroom Headroom
+	lister   AccountLister
+	mover    SessionMover
 	notifier Notifier
 	reporter Reporter
 	sender   Sender
@@ -121,7 +141,7 @@ type Service struct {
 // New builds the watcher.
 func New(d Deps) *Service {
 	s := &Service{
-		store: d.Store, settings: d.Settings, accounts: d.Accounts, notifier: d.Notifier,
+		store: d.Store, settings: d.Settings, accounts: d.Accounts, headroom: d.Headroom, lister: d.Lister, mover: d.Mover, notifier: d.Notifier,
 		reporter: d.Reporter, sender: d.Sender, log: d.Logger, now: d.Now, stagger: d.Stagger,
 	}
 	if s.log == nil {
@@ -284,6 +304,9 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 			UsageLimitWindow: window, UsageLimitProvider: providerLabel(rec.Harness),
 			UsageLimitAutoResume: enabled && limit.ResetsAt != nil,
 		}
+		if provider, ok := domain.AgentAccountProviderFor(rec.Harness); ok && stop.AccountKey != "" {
+			intent.UsageLimitSwitchPrompt = s.hasSwitchTargets(ctx, string(provider), stop.AccountKey)
+		}
 		if limit.ResetsAt != nil {
 			intent.UsageLimitResetsAt = *limit.ResetsAt
 		}
@@ -294,6 +317,10 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 	inserted, err := s.store.InsertUsageLimitStop(ctx, stop)
 	if err != nil || !inserted {
 		return err
+	}
+	// One owner prompt per limit window, however many sessions stop on it.
+	if err := s.ensurePrompt(ctx, stop, rec, now); err != nil {
+		s.log.Warn("record usage-limit prompt", "session", rec.ID, "err", err)
 	}
 	reason := ""
 	switch {
@@ -477,6 +504,58 @@ func (s *Service) resume(ctx context.Context, turn domain.LimitStopTurn, rec dom
 		s.log.Info("usage-limited session could not take the resume message yet", "session", rec.ID, "err", err)
 		return false, s.store.DeferUsageLimitStop(ctx, turn.TurnID, now.Add(retryDelay))
 	}
+}
+
+// ResumeAfterAccountMove continues a session whose latest turn stopped on the
+// old account's usage limit, now that its agent runs on targetAccountID. It does
+// nothing when the session is not stopped on a limit, when the target account is
+// known to be at its own limit, or when the session already continued. It
+// reports whether the continue message went out.
+func (s *Service) ResumeAfterAccountMove(ctx context.Context, id domain.SessionID, targetAccountID string) (bool, error) {
+	if s.headroom != nil && targetAccountID != "" && !s.headroom.HasHeadroom(ctx, targetAccountID) {
+		return false, nil
+	}
+	now := s.now()
+	// The session's own latest failed turn, whatever became of its stop row: a
+	// move is an explicit action, so it continues a turn the automatic resume
+	// had parked (resume off, reset time unknown) too.
+	latest, err := s.store.ListLatestFailedTurns(ctx, []domain.SessionID{id})
+	if err != nil {
+		return false, fmt.Errorf("list latest failed turn: %w", err)
+	}
+	for _, turn := range latest {
+		if turn.SessionID != id || turn.Limit() == nil || turn.ResumeState == domain.UsageLimitStopResumed {
+			continue
+		}
+		rec, found, err := s.store.GetSession(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if !found || rec.IsTerminated {
+			return false, nil
+		}
+		window, _ := domain.UsageLimitStopMessage(turn.ErrorMessage)
+		if err := s.sender.SendSemantic(ctx, id, AccountMoveResumeMessage(window), "usage-limit-account-move:"+turn.TurnID); err != nil {
+			return false, err
+		}
+		// Settle the stop so the watcher does not continue the session a second
+		// time; a stop AO never recorded (or already closed) has no row to update.
+		if err := s.store.MarkUsageLimitStopResumed(ctx, turn.TurnID, now, now); err != nil {
+			s.log.Warn("mark usage-limit stop resumed after account move", "session", id, "turn", turn.TurnID, "err", err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// AccountMoveResumeMessage is the prompt sent to a session that was moved to an
+// account with usage left after its turn stopped on a limit.
+func AccountMoveResumeMessage(window string) string {
+	limit := "usage limit"
+	if window != "" {
+		limit = window + " usage limit"
+	}
+	return "Your previous turn stopped because the " + limit + " of the previous account was reached. You are now on another account with usage left. Continue where you left off."
 }
 
 // ResumeMessage is the short prompt sent to a session whose limit has reset.

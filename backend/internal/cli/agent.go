@@ -59,6 +59,7 @@ func newAgentCommand(ctx *commandContext) *cobra.Command {
 		Short: "Inspect agent catalog readiness",
 	}
 	cmd.AddCommand(newAgentListCommand(ctx))
+	cmd.AddCommand(newAgentAccountsCommand(ctx))
 	return cmd
 }
 

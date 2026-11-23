@@ -14,6 +14,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentaccounts"
+	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/usagelimit"
 )
 
 // AgentAccountService is the HTTP boundary of the Claude Code and Codex
@@ -33,14 +35,23 @@ type AgentAccountService interface {
 
 // AgentAccountSessionMover moves a session's agent to another account.
 type AgentAccountSessionMover interface {
-	StartAccountTransition(context.Context, domain.SessionID, string, bool) (domain.SessionInterfaceTransition, error)
+	SwitchAccount(ctx context.Context, id domain.SessionID, accountID string, stopTurn bool, includeWorkers *bool) (sessionsvc.AccountSwitchResult, error)
 }
 
-// AgentAccountsController exposes accounts, sign-in, limits, usage, and the
-// account of each session.
+// UsageLimitPromptService is the switch-or-wait question AO asks the owner when
+// sessions stop on an account's usage limit.
+type UsageLimitPromptService interface {
+	ListPrompts(context.Context) ([]usagelimit.Prompt, error)
+	Switch(ctx context.Context, id, accountID string) (usagelimit.SwitchResult, error)
+	Wait(ctx context.Context, id string) error
+}
+
+// AgentAccountsController exposes accounts, sign-in, limits, usage, the
+// account of each session, and the usage-limit prompts.
 type AgentAccountsController struct {
 	Svc      AgentAccountService
 	Sessions AgentAccountSessionMover
+	Prompts  UsageLimitPromptService
 }
 
 // Register adds the account routes.
@@ -53,6 +64,9 @@ func (c *AgentAccountsController) Register(r chi.Router) {
 	r.Post("/agents/accounts/login", c.startLogin)
 	r.Post("/agents/accounts/login/{operationId}/verify", c.verifyLogin)
 	r.Post("/agents/accounts/login/{operationId}/cancel", c.cancelLogin)
+	r.Get("/agents/accounts/limit-prompts", c.listLimitPrompts)
+	r.Post("/agents/accounts/limit-prompts/{promptId}/switch", c.switchLimitPrompt)
+	r.Post("/agents/accounts/limit-prompts/{promptId}/wait", c.waitLimitPrompt)
 	r.Get("/agents/accounts/sessions/{sessionId}", c.sessionAccounts)
 	r.Put("/agents/accounts/sessions/{sessionId}", c.switchSession)
 	r.Post("/agents/accounts/{accountId}/login", c.signInAgain)
@@ -291,14 +305,32 @@ func (c *AgentAccountsController) switchSession(w http.ResponseWriter, r *http.R
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "accountId is required", nil)
 		return
 	}
-	transition, err := c.Sessions.StartAccountTransition(r.Context(), domain.SessionID(strings.TrimSpace(chi.URLParam(r, "sessionId"))), strings.TrimSpace(in.AccountID), in.StopTurn)
+	id := domain.SessionID(strings.TrimSpace(chi.URLParam(r, "sessionId")))
+	result, err := c.Sessions.SwitchAccount(r.Context(), id, strings.TrimSpace(in.AccountID), in.StopTurn, in.IncludeWorkers)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusAccepted, StartSessionInterfaceTransitionResponse{
-		OK: true, SessionID: transition.SessionID, Transition: sessionInterfaceTransitionView(transition),
-	})
+	out := SwitchSessionAgentAccountResponse{
+		OK: true, SessionID: id, Workers: make([]SessionAccountWorkerMove, 0, len(result.Workers)),
+		MovedWorkers: result.MovedWorkers(),
+	}
+	if result.Transition != nil {
+		view := sessionInterfaceTransitionView(*result.Transition)
+		out.Transition = &view
+	}
+	for _, mv := range result.Workers {
+		item := SessionAccountWorkerMove{SessionID: mv.SessionID, Status: "skipped", Reason: mv.Skipped}
+		switch {
+		case mv.Transition != nil:
+			view := sessionInterfaceTransitionView(*mv.Transition)
+			item.Status, item.Transition = "moving", &view
+		case mv.Error != "":
+			item.Status, item.Reason = "failed", mv.Error
+		}
+		out.Workers = append(out.Workers, item)
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, out)
 }
 
 // agentAccountUnsharedMessage is shown when an account folder cannot link to

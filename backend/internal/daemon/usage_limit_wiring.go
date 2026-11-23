@@ -34,6 +34,17 @@ func (s usageLimitSender) SendSemantic(ctx context.Context, id domain.SessionID,
 	return err
 }
 
+// usageLimitMover moves a limit-stopped session to another account through the
+// session manager's durable handoff, waiting for any turn in progress.
+type usageLimitMover struct {
+	move func(context.Context, domain.SessionID, string, domain.SessionInterfaceTransitionPolicy) (domain.SessionInterfaceTransition, error)
+}
+
+func (m usageLimitMover) MoveToAccount(ctx context.Context, id domain.SessionID, accountID string) error {
+	_, err := m.move(ctx, id, accountID, domain.SessionInterfaceTransitionDrain)
+	return err
+}
+
 // usageLimitAccounts names the login a session ran on; a missing account
 // service reads as the computer's own login.
 type usageLimitAccounts struct {

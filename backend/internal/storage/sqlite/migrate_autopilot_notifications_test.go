@@ -6,7 +6,7 @@ import "testing"
 // must keep every earlier kind: a usage_limit notification written before the
 // upgrade has to survive it, and survive a rollback too.
 func TestAutopilotMigrationKeepsUsageLimitNotifications(t *testing.T) {
-	const before, autopilot = int64(20261117093000000), int64(20261122090000000)
+	const before, autopilot = int64(20261117093000000), int64(20261123231000000)
 	db := openMigratedDatabaseCopy(t, before)
 	const at = "2026-11-22T08:00:00Z"
 	mustExec(t, db, `

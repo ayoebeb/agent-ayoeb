@@ -1084,6 +1084,92 @@ func (s *Service) StartAccountTransition(ctx context.Context, id domain.SessionI
 	return transition, toAPIError(err)
 }
 
+// WorkerAccountMove is one worker's outcome of an orchestrator's account switch.
+type WorkerAccountMove struct {
+	SessionID  domain.SessionID
+	Transition *domain.SessionInterfaceTransition
+	// Skipped is why the worker was left alone (already on the account, or a move
+	// of it is already running); Error is why moving it failed.
+	Skipped string
+	Error   string
+}
+
+// AccountSwitchResult is a session's account move plus the workers that moved
+// along with it. Transition is nil when the session itself was already on the
+// account but its workers were still brought over.
+type AccountSwitchResult struct {
+	Transition *domain.SessionInterfaceTransition
+	Workers    []WorkerAccountMove
+}
+
+// MovedWorkers is how many workers started moving.
+func (r AccountSwitchResult) MovedWorkers() int {
+	n := 0
+	for _, w := range r.Workers {
+		if w.Transition != nil {
+			n++
+		}
+	}
+	return n
+}
+
+type workerAccountCommander interface {
+	StartWorkerAccountTransitions(context.Context, domain.SessionID, string, domain.SessionInterfaceTransitionPolicy) ([]sessionmanager.WorkerAccountMove, error)
+}
+
+// SwitchAccount moves the session to another provider account. When the session
+// is an orchestrator and includeWorkers is not false, every live worker of its
+// project on the same harness moves to the same account with it. An
+// orchestrator that is already on the account still brings its workers over.
+func (s *Service) SwitchAccount(ctx context.Context, id domain.SessionID, accountID string, stopTurn bool, includeWorkers *bool) (AccountSwitchResult, error) {
+	var result AccountSwitchResult
+	manager, ok := s.manager.(agentAccountCommander)
+	if !ok {
+		return result, apierr.Conflict(
+			"AGENT_ACCOUNT_UNSUPPORTED", "This build cannot move a session to another account", nil)
+	}
+	policy := domain.SessionInterfaceTransitionDrain
+	if stopTurn {
+		policy = domain.SessionInterfaceTransitionInterrupt
+	}
+	cascade := includeWorkers == nil || *includeWorkers
+	transition, err := manager.StartAccountTransition(ctx, id, accountID, policy)
+	switch {
+	case err == nil:
+		result.Transition = &transition
+	case cascade && errors.Is(err, ports.ErrAgentAccountUnchanged):
+		// The session is already there; its workers may not be.
+	default:
+		return AccountSwitchResult{}, toAPIError(err)
+	}
+	if !cascade {
+		return result, nil
+	}
+	workers, ok := s.manager.(workerAccountCommander)
+	if !ok {
+		if result.Transition == nil {
+			return AccountSwitchResult{}, toAPIError(err)
+		}
+		return result, nil
+	}
+	moves, werr := workers.StartWorkerAccountTransitions(ctx, id, accountID, policy)
+	if werr != nil {
+		return AccountSwitchResult{}, toAPIError(werr)
+	}
+	for _, mv := range moves {
+		out := WorkerAccountMove{SessionID: mv.SessionID, Transition: mv.Transition, Skipped: mv.Skipped}
+		if mv.Err != nil {
+			out.Error = toAPIError(mv.Err).Error()
+		}
+		result.Workers = append(result.Workers, out)
+	}
+	if result.Transition == nil && result.MovedWorkers() == 0 {
+		// Nothing moved and nothing to bring over: report the plain refusal.
+		return AccountSwitchResult{}, toAPIError(err)
+	}
+	return result, nil
+}
+
 // InterfaceTransitionStatus returns capability and progress without launching
 // a provider process or mutating the session.
 func (s *Service) InterfaceTransitionStatus(ctx context.Context, id domain.SessionID) (InterfaceTransitionStatus, error) {
