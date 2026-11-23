@@ -163,13 +163,12 @@ func (s *Service) hasSwitchTargets(ctx context.Context, provider, exclude string
 }
 
 // openPromptSessions are the sessions of a prompt that are still stopped.
-func (s *Service) openPromptSessions(ctx context.Context, p domain.UsageLimitPrompt) ([]PromptSession, []domain.UsageLimitStop, error) {
+func (s *Service) openPromptSessions(ctx context.Context, p domain.UsageLimitPrompt) ([]PromptSession, error) {
 	stops, err := s.store.ListUsageLimitPromptStops(ctx, p.WindowKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var sessions []PromptSession
-	var live []domain.UsageLimitStop
 	seen := map[domain.SessionID]bool{}
 	for _, stop := range stops {
 		if seen[stop.SessionID] {
@@ -177,20 +176,19 @@ func (s *Service) openPromptSessions(ctx context.Context, p domain.UsageLimitPro
 		}
 		rec, found, err := s.store.GetSession(ctx, stop.SessionID)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if !found || rec.IsTerminated || rec.Activity.State == domain.ActivityExited {
 			continue
 		}
 		seen[stop.SessionID] = true
-		live = append(live, stop)
 		sessions = append(sessions, PromptSession{ID: rec.ID, DisplayName: rec.DisplayName, Kind: rec.Kind, ProjectID: rec.ProjectID})
 	}
 	// The orchestrator first: it is the one the owner talks to.
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return sessions[i].Kind == domain.KindOrchestrator && sessions[j].Kind != domain.KindOrchestrator
 	})
-	return sessions, live, nil
+	return sessions, nil
 }
 
 // ListPrompts returns the questions waiting for the owner. A prompt whose
@@ -205,7 +203,7 @@ func (s *Service) ListPrompts(ctx context.Context) ([]Prompt, error) {
 	}
 	var out []Prompt
 	for _, p := range open {
-		sessions, _, err := s.openPromptSessions(ctx, p)
+		sessions, err := s.openPromptSessions(ctx, p)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +259,7 @@ func (s *Service) Switch(ctx context.Context, id, targetID string) (SwitchResult
 	if !valid {
 		return SwitchResult{}, ErrPromptTargetInvalid
 	}
-	sessions, _, err := s.openPromptSessions(ctx, p)
+	sessions, err := s.openPromptSessions(ctx, p)
 	if err != nil {
 		return SwitchResult{}, err
 	}
