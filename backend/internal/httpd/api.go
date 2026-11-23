@@ -33,7 +33,7 @@ type APIDeps struct {
 	AgentAccounts controllers.AgentAccountService
 	// UsageLimitPrompts is the switch-or-wait question for limit-stopped sessions.
 	UsageLimitPrompts controllers.UsageLimitPromptService
-	Projects      projectsvc.Manager
+	Projects          projectsvc.Manager
 	// ProjectPermissionRules lists and revokes a project's remembered "Always
 	// allow" rules. Nil answers 501.
 	ProjectPermissionRules controllers.ProjectPermissionRules
