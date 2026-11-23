@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentaccounts"
+	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 )
 
 // AgentAccountService is the HTTP boundary of the Claude Code and Codex
@@ -33,7 +34,7 @@ type AgentAccountService interface {
 
 // AgentAccountSessionMover moves a session's agent to another account.
 type AgentAccountSessionMover interface {
-	StartAccountTransition(context.Context, domain.SessionID, string, bool) (domain.SessionInterfaceTransition, error)
+	SwitchAccount(ctx context.Context, id domain.SessionID, accountID string, stopTurn bool, includeWorkers *bool) (sessionsvc.AccountSwitchResult, error)
 }
 
 // AgentAccountsController exposes accounts, sign-in, limits, usage, and the
@@ -291,14 +292,32 @@ func (c *AgentAccountsController) switchSession(w http.ResponseWriter, r *http.R
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "accountId is required", nil)
 		return
 	}
-	transition, err := c.Sessions.StartAccountTransition(r.Context(), domain.SessionID(strings.TrimSpace(chi.URLParam(r, "sessionId"))), strings.TrimSpace(in.AccountID), in.StopTurn)
+	id := domain.SessionID(strings.TrimSpace(chi.URLParam(r, "sessionId")))
+	result, err := c.Sessions.SwitchAccount(r.Context(), id, strings.TrimSpace(in.AccountID), in.StopTurn, in.IncludeWorkers)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusAccepted, StartSessionInterfaceTransitionResponse{
-		OK: true, SessionID: transition.SessionID, Transition: sessionInterfaceTransitionView(transition),
-	})
+	out := SwitchSessionAgentAccountResponse{
+		OK: true, SessionID: id, Workers: make([]SessionAccountWorkerMove, 0, len(result.Workers)),
+		MovedWorkers: result.MovedWorkers(),
+	}
+	if result.Transition != nil {
+		view := sessionInterfaceTransitionView(*result.Transition)
+		out.Transition = &view
+	}
+	for _, mv := range result.Workers {
+		item := SessionAccountWorkerMove{SessionID: mv.SessionID, Status: "skipped", Reason: mv.Skipped}
+		switch {
+		case mv.Transition != nil:
+			view := sessionInterfaceTransitionView(*mv.Transition)
+			item.Status, item.Transition = "moving", &view
+		case mv.Error != "":
+			item.Status, item.Reason = "failed", mv.Error
+		}
+		out.Workers = append(out.Workers, item)
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, out)
 }
 
 // agentAccountUnsharedMessage is shown when an account folder cannot link to

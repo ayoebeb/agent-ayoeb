@@ -616,6 +616,11 @@ type SpawnSessionRequest struct {
 	// Effort is the optional reasoning level for the selected model.
 	Effort string `json:"effort,omitempty" maxLength:"32"`
 
+	// AgentAccountID starts the agent on this Claude or Codex account. Omitted, a
+	// worker starts on the account its project's orchestrator uses, or the
+	// provider's default.
+	AgentAccountID string `json:"agentAccountId,omitempty" maxLength:"128"`
+
 	// RequestedOutput asks for a specific deliverable. artifact tells the worker to
 	// write a file in its artifact directory instead of opening a PR. Omitted is
 	// the ordinary task flow.
@@ -4315,6 +4320,29 @@ type SwitchSessionAgentAccountRequest struct {
 	// StopTurn cancels a turn in progress, for an agent stuck waiting on the old
 	// account's limit. Otherwise the move waits for the turn to finish.
 	StopTurn bool `json:"stopTurn,omitempty"`
+	// IncludeWorkers moves an orchestrator's live workers (same project, same
+	// agent) to the account with it. It defaults to true for an orchestrator and
+	// is ignored for any other session.
+	IncludeWorkers *bool `json:"includeWorkers,omitempty"`
+}
+
+// SessionAccountWorkerMove is one worker's outcome of an orchestrator's account switch.
+type SessionAccountWorkerMove struct {
+	SessionID domain.SessionID `json:"sessionId"`
+	// Status is moving (a handoff started), skipped (nothing to do) or failed.
+	Status     string                          `json:"status" enum:"moving,skipped,failed"`
+	Reason     string                          `json:"reason,omitempty"`
+	Transition *SessionInterfaceTransitionView `json:"transition,omitempty"`
+}
+
+// SwitchSessionAgentAccountResponse acknowledges an account switch. Transition
+// is absent when the session was already on the account and only its workers moved.
+type SwitchSessionAgentAccountResponse struct {
+	OK           bool                            `json:"ok"`
+	SessionID    domain.SessionID                `json:"sessionId"`
+	Transition   *SessionInterfaceTransitionView `json:"transition,omitempty"`
+	Workers      []SessionAccountWorkerMove      `json:"workers"`
+	MovedWorkers int                             `json:"movedWorkers"`
 }
 
 // SessionImportRequest carries opaque handles returned by the local preview.

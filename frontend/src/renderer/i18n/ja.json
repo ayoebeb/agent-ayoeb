@@ -3877,6 +3877,8 @@
 	"settings.agentAccounts.extraUsage": "追加使用量 {{used}} / {{limit}}",
 	"settings.agentAccounts.sessionAccount": "アカウント",
 	"settings.agentAccounts.moved": "{{from}} から {{to}} に移動しました",
+	"settings.agentAccounts.alsoMovedWorkers_one": "ワーカー {{count}} 件も移動しました",
+	"settings.agentAccounts.alsoMovedWorkers_other": "ワーカー {{count}} 件も移動しました",
 	"settings.agentAccounts.loading": "アカウントを読み込み中…",
 	"settings.agentAccounts.stopAndMoveTitle": "ターンを止めて移動しますか？",
 	"settings.agentAccounts.stopAndMoveWorking": "エージェントはまだ作業中です。Ayo は今すぐ停止し、{{email}} で会話を再開します。次のメッセージからそこで続きます。",

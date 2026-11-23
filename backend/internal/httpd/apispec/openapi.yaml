@@ -1072,7 +1072,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StartSessionInterfaceTransitionResponse'
+                $ref: '#/components/schemas/SwitchSessionAgentAccountResponse'
           description: Accepted
         "400":
           content:
@@ -22438,6 +22438,24 @@ components:
       - text
       - clientMessageId
       type: object
+    SessionAccountWorkerMove:
+      properties:
+        reason:
+          type: string
+        sessionId:
+          type: string
+        status:
+          enum:
+          - moving
+          - skipped
+          - failed
+          type: string
+        transition:
+          $ref: '#/components/schemas/SessionInterfaceTransition'
+      required:
+      - sessionId
+      - status
+      type: object
     SessionActivityResponse:
       properties:
         current:
@@ -24154,6 +24172,9 @@ components:
       type: object
     SpawnSessionRequest:
       properties:
+        agentAccountId:
+          maxLength: 128
+          type: string
         approvalMode:
           enum:
           - default
@@ -24562,10 +24583,34 @@ components:
         accountId:
           minLength: 1
           type: string
+        includeWorkers:
+          type:
+          - "null"
+          - boolean
         stopTurn:
           type: boolean
       required:
       - accountId
+      type: object
+    SwitchSessionAgentAccountResponse:
+      properties:
+        movedWorkers:
+          type: integer
+        ok:
+          type: boolean
+        sessionId:
+          type: string
+        transition:
+          $ref: '#/components/schemas/SessionInterfaceTransition'
+        workers:
+          items:
+            $ref: '#/components/schemas/SessionAccountWorkerMove'
+          type: array
+      required:
+      - ok
+      - sessionId
+      - workers
+      - movedWorkers
       type: object
     SyncArtifactVersionsRequest:
       properties:
