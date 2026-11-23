@@ -29,15 +29,20 @@ type fakeMessenger struct {
 	fail error
 	// hold, when set, parks every send of an "Autopilot iteration" message until
 	// it is closed; inSend is told when one is parked.
-	hold   chan struct{}
-	inSend chan struct{}
+	hold      chan struct{}
+	inSend    chan struct{}
+	holdMatch string
 }
 
 func (m *fakeMessenger) Send(_ context.Context, id domain.SessionID, msg string) error {
 	m.mu.Lock()
 	hold, inSend := m.hold, m.inSend
 	m.mu.Unlock()
-	if hold != nil && strings.Contains(msg, "Autopilot iteration") {
+	match := m.holdMatch
+	if match == "" {
+		match = "Autopilot iteration"
+	}
+	if hold != nil && strings.Contains(msg, match) {
 		inSend <- struct{}{}
 		<-hold
 	}
@@ -737,6 +742,45 @@ func TestStopNoticeFollowsAContinuationAlreadyGoingOut(t *testing.T) {
 	}
 	close(e.msgs.hold)
 	<-judged
+	<-stopped
+
+	msgs := e.msgs.to(orch.ID)
+	if last := msgs[len(msgs)-1]; !strings.Contains(last, "stopped by the user") {
+		t.Fatalf("the stop notice must come last, got %q", last)
+	}
+}
+
+// The first message is fenced too: a Stop that lands while "Autopilot is ON" is
+// still being delivered must not be followed by it, and nothing may arrive after
+// the stop notice.
+func TestStopDuringStartNeverLetsTheTaskArriveAfterTheStopNotice(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	e.msgs.hold, e.msgs.inSend = make(chan struct{}), make(chan struct{})
+	e.msgs.holdMatch = "Autopilot is ON"
+
+	started := make(chan struct{})
+	go func() {
+		defer close(started)
+		if _, err := e.svc.Start(asUser(e.ctx), orch.ID, "task", 0); err != nil {
+			t.Errorf("start: %v", err)
+		}
+	}()
+	<-e.msgs.inSend // the start message is being delivered
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		if ok, err := e.svc.Stop(e.ctx, orch.ID); err != nil || !ok {
+			t.Errorf("stop = %v, %v", ok, err)
+		}
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("Stop sent its notice while the start message was still going out")
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(e.msgs.hold)
+	<-started
 	<-stopped
 
 	msgs := e.msgs.to(orch.ID)

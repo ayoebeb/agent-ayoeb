@@ -55,7 +55,7 @@ func TestEvaluateReadsCodexApprovalPayloads(t *testing.T) {
 
 	// A merge is left to the PR facts, like any other agent's merge.
 	merge := ParseApproval("Run gh pr merge 7", codexApproval(exec, "gh pr merge 7 --squash", testWorkspace), testWorkspace)
-	if v := Evaluate(merge); !v.Merge || len(v.MergeRefs) != 1 || v.MergeRefs[0] != "7" {
+	if v := Evaluate(merge); !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "7" {
 		t.Fatalf("codex merge = %+v", v)
 	}
 
@@ -141,25 +141,89 @@ func TestEvaluateKeepsEveryMergeOfACompoundRequest(t *testing.T) {
 	}
 	for _, c := range cases {
 		v := Evaluate(bash(c.cmd))
-		if !v.Merge || len(v.MergeRefs) != len(c.want) {
+		if !v.Merge || len(v.MergeTargets) != len(c.want) {
 			t.Errorf("Evaluate(%q) = %+v, want merges %q", c.cmd, v, c.want)
 			continue
 		}
 		got := map[string]int{}
-		for _, ref := range v.MergeRefs {
-			got[ref]++
+		var refs []string
+		for _, target := range v.MergeTargets {
+			got[target.Ref]++
+			refs = append(refs, target.Ref)
 		}
 		for _, ref := range c.want {
 			got[ref]--
 		}
 		for ref, n := range got {
 			if n != 0 {
-				t.Errorf("Evaluate(%q) merges = %q, want %q (ref %q off by %d)", c.cmd, v.MergeRefs, c.want, ref, n)
+				t.Errorf("Evaluate(%q) merges = %q, want %q (ref %q off by %d)", c.cmd, refs, c.want, ref, n)
 			}
 		}
 	}
 	// A refused step still wins over any number of merges.
 	if v := Evaluate(bash("gh pr merge 12 && git push origin main")); v.Allow || v.Merge || v.Limit != domain.HardLimitMainPush {
 		t.Errorf("merge then push to main = %+v", v)
+	}
+}
+
+// A command substitution runs in the directory its own command starts in, and a
+// ( ) group is a subshell: what it does to the directory never reaches the parent.
+func TestEvaluateKeepsSubstitutionsAndSubshellsInTheirOwnDirectory(t *testing.T) {
+	denied := []string{
+		`cd /tmp/other-project && echo "$(rm -rf data)"`,
+		"cd /tmp/other-project && echo $(rm -rf data)",
+		"cd /tmp/other-project && echo `rm -rf data`",
+		"cd /tmp/other-project && cat <(rm -rf data)",
+		"cd /tmp/other-project && echo $(echo $(rm -rf data))",
+		"cd /tmp/other-project; (cd " + testWorkspace + " && true); rm -rf data",
+		"cd /tmp/other-project; (cd " + testWorkspace + "); rm -rf data",
+		"(cd /tmp/x && rm -rf data)",
+		"(cd /tmp/x); (rm -rf /etc/y)",
+		"echo $(cd /tmp/x && rm -rf data)",
+		"cd /tmp/other-project && (echo hi; rm -rf data)",
+		"for f in a b; do cd /tmp/x; rm -rf data; done",
+		"if cd /tmp/x; then rm -rf data; fi",
+	}
+	for _, cmd := range denied {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Limit != domain.HardLimitDataDelete {
+			t.Errorf("Evaluate(%q) = allow %v limit %q (%s), want a data_delete refusal", cmd, v.Allow, v.Limit, v.Reason)
+		}
+	}
+	allowed := []string{
+		"(cd /tmp/x && true); rm -rf dist",
+		"(cd /tmp/x); rm -rf dist",
+		"echo $(cd /tmp/x && pwd); rm -rf dist",
+		"cd web && echo $(rm -rf dist)",
+		"(cd web && rm -rf dist); rm -rf out",
+		"echo $(git rev-parse HEAD) && rm -rf dist",
+		"cd /tmp/x; (cd " + testWorkspace + " && rm -rf dist)",
+	}
+	for _, cmd := range allowed {
+		if v := Evaluate(bash(cmd)); !v.Allow {
+			t.Errorf("Evaluate(%q) denied (%s: %s), want allow", cmd, v.Limit, v.Reason)
+		}
+	}
+}
+
+// A merge target keeps the repository it names, so a review of one repository's
+// pull request is never read as a review of another's.
+func TestEvaluateKeepsTheRepositoryOfAMergeTarget(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want MergeTarget
+	}{
+		{"gh pr merge 12 --repo owner/repo-b --squash", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
+		{"gh pr merge -R owner/repo-b 12", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
+		{"gh pr merge 12 -R owner/repo-b", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
+		{"gh pr merge --repo=owner/repo-b 12", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
+		{"gh pr merge --body fixes 12", MergeTarget{Ref: "12"}},
+		{"gh pr merge -t 'Title' -b 'Body' 12 --squash", MergeTarget{Ref: "12"}},
+		{"gh pr merge --repo github.com/owner/repo-b", MergeTarget{Repo: "github.com/owner/repo-b"}},
+	}
+	for _, c := range cases {
+		v := Evaluate(bash(c.cmd))
+		if !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0] != c.want {
+			t.Errorf("Evaluate(%q) = %+v, want one merge of %+v", c.cmd, v.MergeTargets, c.want)
+		}
 	}
 }

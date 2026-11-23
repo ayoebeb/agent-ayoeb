@@ -134,11 +134,11 @@ func TestEvaluateReadsEveryStepOfAChain(t *testing.T) {
 
 func TestEvaluateLeavesAMergeToThePRFacts(t *testing.T) {
 	v := Evaluate(bash("gh pr merge 42 --squash"))
-	if v.Allow || !v.Merge || len(v.MergeRefs) != 1 || v.MergeRefs[0] != "42" {
+	if v.Allow || !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "42" {
 		t.Fatalf("merge verdict = %+v, want a merge request for PR 42", v)
 	}
 	v = Evaluate(bash("gh pr merge https://github.com/o/r/pull/9 --auto"))
-	if !v.Merge || len(v.MergeRefs) != 1 || v.MergeRefs[0] != "https://github.com/o/r/pull/9" {
+	if !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "https://github.com/o/r/pull/9" {
 		t.Fatalf("merge by URL = %+v", v)
 	}
 	// A refusal in another step still wins over the merge.

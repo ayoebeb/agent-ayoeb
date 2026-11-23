@@ -74,3 +74,54 @@ func rawApproval(id, detail string) ApprovalNotice {
 	n.Summary, n.Detail = "Approval required", []byte(detail)
 	return n
 }
+
+// The same pull request number in two repositories: an approved, green one in
+// repository A never lets `gh pr merge 12 --repo B` through.
+func TestMergeIsDecidedPerRepository(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	e.start(orch.ID, "task")
+	worker := e.session(domain.KindWorker, e.now.Add(time.Minute), domain.SessionModeChat)
+	inA := domain.PRFacts{URL: "https://github.com/owner/repo-a/pull/12", Number: 12, CI: domain.CIPassing, HeadSHA: "abc123", SourceBranch: "ao/a"}
+	e.gates.facts[worker.ID] = []domain.PRFacts{inA}
+	e.gates.reviews[worker.ID] = []domain.CurrentHeadReviewRun{review(inA.URL, domain.VerdictApproved, e.now)}
+
+	decide := func(id, cmd string) string {
+		before := len(e.approvals.decisions)
+		e.svc.HandleApproval(e.ctx, orch.ID, approval(id, "Bash", "execute", `{"command":"`+cmd+`"}`))
+		got := e.approvals.decisions[before:]
+		if len(got) != 1 {
+			t.Fatalf("%s: decisions = %v", cmd, got)
+		}
+		return got[0]
+	}
+	for cmd, want := range map[string]string{
+		"gh pr merge 12":                                       "allow",
+		"gh pr merge 12 --repo owner/repo-a":                   "allow",
+		"gh pr merge 12 --repo OWNER/Repo-A":                   "allow",
+		"gh pr merge -R github.com/owner/repo-a 12":            "allow",
+		"gh pr merge 12 --repo owner/repo-b":                   "reject",
+		"gh pr merge 12 -R other/repo-a":                       "reject",
+		"gh pr merge https://github.com/owner/repo-a/pull/12":  "allow",
+		"gh pr merge https://github.com/owner/repo-b/pull/12":  "reject",
+		"gh pr merge 12 && gh pr merge 12 --repo owner/repo-b": "reject",
+	} {
+		if got := decide("r", cmd); got != want {
+			t.Errorf("%q decided %s, want %s", cmd, got, want)
+		}
+	}
+
+	// Without --repo, a number that two tracked repositories share is ambiguous.
+	inB := domain.PRFacts{URL: "https://github.com/owner/repo-b/pull/12", Number: 12, CI: domain.CIPassing, HeadSHA: "def456", SourceBranch: "ao/b"}
+	e.gates.facts[worker.ID] = []domain.PRFacts{inA, inB}
+	e.gates.reviews[worker.ID] = []domain.CurrentHeadReviewRun{review(inA.URL, domain.VerdictApproved, e.now)}
+	if got := decide("amb", "gh pr merge 12"); got != "reject" {
+		t.Errorf("an ambiguous number decided %s, want reject", got)
+	}
+	if got := decide("b", "gh pr merge 12 --repo owner/repo-b"); got != "reject" {
+		t.Errorf("repo B without a review decided %s, want reject", got)
+	}
+	if got := decide("a", "gh pr merge 12 --repo owner/repo-a"); got != "allow" {
+		t.Errorf("repo A approved decided %s, want allow", got)
+	}
+}

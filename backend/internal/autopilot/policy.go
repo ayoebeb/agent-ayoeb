@@ -19,14 +19,22 @@ type Verdict struct {
 	Limit domain.HardLimit
 	// Reason is one plain sentence for the log.
 	Reason string
-	// MergeRefs lists every `gh pr merge` target the request holds (an empty
-	// string means the current branch's pull request): the service decides each
-	// one against the stored PR facts, because a merge is allowed once AO review
-	// approved the exact head and checks are green. A compound request is allowed
-	// only if every one of them is.
-	MergeRefs []string
+	// MergeTargets lists every `gh pr merge` target the request holds: the
+	// service decides each one against the stored PR facts, because a merge is
+	// allowed once AO review approved the exact head and checks are green. A
+	// compound request is allowed only if every one of them is.
+	MergeTargets []MergeTarget
 	// Merge reports that the request holds at least one merge.
 	Merge bool
+}
+
+// MergeTarget is one pull request a `gh pr merge` names: the reference (a
+// number, a URL or a branch; empty means the current branch's pull request) and
+// the repository it is in when `-R`/`--repo` says so (empty means the session's
+// own). A review of one repository's pull request never vouches for another's.
+type MergeTarget struct {
+	Ref  string
+	Repo string
 }
 
 // Action is one permission request reduced to what the policy reads.
@@ -325,49 +333,6 @@ func caseInsensitive(p string) bool { return driveLetter.MatchString(p) }
 
 // ---- shell commands ----
 
-// splitSegments cuts a command line at its separators (&&, ||, ;, |, newline),
-// but not inside quotes: `bash -c "cd x && rm y"` is one command whose argument is
-// a script, which innerCommands then reads as a whole.
-func splitSegments(command string) []string {
-	var out []string
-	var cur strings.Builder
-	var quote rune
-	runes := []rune(command)
-	flush := func() {
-		if seg := strings.TrimSpace(cur.String()); seg != "" {
-			out = append(out, seg)
-		}
-		cur.Reset()
-	}
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		switch {
-		case quote != 0:
-			cur.WriteRune(r)
-			if r == quote {
-				quote = 0
-			}
-		case r == '\'' || r == '"':
-			quote = r
-			cur.WriteRune(r)
-		case r == ';' || r == '\n' || r == '\r':
-			flush()
-		case r == '&' && i+1 < len(runes) && runes[i+1] == '&':
-			flush()
-			i++
-		case r == '|':
-			flush()
-			if i+1 < len(runes) && runes[i+1] == '|' {
-				i++
-			}
-		default:
-			cur.WriteRune(r)
-		}
-	}
-	flush()
-	return out
-}
-
 // cmdEnv is where a command runs: the session's workspace, and the directory
 // the shell is in. dir is empty when it cannot be known (after `cd "$X"`, `cd -`
 // or `cd ~`), in which case a relative destructive target cannot be placed.
@@ -377,8 +342,7 @@ type cmdEnv struct {
 }
 
 // evaluateCommandIn judges a command that starts in cwd (the workspace when cwd
-// is empty). It reads every command of a pipeline or list, so a forbidden step
-// hidden behind `&&` or `;` is still found.
+// is empty).
 func evaluateCommandIn(command, workspace, cwd string) Verdict {
 	dir := strings.TrimSpace(cwd)
 	if dir == "" {
@@ -414,16 +378,24 @@ func evaluateCommandDepth(command string, env cmdEnv, depth int) Verdict {
 		return deny(limit, "The command sends a message through an outside service.")
 	}
 	var nested []innerRun
-	for _, sub := range substitutions(command) {
-		nested = append(nested, innerRun{sub, env.dir})
-	}
 	// merges collects every `gh pr merge` target of the request, so the service
 	// can judge each one: a later approved merge must not authorize an earlier one.
-	var merges []string
+	var merges []MergeTarget
 	for _, segment := range splitSegments(command) {
+		// A ( ) group is a subshell: it starts where the parent is, and nothing
+		// it does to the directory reaches the parent. It is read on its own.
+		if body, rest, ok := subshellGroup(segment); ok {
+			nested = append(nested, innerRun{body, env.dir})
+			segment = rest
+		}
+		// Substitutions run before their command, in the directory the command
+		// itself starts in.
+		for _, sub := range substitutions(segment) {
+			nested = append(nested, innerRun{sub, env.dir})
+		}
 		tokens := tokenize(segment)
 		tokens = stripWrappers(tokens)
-		tokens = stripSubshell(tokens)
+		tokens = stripControl(tokens)
 		if len(tokens) == 0 {
 			continue
 		}
@@ -436,7 +408,7 @@ func evaluateCommandDepth(command string, env cmdEnv, depth int) Verdict {
 		}
 		v := classifySegment(tokens, env)
 		if v.Merge {
-			merges = append(merges, v.MergeRefs...)
+			merges = append(merges, v.MergeTargets...)
 			continue
 		}
 		if !v.Allow {
@@ -450,30 +422,25 @@ func evaluateCommandDepth(command string, env cmdEnv, depth int) Verdict {
 		v := evaluateCommandDepth(inner.command, cmdEnv{workspace: env.workspace, dir: inner.dir}, depth+1)
 		switch {
 		case v.Merge:
-			merges = append(merges, v.MergeRefs...)
+			merges = append(merges, v.MergeTargets...)
 		case !v.Allow:
 			return v
 		}
 	}
 	if len(merges) > 0 {
-		return Verdict{Merge: true, MergeRefs: merges, Reason: "A merge is decided against the PR's review and checks."}
+		return Verdict{Merge: true, MergeTargets: merges, Reason: "A merge is decided against the PR's review and checks."}
 	}
 	return allow("A command with no hard-limit effect.")
 }
 
-// stripSubshell drops the "(" or "{" that opens a group, so `(cd x && rm y)` is
-// read like `cd x && rm y`.
-func stripSubshell(tokens []string) []string {
-	for len(tokens) > 0 {
-		head := strings.TrimLeft(tokens[0], "({")
-		if head == tokens[0] {
-			break
-		}
-		if head == "" {
-			tokens = tokens[1:]
-			continue
-		}
-		tokens = append([]string{head}, tokens[1:]...)
+// controlWords open a clause of a compound command (`do cd x`, `then rm y`);
+// the command that matters follows them.
+var controlWords = map[string]bool{"do": true, "then": true, "else": true, "elif": true, "if": true, "while": true, "until": true, "!": true, "{": true}
+
+// stripControl drops the control words in front of a command.
+func stripControl(tokens []string) []string {
+	for len(tokens) > 0 && controlWords[tokens[0]] {
+		tokens = tokens[1:]
 	}
 	return tokens
 }
@@ -517,22 +484,129 @@ func resolveIn(dir, p string) string {
 	return path.Clean(dir + "/" + p)
 }
 
-var (
-	dollarSubstitution = regexp.MustCompile(`\$\(([^()]*)\)`)
-	backtickSubst      = regexp.MustCompile("`([^`]*)`")
-)
-
-// substitutions returns the commands inside $(...) and `...`, which a shell runs
-// before the command that holds them.
-func substitutions(command string) []string {
-	dollars := dollarSubstitution.FindAllStringSubmatch(command, -1)
-	ticks := backtickSubst.FindAllStringSubmatch(command, -1)
-	out := make([]string, 0, len(dollars)+len(ticks))
-	for _, m := range dollars {
-		out = append(out, m[1])
+// splitSegments cuts a command line at its separators (&&, ||, ;, |, newline),
+// but not inside quotes, backticks or ( ) groups: `bash -c "cd x && rm y"` is
+// one command whose argument is a script, and `(cd x && rm y)` or `$(cd x; rm y)`
+// is one group, which are read as a whole.
+func splitSegments(command string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	depth, backtick := 0, false
+	runes := []rune(command)
+	flush := func() {
+		if seg := strings.TrimSpace(cur.String()); seg != "" {
+			out = append(out, seg)
+		}
+		cur.Reset()
 	}
-	for _, m := range ticks {
-		out = append(out, m[1])
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case quote != 0:
+			cur.WriteRune(r)
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+			cur.WriteRune(r)
+		case r == '`':
+			backtick = !backtick
+			cur.WriteRune(r)
+		case r == '(':
+			depth++
+			cur.WriteRune(r)
+		case r == ')':
+			if depth > 0 {
+				depth--
+			}
+			cur.WriteRune(r)
+		case depth > 0 || backtick:
+			cur.WriteRune(r)
+		case r == ';' || r == '\n' || r == '\r':
+			flush()
+		case r == '&' && i+1 < len(runes) && runes[i+1] == '&':
+			flush()
+			i++
+		case r == '|':
+			flush()
+			if i+1 < len(runes) && runes[i+1] == '|' {
+				i++
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return out
+}
+
+// matchingParen returns the index of the ")" that closes the "(" at runes[open],
+// or -1. Quotes are skipped; an unbalanced group runs to the end.
+func matchingParen(runes []rune, open int) int {
+	depth := 0
+	var quote rune
+	for i := open; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '(':
+			depth++
+		case r == ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// subshellGroup reads a segment that opens with a ( ) group: the commands in the
+// group, and what follows it (a redirection, or nothing).
+func subshellGroup(segment string) (body, rest string, ok bool) {
+	segment = strings.TrimSpace(segment)
+	if !strings.HasPrefix(segment, "(") {
+		return "", "", false
+	}
+	runes := []rune(segment)
+	end := matchingParen(runes, 0)
+	if end < 0 {
+		return string(runes[1:]), "", true
+	}
+	return string(runes[1:end]), string(runes[end+1:]), true
+}
+
+// substitutions returns the commands inside $(...), <(...), >(...) and `...` of
+// one command, which a shell runs before the command that holds them. Nested
+// groups are balanced; a substitution inside one is found when that one is read.
+func substitutions(command string) []string {
+	var out []string
+	runes := []rune(command)
+	for i := 0; i < len(runes); i++ {
+		switch {
+		case runes[i] == '`':
+			end := i + 1
+			for end < len(runes) && runes[end] != '`' {
+				end++
+			}
+			out = append(out, string(runes[i+1:end]))
+			i = end
+		case (runes[i] == '$' || runes[i] == '<' || runes[i] == '>') && i+1 < len(runes) && runes[i+1] == '(':
+			end := matchingParen(runes, i+1)
+			if end < 0 {
+				out = append(out, string(runes[i+2:]))
+				return out
+			}
+			out = append(out, string(runes[i+2:end]))
+			i = end
+		}
 	}
 	return out
 }
@@ -944,6 +1018,39 @@ found:
 	return allow("A git command with no hard-limit effect.")
 }
 
+// mergeFlagsWithValue are the `gh pr merge` options whose next word is their
+// value, not the pull request.
+var mergeFlagsWithValue = map[string]bool{
+	"-b": true, "--body": true, "-t": true, "--subject": true, "-F": true, "--body-file": true,
+	"-A": true, "--author-email": true, "--match-head-commit": true, "-R": true, "--repo": true,
+}
+
+// mergeTarget reads the pull request and the repository out of the arguments of
+// `gh pr merge`.
+func mergeTarget(args []string) MergeTarget {
+	var t MergeTarget
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-R" || a == "--repo":
+			if i+1 < len(args) {
+				t.Repo = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--repo="):
+			t.Repo = strings.TrimPrefix(a, "--repo=")
+		case strings.HasPrefix(a, "-R") && len(a) > 2 && !strings.HasPrefix(a, "--"):
+			t.Repo = strings.TrimPrefix(strings.TrimPrefix(a, "-R"), "=")
+		case mergeFlagsWithValue[a]:
+			i++
+		case strings.HasPrefix(a, "-"):
+		case t.Ref == "":
+			t.Ref = a
+		}
+	}
+	return t
+}
+
 var ghWriteMethod = regexp.MustCompile(`(?i)(-X|--method)[ =]?(POST|PUT|PATCH|DELETE)`)
 
 func classifyGH(args, lower []string) Verdict {
@@ -967,14 +1074,7 @@ func classifyGH(args, lower []string) Verdict {
 			if hasFlag(lower, "--admin") {
 				return deny(domain.HardLimitCI, "The merge bypasses the branch's required checks and reviews.")
 			}
-			ref := ""
-			for _, a := range rest {
-				if !strings.HasPrefix(a, "-") {
-					ref = a
-					break
-				}
-			}
-			return Verdict{Merge: true, MergeRefs: []string{ref}, Reason: "A merge is decided against the PR's review and checks."}
+			return Verdict{Merge: true, MergeTargets: []MergeTarget{mergeTarget(rest)}, Reason: "A merge is decided against the PR's review and checks."}
 		case "comment", "review":
 			return deny(domain.HardLimitMessaging, "The command posts on a pull request other people read.")
 		}

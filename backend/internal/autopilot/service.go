@@ -368,13 +368,18 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, task string, m
 	s.logEventLocked(ctx, run, domain.AutopilotEventStarted, "Autopilot started: "+clip(task, 140), task)
 	s.mu.Unlock()
 
-	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
-	defer cancel()
-	if err := s.messenger.Send(sendCtx, id, startMessage(run, rec.Kind)); err != nil {
+	// The task goes out through the same fence as every continuation, so a Stop
+	// that lands first is never followed by "Autopilot is ON".
+	sent, err := s.deliverIteration(ctx, run, startMessage(run, rec.Kind))
+	if err != nil {
 		s.mu.Lock()
 		s.finishLocked(ctx, run.ID, domain.AutopilotStopped, domain.AutopilotEndUser, "Autopilot could not start: the session did not take the message ("+clip(err.Error(), 160)+")")
 		s.mu.Unlock()
 		return View{}, apierr.Unavailable("AUTOPILOT_START_FAILED", "The session could not be reached, so Autopilot did not start: "+clip(err.Error(), 200))
+	}
+	if !sent {
+		// Stopped before the task went out.
+		return s.View(ctx, id)
 	}
 	s.mu.Lock()
 	if cur, found, _ := s.store.GetAutopilotRun(ctx, run.ID); found && cur.State == domain.AutopilotRunning {
