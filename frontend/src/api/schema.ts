@@ -329,6 +329,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/accounts/limit-prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the switch-or-wait questions for sessions stopped on an account's usage limit */
+        get: operations["listUsageLimitPrompts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/accounts/limit-prompts/{promptId}/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Move the sessions stopped on a limit to another account and continue them */
+        post: operations["switchUsageLimitPrompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/accounts/limit-prompts/{promptId}/wait": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Wait for the limit to reset instead of switching accounts */
+        post: operations["waitUsageLimitPrompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/accounts/login": {
         parameters: {
             query?: never;
@@ -8689,6 +8740,14 @@ export interface components {
             transition?: components["schemas"]["SessionInterfaceTransition"];
             workers: components["schemas"]["SessionAccountWorkerMove"][];
         };
+        SwitchUsageLimitPromptRequest: {
+            accountId: string;
+        };
+        SwitchUsageLimitPromptResponse: {
+            failed: components["schemas"]["UsageLimitPromptFailure"][];
+            moved: string[];
+            ok: boolean;
+        };
         SyncArtifactVersionsRequest: {
             /** @description Artifact-directory-relative file path, as listed in the session's artifactFiles. */
             path: string;
@@ -8919,6 +8978,46 @@ export interface components {
             /** Format: double */
             usedPercent: number;
         };
+        UsageLimitPrompt: {
+            accountEmail?: string;
+            accountId: string;
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            options: components["schemas"]["UsageLimitPromptOption"][];
+            provider: string;
+            /** Format: date-time */
+            resetsAt?: null | string;
+            sessions: components["schemas"]["UsageLimitPromptSession"][];
+            windowLabel?: string;
+        };
+        UsageLimitPromptFailure: {
+            reason: string;
+            sessionId: string;
+        };
+        UsageLimitPromptOption: {
+            accountId: string;
+            device: boolean;
+            email?: string;
+            /** Format: date-time */
+            fiveHourResetsAt?: null | string;
+            fiveHourUsedPercent?: null | number;
+            full: boolean;
+            plan?: string;
+            /** Format: date-time */
+            weeklyResetsAt?: null | string;
+            weeklyUsedPercent?: null | number;
+        };
+        UsageLimitPromptSession: {
+            displayName?: string;
+            /** @enum {string} */
+            kind: "worker" | "orchestrator";
+            projectId?: string;
+            sessionId: string;
+        };
+        UsageLimitPromptsResponse: {
+            prompts: components["schemas"]["UsageLimitPrompt"][];
+        };
         UsageLimitSpan: {
             durationMinutes?: number;
             /** Format: date-time */
@@ -9045,6 +9144,9 @@ export interface components {
             account?: components["schemas"]["AgentAccountResponse"];
             /** @enum {string} */
             status: "waiting" | "complete" | "duplicate" | "mismatch";
+        };
+        WaitUsageLimitPromptResponse: {
+            ok: boolean;
         };
         WorkspaceBranchResponse: {
             checkedOut: boolean;
@@ -10417,6 +10519,148 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listUsageLimitPrompts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageLimitPromptsResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    switchUsageLimitPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Usage-limit prompt identifier. */
+                promptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchUsageLimitPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwitchUsageLimitPromptResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    waitUsageLimitPrompt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Usage-limit prompt identifier. */
+                promptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitUsageLimitPromptResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

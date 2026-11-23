@@ -46,6 +46,12 @@ var ErrSessionGone = errors.New("session cannot receive the resume message")
 type Store interface {
 	ListLimitStopCandidates(ctx context.Context, completedSince time.Time) ([]domain.LimitStopTurn, error)
 	ListLatestFailedTurns(ctx context.Context, ids []domain.SessionID) ([]domain.LimitStopTurn, error)
+	InsertUsageLimitPrompt(ctx context.Context, p domain.UsageLimitPrompt) (bool, error)
+	ListOpenUsageLimitPrompts(ctx context.Context) ([]domain.UsageLimitPrompt, error)
+	GetUsageLimitPrompt(ctx context.Context, id string) (domain.UsageLimitPrompt, bool, error)
+	DecideUsageLimitPrompt(ctx context.Context, id, state, targetAccountID string, at time.Time) (bool, error)
+	ReopenUsageLimitPrompt(ctx context.Context, id string) error
+	ListUsageLimitPromptStops(ctx context.Context, windowKey string) ([]domain.UsageLimitStop, error)
 	InsertUsageLimitStop(ctx context.Context, stop domain.UsageLimitStop) (bool, error)
 	ListPendingUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error)
 	ListUnreportedUsageLimitStops(ctx context.Context) ([]domain.UsageLimitStop, error)
@@ -97,6 +103,10 @@ type Deps struct {
 	Settings Settings
 	Accounts Accounts
 	Headroom Headroom
+	// Lister and Mover turn on the owner prompt: which accounts could take the
+	// stopped sessions, and how to move them. Without them AO only notifies.
+	Lister   AccountLister
+	Mover    SessionMover
 	Notifier Notifier
 	Reporter Reporter
 	Sender   Sender
@@ -112,6 +122,8 @@ type Service struct {
 	settings Settings
 	accounts Accounts
 	headroom Headroom
+	lister   AccountLister
+	mover    SessionMover
 	notifier Notifier
 	reporter Reporter
 	sender   Sender
@@ -129,7 +141,7 @@ type Service struct {
 // New builds the watcher.
 func New(d Deps) *Service {
 	s := &Service{
-		store: d.Store, settings: d.Settings, accounts: d.Accounts, headroom: d.Headroom, notifier: d.Notifier,
+		store: d.Store, settings: d.Settings, accounts: d.Accounts, headroom: d.Headroom, lister: d.Lister, mover: d.Mover, notifier: d.Notifier,
 		reporter: d.Reporter, sender: d.Sender, log: d.Logger, now: d.Now, stagger: d.Stagger,
 	}
 	if s.log == nil {
@@ -292,6 +304,9 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 			UsageLimitWindow: window, UsageLimitProvider: providerLabel(rec.Harness),
 			UsageLimitAutoResume: enabled && limit.ResetsAt != nil,
 		}
+		if provider, ok := domain.AgentAccountProviderFor(rec.Harness); ok && stop.AccountKey != "" {
+			intent.UsageLimitSwitchPrompt = s.hasSwitchTargets(ctx, string(provider), stop.AccountKey)
+		}
 		if limit.ResetsAt != nil {
 			intent.UsageLimitResetsAt = *limit.ResetsAt
 		}
@@ -302,6 +317,10 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 	inserted, err := s.store.InsertUsageLimitStop(ctx, stop)
 	if err != nil || !inserted {
 		return err
+	}
+	// One owner prompt per limit window, however many sessions stop on it.
+	if err := s.ensurePrompt(ctx, stop, rec, now); err != nil {
+		s.log.Warn("record usage-limit prompt", "session", rec.ID, "err", err)
 	}
 	reason := ""
 	switch {

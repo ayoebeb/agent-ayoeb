@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentaccounts"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/usagelimit"
 )
 
 // AgentAccountService is the HTTP boundary of the Claude Code and Codex
@@ -37,11 +38,20 @@ type AgentAccountSessionMover interface {
 	SwitchAccount(ctx context.Context, id domain.SessionID, accountID string, stopTurn bool, includeWorkers *bool) (sessionsvc.AccountSwitchResult, error)
 }
 
-// AgentAccountsController exposes accounts, sign-in, limits, usage, and the
-// account of each session.
+// UsageLimitPromptService is the switch-or-wait question AO asks the owner when
+// sessions stop on an account's usage limit.
+type UsageLimitPromptService interface {
+	ListPrompts(context.Context) ([]usagelimit.Prompt, error)
+	Switch(ctx context.Context, id, accountID string) (usagelimit.SwitchResult, error)
+	Wait(ctx context.Context, id string) error
+}
+
+// AgentAccountsController exposes accounts, sign-in, limits, usage, the
+// account of each session, and the usage-limit prompts.
 type AgentAccountsController struct {
 	Svc      AgentAccountService
 	Sessions AgentAccountSessionMover
+	Prompts  UsageLimitPromptService
 }
 
 // Register adds the account routes.
@@ -54,6 +64,9 @@ func (c *AgentAccountsController) Register(r chi.Router) {
 	r.Post("/agents/accounts/login", c.startLogin)
 	r.Post("/agents/accounts/login/{operationId}/verify", c.verifyLogin)
 	r.Post("/agents/accounts/login/{operationId}/cancel", c.cancelLogin)
+	r.Get("/agents/accounts/limit-prompts", c.listLimitPrompts)
+	r.Post("/agents/accounts/limit-prompts/{promptId}/switch", c.switchLimitPrompt)
+	r.Post("/agents/accounts/limit-prompts/{promptId}/wait", c.waitLimitPrompt)
 	r.Get("/agents/accounts/sessions/{sessionId}", c.sessionAccounts)
 	r.Put("/agents/accounts/sessions/{sessionId}", c.switchSession)
 	r.Post("/agents/accounts/{accountId}/login", c.signInAgain)

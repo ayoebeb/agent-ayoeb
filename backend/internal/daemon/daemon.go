@@ -823,11 +823,19 @@ func Run(buildVersion string) error {
 	// A turn that stops on the provider's usage limit is followed up exactly once:
 	// the orchestrator is told, the person gets one notification per account and
 	// window, and the session is continued after the reset (staggered and capped).
+	var limitMover usagelimit.SessionMover
+	if mover, ok := sessMgr.(interface {
+		StartAccountTransition(context.Context, domain.SessionID, string, domain.SessionInterfaceTransitionPolicy) (domain.SessionInterfaceTransition, error)
+	}); ok {
+		limitMover = usageLimitMover{move: mover.StartAccountTransition}
+	}
 	usageLimitSvc := usagelimit.New(usagelimit.Deps{
 		Store:    store,
 		Settings: settingsSvc,
 		Accounts: usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID},
 		Headroom: agentAccountSvc,
+		Lister:   agentAccountSvc,
+		Mover:    limitMover,
 		Notifier: notificationWriter,
 		Reporter: usageLimitReporter{reports: reportSvc},
 		Sender:   usageLimitSender{sessions: reportSessions},
@@ -1259,6 +1267,7 @@ func Run(buildVersion string) error {
 		Agents:                 agentSvc,
 		CodexAccounts:          agentSvc,
 		AgentAccounts:          freshAccountUsage{agentAccountSvc, usagePipeline},
+		UsageLimitPrompts:      usageLimitSvc,
 		SystemChecks:           systemChecks,
 		Installer:              systemInstall,
 		ComputerUse:            computerUse,

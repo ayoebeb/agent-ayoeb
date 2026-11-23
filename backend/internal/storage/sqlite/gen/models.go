@@ -978,6 +978,19 @@ type UsageCodexSourceDiscovery struct {
 	HasMixedChildTypes     int64
 }
 
+type UsageLimitPrompt struct {
+	ID              string
+	WindowKey       string
+	AccountKey      string
+	Provider        string
+	WindowLabel     string
+	ResetsAt        sql.NullTime
+	State           string
+	TargetAccountID string
+	CreatedAt       time.Time
+	DecidedAt       sql.NullTime
+}
+
 type UsageLimitStop struct {
 	TurnID       string
 	SessionID    string

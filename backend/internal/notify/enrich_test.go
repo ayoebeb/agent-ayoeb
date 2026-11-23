@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -49,5 +50,17 @@ func TestEnrichReadyToMergeFallsBackWithoutPRTitle(t *testing.T) {
 
 	if want := "PR #67 is ready to merge"; rec.Title != want {
 		t.Fatalf("title = %q, want %q", rec.Title, want)
+	}
+}
+
+func TestUsageLimitBodyPointsAtTheSwitchPromptWhenThereIsAnotherAccount(t *testing.T) {
+	reset := time.Date(2026, 11, 23, 18, 0, 0, 0, time.UTC)
+	intent := Intent{Type: domain.NotificationUsageLimit, CreatedAt: reset.Add(-time.Hour), UsageLimitResetsAt: reset, UsageLimitAutoResume: true}
+	if body := usageLimitBody(intent); strings.Contains(body, "another account") {
+		t.Fatalf("body without a prompt = %q", body)
+	}
+	intent.UsageLimitSwitchPrompt = true
+	if body := usageLimitBody(intent); !strings.Contains(body, "switch them to another account or wait for the reset") {
+		t.Fatalf("body with a prompt = %q", body)
 	}
 }

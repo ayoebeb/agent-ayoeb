@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 )
@@ -158,4 +160,34 @@ func BuildSessionUsageLimit(turn LimitStopTurn, now time.Time) *SessionUsageLimi
 		out.Resume = UsageLimitResumeWaiting
 	}
 	return out
+}
+
+// States of a usage-limit prompt: open until the owner answers it.
+const (
+	UsageLimitPromptOpen     = "open"
+	UsageLimitPromptSwitched = "switched"
+	UsageLimitPromptWaiting  = "waiting"
+)
+
+// UsageLimitPrompt is the question AO asks the owner about one limit event (an
+// account's limit window): switch the sessions that stopped to another account,
+// or wait for the reset. The sessions are the window's stops.
+type UsageLimitPrompt struct {
+	ID          string
+	WindowKey   string
+	AccountKey  string
+	Provider    string
+	WindowLabel string
+	ResetsAt    *time.Time
+	State       string
+	// TargetAccountID is the account the owner switched to.
+	TargetAccountID string
+	CreatedAt       time.Time
+	DecidedAt       *time.Time
+}
+
+// UsageLimitPromptID is the stable id of the prompt of a limit window.
+func UsageLimitPromptID(windowKey string) string {
+	sum := sha256.Sum256([]byte(windowKey))
+	return hex.EncodeToString(sum[:8])
 }
