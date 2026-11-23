@@ -728,6 +728,7 @@ func (m *Manager) runInterfaceTransition(
 		return
 	}
 	m.deliverQueuedAfterAccountMove(transition)
+	m.runAccountMovedHook(transition)
 }
 
 // hermesNativeConversationID reads the native state.db session id the

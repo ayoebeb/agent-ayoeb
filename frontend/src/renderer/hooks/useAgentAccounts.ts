@@ -112,13 +112,18 @@ export function useAgentAccountActions() {
 			await queryClient.invalidateQueries({ queryKey: agentAccountsQueryKey });
 			return result.outcome;
 		},
-		/** Starts the durable move; the shared interface-transition status shows its progress. */
+		/** Starts the durable move; the shared interface-transition status shows its
+		 * progress. An orchestrator takes its project's live workers along; the
+		 * result says how many moved. */
 		switchSession: async (sessionId: string, accountId: string, stopTurn = false) => {
 			const result = unwrap(await apiClient.PUT("/api/v1/agents/accounts/sessions/{sessionId}", {
 				params: { path: { sessionId } }, body: { accountId, ...(stopTurn ? { stopTurn: true } : {}) },
 			}));
 			await queryClient.invalidateQueries({ queryKey: sessionInterfaceTransitionQueryKey(sessionId) });
-			return result.transition;
+			for (const worker of result.workers) {
+				if (worker.status === "moving") await queryClient.invalidateQueries({ queryKey: sessionInterfaceTransitionQueryKey(worker.sessionId) });
+			}
+			return { transition: result.transition, movedWorkers: result.movedWorkers, workers: result.workers };
 		},
 		refreshSession: (sessionId: string) => queryClient.invalidateQueries({ queryKey: sessionAccountsKey(sessionId) }),
 	};

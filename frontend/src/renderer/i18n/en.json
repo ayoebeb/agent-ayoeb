@@ -3859,6 +3859,8 @@
 	"settings.agentAccounts.extraUsage": "Extra usage {{used}} of {{limit}}",
 	"settings.agentAccounts.sessionAccount": "Account",
 	"settings.agentAccounts.moved": "Moved from {{from}} to {{to}}",
+	"settings.agentAccounts.alsoMovedWorkers_one": "Also moved {{count}} worker",
+	"settings.agentAccounts.alsoMovedWorkers_other": "Also moved {{count}} workers",
 	"settings.agentAccounts.loading": "Loading accounts…",
 	"settings.agentAccounts.stopAndMoveTitle": "Stop the turn and move?",
 	"settings.agentAccounts.stopAndMoveWorking": "The agent is still working. Ayo stops it now and resumes the conversation on {{email}}. Your next message continues from there.",

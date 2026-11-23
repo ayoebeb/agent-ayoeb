@@ -441,6 +441,8 @@ type Manager struct {
 	agentAccounts               ports.AgentAccountLaunchEnv
 	accountOverrideMu           sync.Mutex
 	accountOverrides            map[domain.SessionID]string
+	accountMovedMu              sync.Mutex
+	accountMoved                func(context.Context, domain.SessionInterfaceTransition)
 	attachments                 *attachmentstore.Store
 	attachmentSuffix            func() (string, error)
 	dataDir                     string
@@ -1238,7 +1240,24 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	}
 	id := rec.ID
 	if m.agentAccounts != nil {
-		if err := m.agentAccounts.BindSession(ctx, id, cfg.Harness, cfg.AgentAccountID); err != nil {
+		bindAccount := cfg.AgentAccountID
+		inherited := false
+		if bindAccount == "" && cfg.Kind != domain.KindOrchestrator {
+			// A worker starts on the account its project's orchestrator moved to,
+			// so a move off a limited account is not undone by the next spawn.
+			if inheritedID := m.inheritedSpawnAccount(ctx, rec.ProjectID, cfg.Harness); inheritedID != "" {
+				bindAccount, inherited = inheritedID, true
+			}
+		}
+		err := m.agentAccounts.BindSession(ctx, id, cfg.Harness, bindAccount)
+		if err != nil && inherited {
+			// The orchestrator's account cannot start an agent now (signed out,
+			// being removed): the default account keeps the spawn working.
+			m.logger.Warn("spawn: orchestrator's account unusable; using the default account",
+				"sessionID", id, "account", bindAccount, "error", err)
+			err = m.agentAccounts.BindSession(ctx, id, cfg.Harness, "")
+		}
+		if err != nil {
 			if prep != nil {
 				cleanupCtx, cancel := spawnRollbackContext(ctx)
 				m.discardClaimedTaskPreparation(cleanupCtx, prep)

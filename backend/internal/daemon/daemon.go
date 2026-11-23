@@ -827,11 +827,23 @@ func Run(buildVersion string) error {
 		Store:    store,
 		Settings: settingsSvc,
 		Accounts: usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID},
+		Headroom: agentAccountSvc,
 		Notifier: notificationWriter,
 		Reporter: usageLimitReporter{reports: reportSvc},
 		Sender:   usageLimitSender{sessions: reportSessions},
 		Logger:   log,
 	})
+	// A session moved to another account while stopped on the old account's
+	// usage limit continues at once on the new one.
+	if hooked, ok := sessMgr.(interface {
+		SetAccountMovedHook(func(context.Context, domain.SessionInterfaceTransition))
+	}); ok {
+		hooked.SetAccountMovedHook(func(hookCtx context.Context, t domain.SessionInterfaceTransition) {
+			if _, err := usageLimitSvc.ResumeAfterAccountMove(hookCtx, t.SessionID, t.TargetAccountID); err != nil {
+				log.Warn("continue session after account move", "session", t.SessionID, "err", err)
+			}
+		})
+	}
 	chatSvc.SetUsageLimitResumeIntent(func(intentCtx context.Context, turnID string, retryArmed bool) {
 		reason := domain.UsageLimitOffCancelled
 		if retryArmed {

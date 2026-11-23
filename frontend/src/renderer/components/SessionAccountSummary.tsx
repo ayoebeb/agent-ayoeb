@@ -26,6 +26,7 @@ export function SessionAccountSummary({ session }: { session: WorkspaceSession }
 	const { transition } = useSessionInterfaceTransitionStatus(shownId);
 	const [message, setMessage] = useState("");
 	const [confirming, setConfirming] = useState<string | null>(null);
+	const [movedWorkers, setMovedWorkers] = useState(0);
 	const accountMove = transition?.targetAccountId ? transition : undefined;
 	const moving = interfaceTransitionIsActive(accountMove);
 	const settledPhase = accountMove && !moving ? accountMove.phase : undefined;
@@ -55,8 +56,10 @@ export function SessionAccountSummary({ session }: { session: WorkspaceSession }
 		}
 		setConfirming(null);
 		setMessage("");
+		setMovedWorkers(0);
 		try {
-			await actions.switchSession(session.id, accountId, stopTurn);
+			const result = await actions.switchSession(session.id, accountId, stopTurn);
+			setMovedWorkers(result.movedWorkers);
 		} catch (err) {
 			setMessage(err instanceof Error ? err.message : String(err));
 		}
@@ -85,6 +88,9 @@ export function SessionAccountSummary({ session }: { session: WorkspaceSession }
 			</div>
 		</div>
 		{status ? <p className="mt-2 text-xs text-muted-foreground" role="status">{status}</p> : null}
+		{movedWorkers > 0 ? <p className="mt-1 text-xs text-muted-foreground" role="status" data-testid="session-account-moved-workers">
+			{t("settings.agentAccounts.alsoMovedWorkers", { count: movedWorkers })}
+		</p> : null}
 		{account ? <AccountLimits account={account} /> : null}
 		{confirming ? <ConfirmDialog open
 			title={t("settings.agentAccounts.stopAndMoveTitle")}

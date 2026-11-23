@@ -7818,6 +7818,13 @@ export interface components {
             resources?: components["schemas"]["ConversationResourceContentRequest"][];
             text: string;
         };
+        SessionAccountWorkerMove: {
+            reason?: string;
+            sessionId: string;
+            /** @enum {string} */
+            status: "moving" | "skipped" | "failed";
+            transition?: components["schemas"]["SessionInterfaceTransition"];
+        };
         SessionActivityResponse: {
             current?: components["schemas"]["SessionStepResponse"];
             recent: components["schemas"]["SessionStepResponse"][];
@@ -8518,6 +8525,7 @@ export interface components {
             orchestrator: components["schemas"]["OrchestratorResponse"];
         };
         SpawnSessionRequest: {
+            agentAccountId?: string;
             /** @enum {string} */
             approvalMode?: "default" | "accept-edits" | "auto" | "bypass-permissions";
             async?: boolean;
@@ -8671,7 +8679,15 @@ export interface components {
         };
         SwitchSessionAgentAccountRequest: {
             accountId: string;
+            includeWorkers?: null | boolean;
             stopTurn?: boolean;
+        };
+        SwitchSessionAgentAccountResponse: {
+            movedWorkers: number;
+            ok: boolean;
+            sessionId: string;
+            transition?: components["schemas"]["SessionInterfaceTransition"];
+            workers: components["schemas"]["SessionAccountWorkerMove"][];
         };
         SyncArtifactVersionsRequest: {
             /** @description Artifact-directory-relative file path, as listed in the session's artifactFiles. */
@@ -10595,7 +10611,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StartSessionInterfaceTransitionResponse"];
+                    "application/json": components["schemas"]["SwitchSessionAgentAccountResponse"];
                 };
             };
             /** @description Bad Request */

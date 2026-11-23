@@ -3877,6 +3877,8 @@
 	"settings.agentAccounts.extraUsage": "Zusätzliche Nutzung {{used}} von {{limit}}",
 	"settings.agentAccounts.sessionAccount": "Konto",
 	"settings.agentAccounts.moved": "Von {{from}} zu {{to}} verschoben",
+	"settings.agentAccounts.alsoMovedWorkers_one": "{{count}} Worker ebenfalls verschoben",
+	"settings.agentAccounts.alsoMovedWorkers_other": "{{count}} Worker ebenfalls verschoben",
 	"settings.agentAccounts.loading": "Konten werden geladen…",
 	"settings.agentAccounts.stopAndMoveTitle": "Durchgang beenden und verschieben?",
 	"settings.agentAccounts.stopAndMoveWorking": "Der Agent arbeitet noch. Ayo stoppt ihn jetzt und setzt die Unterhaltung mit {{email}} fort. Deine nächste Nachricht macht dort weiter.",

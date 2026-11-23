@@ -3859,6 +3859,8 @@
 	"settings.agentAccounts.extraUsage": "额外用量 {{used}} / {{limit}}",
 	"settings.agentAccounts.sessionAccount": "账户",
 	"settings.agentAccounts.moved": "已从 {{from}} 移至 {{to}}",
+	"settings.agentAccounts.alsoMovedWorkers_one": "同时移动了 {{count}} 个 worker",
+	"settings.agentAccounts.alsoMovedWorkers_other": "同时移动了 {{count}} 个 worker",
 	"settings.agentAccounts.loading": "正在加载账户…",
 	"settings.agentAccounts.stopAndMoveTitle": "停止本轮并移动？",
 	"settings.agentAccounts.stopAndMoveWorking": "智能体仍在工作。Ayo 会立即停止它，并在 {{email}} 上恢复对话。你的下一条消息会从那里继续。",

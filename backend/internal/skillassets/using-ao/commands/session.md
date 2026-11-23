@@ -436,6 +436,34 @@ ao session resume-agent mer-3
 
 ---
 
+### ao session switch-account
+
+Move a session's agent to another Claude or Codex account, keeping its conversation. For an orchestrator, its live workers of the same project and agent move too, and a session that stopped on a usage limit continues by itself on the new account. List accounts with `ao agent accounts`.
+
+**Syntax:**
+```
+ao session switch-account <id> --account <account id or email prefix> [flags]
+```
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--account string` | Account id or the start of its email address (see `ao agent accounts`) | Required |
+| `--workers` | Also move the project's live workers (the default for an orchestrator) | - |
+| `--no-workers` | Move only this session, not its workers | - |
+| `--stop-turn` | Cancel a turn in progress instead of waiting for it to finish | - |
+| `--json` | Output as JSON | - |
+
+**Examples:**
+
+```bash
+ao agent accounts
+ao session switch-account mer-orchestrator-1 --account second.person
+```
+
+---
+
 ### ao session cleanup
 
 Clean up terminated sessions by reclaiming eligible workspaces. Dirty worktrees are skipped by the daemon.
