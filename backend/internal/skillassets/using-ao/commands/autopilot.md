@@ -97,9 +97,12 @@ replacement with `ao autopilot decide`, and carry on.
 The permission policy enforces the same list for the Chat sessions it answers:
 it allows anything inside the workspace (edits, tests, builds, git on your
 branch, `gh pr create`, pushing `ao/*` branches), and denies a limit's request
-and parks it for you. It decides `gh pr merge` against AO's records: allowed only
-when an AO review approved the exact head and checks are green, which is the rule
-you already follow. Autopilot does not loosen it.
+and parks it for you. It reads Claude and Codex requests alike, follows `cd` and the
+provider's working directory before it judges a relative delete, and refuses a
+request whose effect it cannot determine. It decides `gh pr merge` against AO's
+records: allowed only when an AO review approved the exact head and checks are
+green, for **every** merge in the command, which is the rule you already follow.
+Autopilot does not loosen it.
 
 ## What stops a run
 

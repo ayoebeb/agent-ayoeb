@@ -368,12 +368,6 @@ func splitSegments(command string) []string {
 	return out
 }
 
-// evaluateCommand reads every command of a pipeline or list, so a forbidden step
-// hidden behind `&&` or `;` is still found.
-func evaluateCommand(command, workspace string) Verdict {
-	return evaluateCommandIn(command, workspace, "")
-}
-
 // cmdEnv is where a command runs: the session's workspace, and the directory
 // the shell is in. dir is empty when it cannot be known (after `cd "$X"`, `cd -`
 // or `cd ~`), in which case a relative destructive target cannot be placed.
@@ -383,7 +377,8 @@ type cmdEnv struct {
 }
 
 // evaluateCommandIn judges a command that starts in cwd (the workspace when cwd
-// is empty).
+// is empty). It reads every command of a pipeline or list, so a forbidden step
+// hidden behind `&&` or `;` is still found.
 func evaluateCommandIn(command, workspace, cwd string) Verdict {
 	dir := strings.TrimSpace(cwd)
 	if dir == "" {
