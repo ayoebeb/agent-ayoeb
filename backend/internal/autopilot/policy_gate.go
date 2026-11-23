@@ -179,8 +179,8 @@ func sameDir(a, b string) bool {
 }
 
 var (
-	prNumber = regexp.MustCompile(`^d+$`)
-	prURL    = regexp.MustCompile(`^https://[A-Za-z0-9.\-]+(:[0-9]+)?/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull/d+/?$`)
+	prNumber = regexp.MustCompile(`^\d+$`)
+	prURL    = regexp.MustCompile(`^https://[A-Za-z0-9.\-]+(:\d+)?/[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+/pull/\d+/?$`)
 	headSHA  = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
 )
 
