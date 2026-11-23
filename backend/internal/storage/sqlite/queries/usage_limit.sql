@@ -162,3 +162,38 @@ WHERE session_id = ? AND resume_state = 'resumed' AND resumed_at >= ?;
 
 -- name: SetUsageLimitAutoResume :exec
 UPDATE app_settings SET usage_limit_auto_resume = ?, usage_limit_max_resumes = ?, updated_at = ? WHERE id = 1;
+
+-- The owner prompt of one limit event (an account's limit window). The sessions
+-- it covers are the window's stop rows.
+-- name: InsertUsageLimitPrompt :execrows
+INSERT INTO usage_limit_prompts (id, window_key, account_key, provider, window_label, resets_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (window_key) DO NOTHING;
+
+-- name: ListOpenUsageLimitPrompts :many
+SELECT * FROM usage_limit_prompts WHERE state = 'open' ORDER BY created_at, id;
+
+-- name: GetUsageLimitPrompt :one
+SELECT * FROM usage_limit_prompts WHERE id = ?;
+
+-- Claims an open prompt for an answer; it changes nothing once answered, so a
+-- double click or a second window cannot answer one prompt twice.
+-- name: DecideUsageLimitPrompt :execrows
+UPDATE usage_limit_prompts
+SET state = sqlc.arg(state), target_account_id = sqlc.arg(target_account_id), decided_at = sqlc.arg(decided_at)
+WHERE id = sqlc.arg(id) AND state = 'open';
+
+-- Puts a claimed prompt back when its answer moved nothing.
+-- name: ReopenUsageLimitPrompt :execrows
+UPDATE usage_limit_prompts SET state = 'open', target_account_id = '', decided_at = NULL
+WHERE id = ? AND state = 'switched';
+
+-- The stops of one limit window that are still waiting on the owner or the
+-- reset: not continued yet, and not closed because the session was stopped, moved
+-- on or too old.
+-- name: ListUsageLimitPromptStops :many
+SELECT * FROM usage_limit_stops
+WHERE window_key = ?
+  AND resume_state != 'resumed'
+  AND NOT (resume_state = 'skipped' AND skip_reason IN ('stopped', 'superseded', 'expired'))
+ORDER BY detected_at, turn_id;

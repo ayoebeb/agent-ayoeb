@@ -290,3 +290,64 @@ func TestQueuedTurnBehindALimitStopDoesNotSupersedeIt(t *testing.T) {
 		t.Fatalf("a running turn after the stop must supersede it: %+v, %v", candidates, err)
 	}
 }
+
+// One prompt per limit window; its sessions are the window's stops that are
+// still waiting; an answer is taken once and a failed switch can reopen it.
+func TestUsageLimitPromptLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s, session, conversation := seededChatConversation(t)
+	for _, id := range []string{"a", "b", "c"} {
+		appendBranchPrompt(t, s, session, conversation, "generation-root", id, "task "+id)
+		if err := s.SettleTurnByID(ctx, "turn-"+id, domain.TurnStateFailed, storeLimitMessage, testNow); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.InsertUsageLimitStop(ctx, domain.UsageLimitStop{TurnID: "turn-" + id, SessionID: session.ID, WindowKey: "acct|w1", DetectedAt: testNow}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset := testNow.Add(2 * time.Hour)
+	prompt := domain.UsageLimitPrompt{ID: domain.UsageLimitPromptID("acct|w1"), WindowKey: "acct|w1", AccountKey: "acct", Provider: "claude", WindowLabel: "5-hour", ResetsAt: &reset, CreatedAt: testNow}
+	if inserted, err := s.InsertUsageLimitPrompt(ctx, prompt); err != nil || !inserted {
+		t.Fatalf("insert = %v, %v", inserted, err)
+	}
+	if inserted, err := s.InsertUsageLimitPrompt(ctx, prompt); err != nil || inserted {
+		t.Fatalf("second insert of the same window = %v, %v, want it ignored", inserted, err)
+	}
+	open, err := s.ListOpenUsageLimitPrompts(ctx)
+	if err != nil || len(open) != 1 || open[0].AccountKey != "acct" || open[0].ResetsAt == nil || open[0].State != domain.UsageLimitPromptOpen {
+		t.Fatalf("open = %+v, %v", open, err)
+	}
+
+	// Stops that were continued, or closed because the session was stopped, no
+	// longer count as sessions of the prompt.
+	if err := s.MarkUsageLimitStopResumed(ctx, "turn-a", testNow, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SkipUsageLimitStop(ctx, "turn-b", domain.UsageLimitSkipStopped); err != nil {
+		t.Fatal(err)
+	}
+	stops, err := s.ListUsageLimitPromptStops(ctx, "acct|w1")
+	if err != nil || len(stops) != 1 || stops[0].TurnID != "turn-c" {
+		t.Fatalf("stops = %+v, %v, want only turn-c", stops, err)
+	}
+
+	if ok, err := s.DecideUsageLimitPrompt(ctx, prompt.ID, domain.UsageLimitPromptSwitched, "acct-2", testNow); err != nil || !ok {
+		t.Fatalf("decide = %v, %v", ok, err)
+	}
+	if ok, err := s.DecideUsageLimitPrompt(ctx, prompt.ID, domain.UsageLimitPromptWaiting, "", testNow); err != nil || ok {
+		t.Fatalf("second decide = %v, %v, want it refused", ok, err)
+	}
+	if open, _ := s.ListOpenUsageLimitPrompts(ctx); len(open) != 0 {
+		t.Fatalf("open after an answer = %+v", open)
+	}
+	if err := s.ReopenUsageLimitPrompt(ctx, prompt.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := s.GetUsageLimitPrompt(ctx, prompt.ID)
+	if err != nil || !found || got.State != domain.UsageLimitPromptOpen || got.TargetAccountID != "" {
+		t.Fatalf("reopened = %+v, %v, %v", got, found, err)
+	}
+	if _, found, _ := s.GetUsageLimitPrompt(ctx, "nope"); found {
+		t.Fatal("unknown prompt found")
+	}
+}

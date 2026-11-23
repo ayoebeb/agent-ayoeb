@@ -215,3 +215,88 @@ func (s *Store) SetUsageLimitAutoResume(ctx context.Context, enabled bool, maxCo
 		UsageLimitAutoResume: enabled, UsageLimitMaxResumes: int64(maxConcurrent), UpdatedAt: now.UTC(),
 	})
 }
+
+func usageLimitPromptFromRow(row gen.UsageLimitPrompt) domain.UsageLimitPrompt {
+	return domain.UsageLimitPrompt{
+		ID: row.ID, WindowKey: row.WindowKey, AccountKey: row.AccountKey, Provider: row.Provider,
+		WindowLabel: row.WindowLabel, ResetsAt: timePtr(row.ResetsAt), State: row.State,
+		TargetAccountID: row.TargetAccountID, CreatedAt: row.CreatedAt, DecidedAt: timePtr(row.DecidedAt),
+	}
+}
+
+// InsertUsageLimitPrompt records the owner prompt of a limit window, once.
+func (s *Store) InsertUsageLimitPrompt(ctx context.Context, p domain.UsageLimitPrompt) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.InsertUsageLimitPrompt(ctx, gen.InsertUsageLimitPromptParams{
+		ID: p.ID, WindowKey: p.WindowKey, AccountKey: p.AccountKey, Provider: p.Provider,
+		WindowLabel: p.WindowLabel, ResetsAt: nullableTime(utcOrZero(p.ResetsAt)), CreatedAt: p.CreatedAt.UTC(),
+	})
+	if err != nil {
+		return false, fmt.Errorf("insert usage-limit prompt %s: %w", p.ID, err)
+	}
+	return n > 0, nil
+}
+
+// ListOpenUsageLimitPrompts returns the prompts the owner has not answered.
+func (s *Store) ListOpenUsageLimitPrompts(ctx context.Context) ([]domain.UsageLimitPrompt, error) {
+	rows, err := s.qr.ListOpenUsageLimitPrompts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list open usage-limit prompts: %w", err)
+	}
+	out := make([]domain.UsageLimitPrompt, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, usageLimitPromptFromRow(row))
+	}
+	return out, nil
+}
+
+// GetUsageLimitPrompt returns one prompt by id.
+func (s *Store) GetUsageLimitPrompt(ctx context.Context, id string) (domain.UsageLimitPrompt, bool, error) {
+	row, err := s.qr.GetUsageLimitPrompt(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.UsageLimitPrompt{}, false, nil
+	}
+	if err != nil {
+		return domain.UsageLimitPrompt{}, false, fmt.Errorf("get usage-limit prompt %s: %w", id, err)
+	}
+	return usageLimitPromptFromRow(row), true, nil
+}
+
+// DecideUsageLimitPrompt answers an open prompt. It reports false when the
+// prompt was not open, so only one caller answers it.
+func (s *Store) DecideUsageLimitPrompt(ctx context.Context, id, state, targetAccountID string, at time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.DecideUsageLimitPrompt(ctx, gen.DecideUsageLimitPromptParams{
+		State: state, TargetAccountID: targetAccountID, DecidedAt: nullableTime(at.UTC()), ID: id,
+	})
+	if err != nil {
+		return false, fmt.Errorf("decide usage-limit prompt %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// ReopenUsageLimitPrompt puts a switched prompt back to open.
+func (s *Store) ReopenUsageLimitPrompt(ctx context.Context, id string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if _, err := s.qw.ReopenUsageLimitPrompt(ctx, id); err != nil {
+		return fmt.Errorf("reopen usage-limit prompt %s: %w", id, err)
+	}
+	return nil
+}
+
+// ListUsageLimitPromptStops returns the stops of a limit window that are still
+// waiting on the owner or the reset.
+func (s *Store) ListUsageLimitPromptStops(ctx context.Context, windowKey string) ([]domain.UsageLimitStop, error) {
+	rows, err := s.qr.ListUsageLimitPromptStops(ctx, windowKey)
+	if err != nil {
+		return nil, fmt.Errorf("list usage-limit prompt stops: %w", err)
+	}
+	out := make([]domain.UsageLimitStop, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, usageLimitStopFromRow(row))
+	}
+	return out, nil
+}

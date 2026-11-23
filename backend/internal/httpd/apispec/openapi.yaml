@@ -931,6 +931,117 @@ paths:
       summary: Spend one Codex usage-limit reset of an account
       tags:
       - agents
+  /api/v1/agents/accounts/limit-prompts:
+    get:
+      operationId: listUsageLimitPrompts
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageLimitPromptsResponse'
+          description: OK
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the switch-or-wait questions for sessions stopped on an account's
+        usage limit
+      tags:
+      - agents
+  /api/v1/agents/accounts/limit-prompts/{promptId}/switch:
+    post:
+      operationId: switchUsageLimitPrompt
+      parameters:
+      - description: Usage-limit prompt identifier.
+        in: path
+        name: promptId
+        required: true
+        schema:
+          description: Usage-limit prompt identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SwitchUsageLimitPromptRequest'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwitchUsageLimitPromptResponse'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Move the sessions stopped on a limit to another account and continue
+        them
+      tags:
+      - agents
+  /api/v1/agents/accounts/limit-prompts/{promptId}/wait:
+    post:
+      operationId: waitUsageLimitPrompt
+      parameters:
+      - description: Usage-limit prompt identifier.
+        in: path
+        name: promptId
+        required: true
+        schema:
+          description: Usage-limit prompt identifier.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaitUsageLimitPromptResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Wait for the limit to reset instead of switching accounts
+      tags:
+      - agents
   /api/v1/agents/accounts/login:
     post:
       operationId: startAgentAccountLogin
@@ -24612,6 +24723,31 @@ components:
       - workers
       - movedWorkers
       type: object
+    SwitchUsageLimitPromptRequest:
+      properties:
+        accountId:
+          minLength: 1
+          type: string
+      required:
+      - accountId
+      type: object
+    SwitchUsageLimitPromptResponse:
+      properties:
+        failed:
+          items:
+            $ref: '#/components/schemas/UsageLimitPromptFailure'
+          type: array
+        moved:
+          items:
+            type: string
+          type: array
+        ok:
+          type: boolean
+      required:
+      - ok
+      - moved
+      - failed
+      type: object
     SyncArtifactVersionsRequest:
       properties:
         path:
@@ -25228,6 +25364,117 @@ components:
       - at
       - usedPercent
       type: object
+    UsageLimitPrompt:
+      properties:
+        accountEmail:
+          type: string
+        accountId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        options:
+          items:
+            $ref: '#/components/schemas/UsageLimitPromptOption'
+          type: array
+        provider:
+          type: string
+        resetsAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        sessions:
+          items:
+            $ref: '#/components/schemas/UsageLimitPromptSession'
+          type: array
+        windowLabel:
+          type: string
+      required:
+      - id
+      - provider
+      - accountId
+      - createdAt
+      - sessions
+      - options
+      type: object
+    UsageLimitPromptFailure:
+      properties:
+        reason:
+          type: string
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - reason
+      type: object
+    UsageLimitPromptOption:
+      properties:
+        accountId:
+          type: string
+        device:
+          type: boolean
+        email:
+          type: string
+        fiveHourResetsAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        fiveHourUsedPercent:
+          maximum: 100
+          minimum: 0
+          type:
+          - "null"
+          - number
+        full:
+          type: boolean
+        plan:
+          type: string
+        weeklyResetsAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        weeklyUsedPercent:
+          maximum: 100
+          minimum: 0
+          type:
+          - "null"
+          - number
+      required:
+      - accountId
+      - device
+      - full
+      type: object
+    UsageLimitPromptSession:
+      properties:
+        displayName:
+          type: string
+        kind:
+          enum:
+          - worker
+          - orchestrator
+          type: string
+        projectId:
+          type: string
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - kind
+      type: object
+    UsageLimitPromptsResponse:
+      properties:
+        prompts:
+          items:
+            $ref: '#/components/schemas/UsageLimitPrompt'
+          type: array
+      required:
+      - prompts
+      type: object
     UsageLimitSpan:
       properties:
         durationMinutes:
@@ -25515,6 +25762,13 @@ components:
           type: string
       required:
       - status
+      type: object
+    WaitUsageLimitPromptResponse:
+      properties:
+        ok:
+          type: boolean
+      required:
+      - ok
       type: object
     WorkspaceBranchResponse:
       properties:
