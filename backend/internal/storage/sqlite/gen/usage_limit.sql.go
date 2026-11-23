@@ -42,6 +42,34 @@ func (q *Queries) CountRunningUsageLimitResumes(ctx context.Context) (int64, err
 	return count, err
 }
 
+const decideUsageLimitPrompt = `-- name: DecideUsageLimitPrompt :execrows
+UPDATE usage_limit_prompts
+SET state = ?1, target_account_id = ?2, decided_at = ?3
+WHERE id = ?4 AND state = 'open'
+`
+
+type DecideUsageLimitPromptParams struct {
+	State           string
+	TargetAccountID string
+	DecidedAt       sql.NullTime
+	ID              string
+}
+
+// Claims an open prompt for an answer; it changes nothing once answered, so a
+// double click or a second window cannot answer one prompt twice.
+func (q *Queries) DecideUsageLimitPrompt(ctx context.Context, arg DecideUsageLimitPromptParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, decideUsageLimitPrompt,
+		arg.State,
+		arg.TargetAccountID,
+		arg.DecidedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deferUsageLimitStop = `-- name: DeferUsageLimitStop :exec
 UPDATE usage_limit_stops SET attempts = attempts + 1, retry_at = ?
 WHERE turn_id = ? AND resume_state = 'pending'
@@ -55,6 +83,62 @@ type DeferUsageLimitStopParams struct {
 func (q *Queries) DeferUsageLimitStop(ctx context.Context, arg DeferUsageLimitStopParams) error {
 	_, err := q.db.ExecContext(ctx, deferUsageLimitStop, arg.RetryAt, arg.TurnID)
 	return err
+}
+
+const getUsageLimitPrompt = `-- name: GetUsageLimitPrompt :one
+SELECT id, window_key, account_key, provider, window_label, resets_at, state, target_account_id, created_at, decided_at FROM usage_limit_prompts WHERE id = ?
+`
+
+func (q *Queries) GetUsageLimitPrompt(ctx context.Context, id string) (UsageLimitPrompt, error) {
+	row := q.db.QueryRowContext(ctx, getUsageLimitPrompt, id)
+	var i UsageLimitPrompt
+	err := row.Scan(
+		&i.ID,
+		&i.WindowKey,
+		&i.AccountKey,
+		&i.Provider,
+		&i.WindowLabel,
+		&i.ResetsAt,
+		&i.State,
+		&i.TargetAccountID,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
+const insertUsageLimitPrompt = `-- name: InsertUsageLimitPrompt :execrows
+INSERT INTO usage_limit_prompts (id, window_key, account_key, provider, window_label, resets_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (window_key) DO NOTHING
+`
+
+type InsertUsageLimitPromptParams struct {
+	ID          string
+	WindowKey   string
+	AccountKey  string
+	Provider    string
+	WindowLabel string
+	ResetsAt    sql.NullTime
+	CreatedAt   time.Time
+}
+
+// The owner prompt of one limit event (an account's limit window). The sessions
+// it covers are the window's stop rows.
+func (q *Queries) InsertUsageLimitPrompt(ctx context.Context, arg InsertUsageLimitPromptParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertUsageLimitPrompt,
+		arg.ID,
+		arg.WindowKey,
+		arg.AccountKey,
+		arg.Provider,
+		arg.WindowLabel,
+		arg.ResetsAt,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const insertUsageLimitStop = `-- name: InsertUsageLimitStop :execrows
@@ -293,6 +377,44 @@ func (q *Queries) ListLimitStopCandidates(ctx context.Context, completedSince sq
 	return items, nil
 }
 
+const listOpenUsageLimitPrompts = `-- name: ListOpenUsageLimitPrompts :many
+SELECT id, window_key, account_key, provider, window_label, resets_at, state, target_account_id, created_at, decided_at FROM usage_limit_prompts WHERE state = 'open' ORDER BY created_at, id
+`
+
+func (q *Queries) ListOpenUsageLimitPrompts(ctx context.Context) ([]UsageLimitPrompt, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenUsageLimitPrompts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageLimitPrompt{}
+	for rows.Next() {
+		var i UsageLimitPrompt
+		if err := rows.Scan(
+			&i.ID,
+			&i.WindowKey,
+			&i.AccountKey,
+			&i.Provider,
+			&i.WindowLabel,
+			&i.ResetsAt,
+			&i.State,
+			&i.TargetAccountID,
+			&i.CreatedAt,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingUsageLimitStops = `-- name: ListPendingUsageLimitStops :many
 SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id FROM usage_limit_stops
 WHERE resume_state = 'pending'
@@ -388,6 +510,56 @@ func (q *Queries) ListUnreportedUsageLimitStops(ctx context.Context) ([]UsageLim
 	return items, nil
 }
 
+const listUsageLimitPromptStops = `-- name: ListUsageLimitPromptStops :many
+SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id FROM usage_limit_stops
+WHERE window_key = ?
+  AND resume_state != 'resumed'
+  AND NOT (resume_state = 'skipped' AND skip_reason IN ('stopped', 'superseded', 'expired'))
+ORDER BY detected_at, turn_id
+`
+
+// The stops of one limit window that are still waiting on the owner or the
+// reset: not continued yet, and not closed because the session was stopped, moved
+// on or too old.
+func (q *Queries) ListUsageLimitPromptStops(ctx context.Context, windowKey string) ([]UsageLimitStop, error) {
+	rows, err := q.db.QueryContext(ctx, listUsageLimitPromptStops, windowKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageLimitStop{}
+	for rows.Next() {
+		var i UsageLimitStop
+		if err := rows.Scan(
+			&i.TurnID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.AccountKey,
+			&i.WindowKey,
+			&i.WindowLabel,
+			&i.ResetsAt,
+			&i.DetectedAt,
+			&i.ReportedAt,
+			&i.ResumeState,
+			&i.SkipReason,
+			&i.Attempts,
+			&i.RetryAt,
+			&i.ResumedAt,
+			&i.ResumeTurnID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markUsageLimitStopReported = `-- name: MarkUsageLimitStopReported :exec
 UPDATE usage_limit_stops SET reported_at = ? WHERE turn_id = ? AND reported_at IS NULL
 `
@@ -436,6 +608,20 @@ WHERE resume_state = 'skipped' AND skip_reason = 'disabled'
 
 func (q *Queries) ReopenDisabledUsageLimitStops(ctx context.Context) (int64, error) {
 	result, err := q.db.ExecContext(ctx, reopenDisabledUsageLimitStops)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const reopenUsageLimitPrompt = `-- name: ReopenUsageLimitPrompt :execrows
+UPDATE usage_limit_prompts SET state = 'open', target_account_id = '', decided_at = NULL
+WHERE id = ? AND state = 'switched'
+`
+
+// Puts a claimed prompt back when its answer moved nothing.
+func (q *Queries) ReopenUsageLimitPrompt(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reopenUsageLimitPrompt, id)
 	if err != nil {
 		return 0, err
 	}

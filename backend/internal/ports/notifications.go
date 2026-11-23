@@ -40,6 +40,9 @@ type NotificationIntent struct {
 	UsageLimitResetsAt   time.Time
 	UsageLimitProvider   string
 	UsageLimitAutoResume bool
+	// UsageLimitSwitchPrompt is set when another signed-in account could take the
+	// stopped sessions, so the notification points at the switch-or-wait prompt.
+	UsageLimitSwitchPrompt bool
 }
 
 // NotificationResolution is the lifecycle-to-notification-producer contract for

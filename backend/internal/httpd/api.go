@@ -31,7 +31,9 @@ type APIDeps struct {
 	Agents        controllers.AgentCatalog
 	CodexAccounts controllers.CodexAccountService
 	AgentAccounts controllers.AgentAccountService
-	Projects      projectsvc.Manager
+	// UsageLimitPrompts is the switch-or-wait question for limit-stopped sessions.
+	UsageLimitPrompts controllers.UsageLimitPromptService
+	Projects          projectsvc.Manager
 	// ProjectPermissionRules lists and revokes a project's remembered "Always
 	// allow" rules. Nil answers 501.
 	ProjectPermissionRules controllers.ProjectPermissionRules
@@ -488,7 +490,7 @@ func memoryPressure(svc controllers.SessionMemoryService) controllers.MemoryPres
 // newAgentAccountsController moves sessions through the session service when
 // it can, so a move maps errors like every other session command.
 func newAgentAccountsController(deps APIDeps) *controllers.AgentAccountsController {
-	c := &controllers.AgentAccountsController{Svc: deps.AgentAccounts}
+	c := &controllers.AgentAccountsController{Svc: deps.AgentAccounts, Prompts: deps.UsageLimitPrompts}
 	if mover, ok := deps.Sessions.(controllers.AgentAccountSessionMover); ok {
 		c.Sessions = mover
 	}
