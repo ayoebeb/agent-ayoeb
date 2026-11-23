@@ -28,13 +28,11 @@ type Verdict struct {
 	Merge bool
 }
 
-// MergeTarget is one pull request a `gh pr merge` names: the reference (a
-// number, a URL or a branch; empty means the current branch's pull request) and
-// the repository it is in when `-R`/`--repo` says so (empty means the session's
-// own). A review of one repository's pull request never vouches for another's.
+// MergeTarget is the one pull request a canonical `gh pr merge` names: its
+// number or its full URL. Only that exact shape is ever allowed to merge (see
+// canonicalMerge), so there is no repository option to carry.
 type MergeTarget struct {
-	Ref  string
-	Repo string
+	Ref string
 }
 
 // Action is one permission request reduced to what the policy reads.
@@ -157,7 +155,9 @@ func Evaluate(a Action) Verdict {
 		if strings.TrimSpace(a.Command) == "" {
 			return Verdict{Reason: "The request runs a command AO could not read."}
 		}
-		return evaluateCommandIn(a.Command, a.Workspace, a.Cwd)
+		// The parser judges the command, then deny-by-default decides whether a
+		// delete or a merge is simple enough to allow at all.
+		return gateDestructive(a, evaluateCommandIn(a.Command, a.Workspace, a.Cwd))
 	case isMCPTool(a.Tool):
 		if limit, ok := classifyMCPTool(a.Tool); ok {
 			return deny(limit, "The tool "+a.Tool+" would "+limit.Description()+".")
@@ -1025,22 +1025,14 @@ var mergeFlagsWithValue = map[string]bool{
 	"-A": true, "--author-email": true, "--match-head-commit": true, "-R": true, "--repo": true,
 }
 
-// mergeTarget reads the pull request and the repository out of the arguments of
-// `gh pr merge`.
+// mergeTarget reads the pull request out of the arguments of `gh pr merge`. It
+// only feeds the parser's own view; whether a merge may go ahead is decided by
+// canonicalMerge.
 func mergeTarget(args []string) MergeTarget {
 	var t MergeTarget
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
-		case a == "-R" || a == "--repo":
-			if i+1 < len(args) {
-				t.Repo = args[i+1]
-				i++
-			}
-		case strings.HasPrefix(a, "--repo="):
-			t.Repo = strings.TrimPrefix(a, "--repo=")
-		case strings.HasPrefix(a, "-R") && len(a) > 2 && !strings.HasPrefix(a, "--"):
-			t.Repo = strings.TrimPrefix(strings.TrimPrefix(a, "-R"), "=")
 		case mergeFlagsWithValue[a]:
 			i++
 		case strings.HasPrefix(a, "-"):

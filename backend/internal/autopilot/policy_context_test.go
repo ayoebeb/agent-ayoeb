@@ -106,17 +106,22 @@ func TestEvaluateFollowsDirectoryChangesBeforeADeletion(t *testing.T) {
 			t.Errorf("Evaluate(%q) = allow %v limit %q (%s), want a data_delete refusal", cmd, v.Allow, v.Limit, v.Reason)
 		}
 	}
-	allowed := []string{
+	// Deleting after any cd is parked, even when the parser can prove where it
+	// lands: a delete is only ever allowed as one plain command (see canonicalDelete).
+	parked := []string{
 		"cd web && rm -rf dist",
 		"cd " + testWorkspace + "/web && rm -rf node_modules",
-		"cd /tmp/x && go test ./...",
 		"cd /tmp/x && cd " + testWorkspace + " && rm -rf dist",
 		"cd web && cd .. && rm -rf dist",
 	}
-	for _, cmd := range allowed {
-		if v := Evaluate(bash(cmd)); !v.Allow {
-			t.Errorf("Evaluate(%q) denied (%s: %s), want allow", cmd, v.Limit, v.Reason)
+	for _, cmd := range parked {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Limit != domain.HardLimitDataDelete {
+			t.Errorf("Evaluate(%q) = allow %v limit %q, want it parked as data_delete", cmd, v.Allow, v.Limit)
 		}
+	}
+	// A directory change on its own is ordinary work.
+	if v := Evaluate(bash("cd /tmp/x && go test ./...")); !v.Allow {
+		t.Errorf("a cd with no delete was denied: %+v", v)
 	}
 	// The provider's own cwd counts, nested shells included.
 	in := Action{Tool: "Bash", Kind: "execute", Command: `sh -c "rm -rf data"`, Workspace: testWorkspace, Cwd: "/tmp/other-project"}
@@ -125,44 +130,24 @@ func TestEvaluateFollowsDirectoryChangesBeforeADeletion(t *testing.T) {
 	}
 }
 
-// Every merge of a compound request is kept, so the service can judge each one
-// and an approved later pull request never authorizes an earlier one.
-func TestEvaluateKeepsEveryMergeOfACompoundRequest(t *testing.T) {
-	cases := []struct {
-		cmd  string
-		want []string
-	}{
-		{"gh pr merge 12 --squash && gh pr merge 13 --squash", []string{"12", "13"}},
-		{"gh pr merge 12; gh pr merge 13", []string{"12", "13"}},
-		{`bash -c "gh pr merge 12 && gh pr merge 13"`, []string{"12", "13"}},
-		{`gh pr merge 12 && bash -c "gh pr merge 13"`, []string{"13", "12"}},
-		{"gh pr merge 12 && echo $(gh pr merge 13)", []string{"12", "13"}},
-		{"gh pr merge && gh pr merge 13", []string{"", "13"}},
-	}
-	for _, c := range cases {
-		v := Evaluate(bash(c.cmd))
-		if !v.Merge || len(v.MergeTargets) != len(c.want) {
-			t.Errorf("Evaluate(%q) = %+v, want merges %q", c.cmd, v, c.want)
-			continue
+// A merge is allowed only as exactly one plain `gh pr merge`; any compound
+// request that holds a merge is parked, so no later merge can vouch for an
+// earlier one and none can hide in a nested script.
+func TestEvaluateParksEveryCompoundMerge(t *testing.T) {
+	for _, cmd := range []string{
+		"gh pr merge 12 --squash && gh pr merge 13 --squash",
+		"gh pr merge 12; gh pr merge 13",
+		`bash -c "gh pr merge 12 && gh pr merge 13"`,
+		`gh pr merge 12 && bash -c "gh pr merge 13"`,
+		"gh pr merge 12 && echo $(gh pr merge 13)",
+		"gh pr merge && gh pr merge 13",
+		"gh pr merge 12 && git push origin main",
+		"gh pr merge 12 || true",
+		"gh pr merge 12 | cat",
+	} {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Merge || v.Limit != domain.HardLimitMainPush {
+			t.Errorf("Evaluate(%q) = %+v, want it parked as main_push", cmd, v)
 		}
-		got := map[string]int{}
-		var refs []string
-		for _, target := range v.MergeTargets {
-			got[target.Ref]++
-			refs = append(refs, target.Ref)
-		}
-		for _, ref := range c.want {
-			got[ref]--
-		}
-		for ref, n := range got {
-			if n != 0 {
-				t.Errorf("Evaluate(%q) merges = %q, want %q (ref %q off by %d)", c.cmd, refs, c.want, ref, n)
-			}
-		}
-	}
-	// A refused step still wins over any number of merges.
-	if v := Evaluate(bash("gh pr merge 12 && git push origin main")); v.Allow || v.Merge || v.Limit != domain.HardLimitMainPush {
-		t.Errorf("merge then push to main = %+v", v)
 	}
 }
 
@@ -189,7 +174,9 @@ func TestEvaluateKeepsSubstitutionsAndSubshellsInTheirOwnDirectory(t *testing.T)
 			t.Errorf("Evaluate(%q) = allow %v limit %q (%s), want a data_delete refusal", cmd, v.Allow, v.Limit, v.Reason)
 		}
 	}
-	allowed := []string{
+	// These stay inside the workspace, but a delete next to a cd, a subshell or a
+	// substitution is parked rather than argued about.
+	parked := []string{
 		"(cd /tmp/x && true); rm -rf dist",
 		"(cd /tmp/x); rm -rf dist",
 		"echo $(cd /tmp/x && pwd); rm -rf dist",
@@ -198,32 +185,14 @@ func TestEvaluateKeepsSubstitutionsAndSubshellsInTheirOwnDirectory(t *testing.T)
 		"echo $(git rev-parse HEAD) && rm -rf dist",
 		"cd /tmp/x; (cd " + testWorkspace + " && rm -rf dist)",
 	}
-	for _, cmd := range allowed {
-		if v := Evaluate(bash(cmd)); !v.Allow {
-			t.Errorf("Evaluate(%q) denied (%s: %s), want allow", cmd, v.Limit, v.Reason)
+	for _, cmd := range parked {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Limit != domain.HardLimitDataDelete {
+			t.Errorf("Evaluate(%q) = allow %v limit %q, want it parked as data_delete", cmd, v.Allow, v.Limit)
 		}
 	}
-}
-
-// A merge target keeps the repository it names, so a review of one repository's
-// pull request is never read as a review of another's.
-func TestEvaluateKeepsTheRepositoryOfAMergeTarget(t *testing.T) {
-	cases := []struct {
-		cmd  string
-		want MergeTarget
-	}{
-		{"gh pr merge 12 --repo owner/repo-b --squash", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
-		{"gh pr merge -R owner/repo-b 12", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
-		{"gh pr merge 12 -R owner/repo-b", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
-		{"gh pr merge --repo=owner/repo-b 12", MergeTarget{Ref: "12", Repo: "owner/repo-b"}},
-		{"gh pr merge --body fixes 12", MergeTarget{Ref: "12"}},
-		{"gh pr merge -t 'Title' -b 'Body' 12 --squash", MergeTarget{Ref: "12"}},
-		{"gh pr merge --repo github.com/owner/repo-b", MergeTarget{Repo: "github.com/owner/repo-b"}},
-	}
-	for _, c := range cases {
-		v := Evaluate(bash(c.cmd))
-		if !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0] != c.want {
-			t.Errorf("Evaluate(%q) = %+v, want one merge of %+v", c.cmd, v.MergeTargets, c.want)
+	for _, cmd := range []string{"(cd /tmp/x && true)", "echo $(cd /tmp/x && pwd)", "echo $(git rev-parse HEAD) && go test ./..."} {
+		if v := Evaluate(bash(cmd)); !v.Allow {
+			t.Errorf("Evaluate(%q) denied (%s: %s), want allow: it deletes nothing", cmd, v.Limit, v.Reason)
 		}
 	}
 }

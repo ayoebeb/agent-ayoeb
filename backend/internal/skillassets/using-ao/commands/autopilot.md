@@ -97,12 +97,26 @@ replacement with `ao autopilot decide`, and carry on.
 The permission policy enforces the same list for the Chat sessions it answers:
 it allows anything inside the workspace (edits, tests, builds, git on your
 branch, `gh pr create`, pushing `ao/*` branches), and denies a limit's request
-and parks it for you. It reads Claude and Codex requests alike, follows `cd` and the
-provider's working directory before it judges a relative delete, and refuses a
-request whose effect it cannot determine. It decides `gh pr merge` against AO's
-records: allowed only when an AO review approved the exact head and checks are
-green, for **every** merge in the command, which is the rule you already follow.
-Autopilot does not loosen it.
+and parks it for you. It reads Claude and Codex requests alike and refuses a
+request whose effect it cannot determine.
+
+A delete or a merge is **denied by default**: Autopilot allows one only in a form
+it can prove, and parks every other one for the human.
+
+- **Delete:** one plain `rm`, `rmdir`, `del`, `erase`, `rd` or `Remove-Item`, with
+  only ordinary flags such as `-rf`, and literal targets strictly inside your
+  workspace. No `cd`, `pushd`, `Set-Location`, `&&`, `||`, `;`, pipe, subshell,
+  substitution, variable, glob, environment assignment, `sudo` or wrapper. `find
+  -delete`, `git clean`, `xargs rm` and a delete inside `bash -c` are parked. Run
+  the delete as its own command.
+- **Merge:** exactly `gh pr merge <number or pull request URL>` with only
+  `--squash`, `--merge`, `--rebase` or `--match-head-commit <sha>`. No global flag
+  before `pr`, no `-R`/`--repo`, no environment assignment such as `GH_REPO`, no
+  chaining. AO then merges only if an AO review approved the exact head and
+  checks are green. When more than one repository is tracked, use the full pull
+  request URL: a bare number is refused.
+
+Autopilot does not loosen the merge rule you already follow.
 
 ## What stops a run
 

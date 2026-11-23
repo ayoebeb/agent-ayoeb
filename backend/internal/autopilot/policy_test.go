@@ -137,7 +137,7 @@ func TestEvaluateLeavesAMergeToThePRFacts(t *testing.T) {
 	if v.Allow || !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "42" {
 		t.Fatalf("merge verdict = %+v, want a merge request for PR 42", v)
 	}
-	v = Evaluate(bash("gh pr merge https://github.com/o/r/pull/9 --auto"))
+	v = Evaluate(bash("gh pr merge https://github.com/o/r/pull/9 --squash"))
 	if !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "https://github.com/o/r/pull/9" {
 		t.Fatalf("merge by URL = %+v", v)
 	}

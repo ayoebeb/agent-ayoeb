@@ -150,12 +150,12 @@ func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, req
 		return Verdict{Limit: domain.HardLimitMainPush, Reason: reason}
 	}
 	var (
-		match   *domain.PRFacts
-		owner   domain.SessionRecord
-		open    []domain.PRFacts
-		ref     = target.Ref
-		repos   = map[string]bool{}
-		matches int
+		match *domain.PRFacts
+		owner domain.SessionRecord
+		open  []domain.PRFacts
+		ref   = target.Ref
+		// repos holds every repository the run tracks a pull request in.
+		repos = map[string]bool{}
 	)
 	for _, o := range owners {
 		facts, err := s.store.ListPRFactsForSession(ctx, o.ID)
@@ -164,12 +164,11 @@ func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, req
 		}
 		for i := range facts {
 			f := facts[i]
+			repos[factRepo(f)] = true
 			if ref != "" && prMatches(f, target) {
 				match, owner = &facts[i], o
-				matches++
-				repos[factRepo(f)] = true
 			}
-			if ref == "" && o.ID == requester.ID && !f.Merged && !f.Closed && repoMatches(f, target.Repo) {
+			if ref == "" && o.ID == requester.ID && !f.Merged && !f.Closed {
 				open = append(open, f)
 			}
 		}
@@ -177,8 +176,11 @@ func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, req
 	if ref == "" && len(open) == 1 {
 		match, owner = &open[0], requester
 	}
-	if len(repos) > 1 {
-		return refusal("The merge names a pull request number that exists in more than one repository AO tracks; name the repository with --repo.")
+	// A bare number means "in the repository this directory belongs to", which AO
+	// cannot see. It is only safe when the run tracks pull requests in one
+	// repository; otherwise the merge must name the pull request's full URL.
+	if ref != "" && !isPRURL(ref) && len(repos) > 1 {
+		return refusal("The merge names a pull request by number, but this run tracks pull requests in more than one repository; merge it by its full URL.")
 	}
 	if match == nil {
 		return refusal("The merge does not match a pull request AO tracks for this run, so AO cannot check its review and checks.")
@@ -199,57 +201,36 @@ func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, req
 	return Verdict{Allow: true, Reason: "The AO review approved the exact head and checks are green."}
 }
 
-// factRepo is the repository ("owner/name", lower case) a pull request is in,
-// read from its URL; empty when the URL does not say.
+// factRepo is the host and repository ("github.com/owner/name", lower case) a
+// pull request is in, read from its URL; empty when the URL does not say. The
+// host is part of the identity: github.com/o/r and ghe.example.com/o/r are two
+// repositories.
 func factRepo(f domain.PRFacts) string {
-	return repoName(f.URL)
-}
-
-// repoName reduces a repository reference (owner/name, host/owner/name, a clone
-// or pull request URL) to "owner/name" in lower case; "" when it has no owner.
-func repoName(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
+	u, err := url.Parse(strings.TrimSpace(f.URL))
+	if err != nil || u.Host == "" {
 		return ""
 	}
-	if u, err := url.Parse(ref); err == nil && u.Host != "" {
-		ref = u.Path
-	}
-	ref = strings.TrimSuffix(strings.Trim(ref, "/"), ".git")
-	parts := strings.Split(ref, "/")
-	switch {
-	case len(parts) >= 4 && (parts[2] == "pull" || parts[2] == "pulls"):
-		parts = parts[:2]
-	case len(parts) == 3 && strings.Contains(parts[0], "."):
-		parts = parts[1:]
-	}
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 4 || parts[2] != "pull" || parts[0] == "" || parts[1] == "" {
 		return ""
 	}
-	return strings.ToLower(parts[0] + "/" + parts[1])
+	return strings.ToLower(u.Host + "/" + parts[0] + "/" + parts[1])
 }
 
-// repoMatches reports whether a pull request is in the repository the merge
-// names; a merge that names none means the session's own, which every tracked
-// pull request is in unless the merge says otherwise.
-func repoMatches(f domain.PRFacts, repo string) bool {
-	repo = repoName(repo)
-	return repo == "" || factRepo(f) == repo
+// isPRURL reports whether a merge reference is a pull request URL.
+func isPRURL(ref string) bool {
+	u, err := url.Parse(strings.TrimSpace(ref))
+	return err == nil && u.Host != ""
 }
 
-// prMatches reports whether a merge target (number, URL or branch, in a
-// repository) names the PR. A number or branch only matches inside the
-// repository the merge names, and a URL names its own repository.
+// prMatches reports whether a merge reference names the PR. A URL must be the
+// tracked pull request's own URL, host and repository included; a bare number
+// only matches by number (mergeVerdict first checks that the number cannot mean
+// another repository).
 func prMatches(f domain.PRFacts, t MergeTarget) bool {
 	ref := strings.TrimSpace(t.Ref)
-	if u, err := url.Parse(ref); err == nil && u.Host != "" {
-		if strings.TrimRight(f.URL, "/") != strings.TrimRight(ref, "/") {
-			return false
-		}
-		return t.Repo == "" || repoMatches(f, t.Repo)
-	}
-	if !repoMatches(f, t.Repo) {
-		return false
+	if isPRURL(ref) {
+		return strings.EqualFold(strings.TrimRight(f.URL, "/"), strings.TrimRight(ref, "/"))
 	}
 	if n, err := strconv.Atoi(strings.TrimPrefix(ref, "#")); err == nil {
 		return f.Number == n
