@@ -17,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentaccounts"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/usagelimit"
 )
 
 // TestLANAccountRoutesAllowlist pins which /api/v1/agents/accounts routes the
@@ -32,7 +33,22 @@ func TestLANAccountRoutesAllowlist(t *testing.T) {
 		{http.MethodGet, base + "/", false},
 		{http.MethodGet, base + "/sessions/orch-1", false},
 		{http.MethodPut, base + "/sessions/orch-1", false},
+		{http.MethodGet, base + "/limit-prompts", false},
+		{http.MethodGet, base + "/limit-prompts/", false},
+		{http.MethodPost, base + "/limit-prompts/p1/switch", false},
+		{http.MethodPost, base + "/limit-prompts/p1/wait", false},
 
+		{http.MethodPost, base + "/limit-prompts", true},
+		{http.MethodPut, base + "/limit-prompts", true},
+		{http.MethodDelete, base + "/limit-prompts", true},
+		{http.MethodGet, base + "/limit-prompts/p1", true},
+		{http.MethodGet, base + "/limit-prompts/p1/switch", true},
+		{http.MethodPut, base + "/limit-prompts/p1/wait", true},
+		{http.MethodDelete, base + "/limit-prompts/p1/wait", true},
+		{http.MethodPost, base + "/limit-prompts//wait", true},
+		{http.MethodPost, base + "/limit-prompts/../wait", true},
+		{http.MethodPost, base + "/limit-prompts/p1/other", true},
+		{http.MethodPost, base + "/limit-prompts/p1/wait/x", true},
 		{http.MethodPost, base, true},
 		{http.MethodPut, base, true},
 		{http.MethodDelete, base, true},
@@ -44,9 +60,6 @@ func TestLANAccountRoutesAllowlist(t *testing.T) {
 		{http.MethodGet, base + "/sessions/..", true},
 		{http.MethodPut, base + "/sessions/a/default", true},
 		{http.MethodGet, base + "/usage", true},
-		{http.MethodGet, base + "/limit-prompts", true},
-		{http.MethodPost, base + "/limit-prompts/p1/switch", true},
-		{http.MethodPost, base + "/limit-prompts/p1/wait", true},
 		{http.MethodPost, base + "/login", true},
 		{http.MethodPost, base + "/login/op-1/verify", true},
 		{http.MethodPost, base + "/login/op-1/cancel", true},
@@ -92,9 +105,35 @@ func (s *remoteSessions) SwitchAccount(_ context.Context, id domain.SessionID, _
 	return sessionsvc.AccountSwitchResult{Transition: &domain.SessionInterfaceTransition{ID: "t1", SessionID: id}}, nil
 }
 
+// remotePrompts counts how often a usage-limit prompt route reaches the service.
+type remotePrompts struct{ calls int }
+
+func (p *remotePrompts) ListPrompts(context.Context) ([]usagelimit.Prompt, error) {
+	p.calls++
+	five := 12.0
+	return []usagelimit.Prompt{{
+		ID: "p1", Provider: "claude", WindowLabel: "5-hour", AccountID: "acct-1", AccountEmail: "owner.name@example.com",
+		Sessions: []usagelimit.PromptSession{{ID: "orch-1", DisplayName: "Main", Kind: domain.KindOrchestrator, ProjectID: "proj"}},
+		Options:  []usagelimit.PromptOption{{AccountID: "acct-2", Email: "second.owner@example.com", Plan: "max", FiveHourUsedPercent: &five}},
+	}}, nil
+}
+
+func (p *remotePrompts) Switch(context.Context, string, string) (usagelimit.SwitchResult, error) {
+	p.calls++
+	return usagelimit.SwitchResult{Moved: []domain.SessionID{"orch-1"}}, nil
+}
+
+func (p *remotePrompts) Wait(context.Context, string) error {
+	p.calls++
+	return nil
+}
+
 func TestAccountRoutesOnLANAdmitOnlyAPersonsClient(t *testing.T) {
 	key := DeriveCommandRunKey("runtime-token")
 	routes := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/agents/accounts/limit-prompts", ""},
+		{http.MethodPost, "/api/v1/agents/accounts/limit-prompts/p1/switch", `{"accountId":"acct-2"}`},
+		{http.MethodPost, "/api/v1/agents/accounts/limit-prompts/p1/wait", ""},
 		{http.MethodGet, "/api/v1/agents/accounts", ""},
 		{http.MethodGet, "/api/v1/agents/accounts/sessions/orch-1", ""},
 		{http.MethodPut, "/api/v1/agents/accounts/sessions/orch-1", `{"accountId":"acct-2"}`},
@@ -130,13 +169,14 @@ func TestAccountRoutesOnLANAdmitOnlyAPersonsClient(t *testing.T) {
 			for _, route := range routes {
 				svc := &remoteAccountsService{}
 				sessions := &remoteSessions{}
+				prompts := &remotePrompts{}
 				cfg := config.Config{AllowedOrigins: []string{testRendererOrigin}}
-				router := NewRouterWithControl(cfg, nil, nil, APIDeps{AgentAccounts: svc, Sessions: sessions, CommandRunKey: key}, ControlDeps{})
+				router := NewRouterWithControl(cfg, nil, nil, APIDeps{AgentAccounts: svc, Sessions: sessions, UsageLimitPrompts: prompts, CommandRunKey: key}, ControlDeps{})
 				req := httptest.NewRequest(route.method, route.path, strings.NewReader(route.body))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
 				router.ServeHTTP(rec, tc.prepare(req))
-				reached := svc.calls + sessions.moved
+				reached := svc.calls + sessions.moved + prompts.calls
 				if tc.allowed {
 					if rec.Code >= 400 || reached != 1 {
 						t.Fatalf("%s %s = %d reached=%d body=%s, want admitted", route.method, route.path, rec.Code, reached, rec.Body)
@@ -184,6 +224,38 @@ func TestLANAccountListIsSanitized(t *testing.T) {
 	}
 }
 
+// TestLANLimitPromptListIsSanitized: another computer reads the open prompts with
+// masked addresses; a local (loopback) read keeps the full ones.
+func TestLANLimitPromptListIsSanitized(t *testing.T) {
+	router := NewRouterWithControl(config.Config{}, nil, nil, APIDeps{UsageLimitPrompts: &remotePrompts{}, CommandRunKey: "k"}, ControlDeps{})
+	read := func(lan bool) string {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/accounts/limit-prompts", nil)
+		if lan {
+			req = req.WithContext(context.WithValue(requestscope.WithLAN(req.Context()), lanBearerContextKey{}, true))
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("lan=%v status = %d, body = %s", lan, rec.Code, rec.Body)
+		}
+		return rec.Body.String()
+	}
+	body := read(true)
+	for _, secret := range []string{"owner.name", "second.owner"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("LAN prompt list leaks %q: %s", secret, body)
+		}
+	}
+	for _, want := range []string{`"accountEmail":"o***@example.com"`, `"email":"s***@example.com"`, `"id":"p1"`, `"displayName":"Main"`, `"fiveHourUsedPercent":12`, `"plan":"max"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("LAN prompt list lacks %s: %s", want, body)
+		}
+	}
+	if local := read(false); !strings.Contains(local, "owner.name@example.com") {
+		t.Fatalf("local prompt list should keep the full address: %s", local)
+	}
+}
+
 // TestLANListenerServesOnlyTheAllowedAccountRoutes drives the real listener: a
 // paired client reaches the account list and a session's account, and nothing
 // else under /api/v1/agents/accounts.
@@ -204,6 +276,11 @@ func TestLANListenerServesOnlyTheAllowedAccountRoutes(t *testing.T) {
 		{http.MethodGet, "/api/v1/agents/accounts", http.StatusOK},
 		{http.MethodGet, "/api/v1/agents/accounts/sessions/orch-1", http.StatusOK},
 		{http.MethodPut, "/api/v1/agents/accounts/sessions/orch-1", http.StatusOK},
+		{http.MethodGet, "/api/v1/agents/accounts/limit-prompts", http.StatusOK},
+		{http.MethodPost, "/api/v1/agents/accounts/limit-prompts/p1/wait", http.StatusOK},
+		{http.MethodPost, "/api/v1/agents/accounts/limit-prompts/p1/switch", http.StatusOK},
+		{http.MethodGet, "/api/v1/agents/accounts/limit-prompts/p1", http.StatusNotFound},
+		{http.MethodDelete, "/api/v1/agents/accounts/limit-prompts", http.StatusNotFound},
 		{http.MethodPost, "/api/v1/agents/accounts/login", http.StatusNotFound},
 		{http.MethodPost, "/api/v1/agents/accounts/acct-1/default", http.StatusNotFound},
 		{http.MethodPost, "/api/v1/agents/accounts/login/op-1/verify", http.StatusNotFound},

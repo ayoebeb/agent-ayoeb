@@ -1463,6 +1463,7 @@ func reviewLaunchSpec(
 		PRURL:           run.PRURL,
 		TargetSHA:       run.TargetSHA,
 		ReviewQueue:     queue,
+		ReviewIndex:     0,
 	}
 }
 
