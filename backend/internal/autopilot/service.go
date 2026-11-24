@@ -144,11 +144,11 @@ type Deps struct {
 	// ParkDigestEvery batches parked items into one notification per run, sent
 	// once the oldest has waited this long. Zero keeps one notification per item.
 	ParkDigestEvery time.Duration
-	Clock        func() time.Time
-	NewID        func() string
-	Logger       *slog.Logger
-	IdleGrace    time.Duration
-	MinNudgeGap  time.Duration
+	Clock           func() time.Time
+	NewID           func() string
+	Logger          *slog.Logger
+	IdleGrace       time.Duration
+	MinNudgeGap     time.Duration
 	// Background runs work off the caller's goroutine; it defaults to a go
 	// statement that recovers from a panic. Tests run it inline.
 	Background func(func())
