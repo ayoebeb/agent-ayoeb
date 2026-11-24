@@ -111,6 +111,10 @@ it can prove, and parks every other one for the human.
   glob, environment assignment, comma list, or PowerShell syntax (`$ @ ` : ( ) { }`).
   `find -delete`, `git clean`, `xargs rm` and a delete inside `bash -c` or `pwsh -c`
   are parked. Run the delete as its own command, from the workspace.
+  Before it answers, AO also resolves the real path of the target and every parent
+  on disk and scans a directory tree it would remove (up to 20000 entries): a
+  symlink, junction or other reparse point, a path that resolves outside the
+  workspace, or a tree too big to scan parks the delete.
 - **Merge:** only through AO's own guarded command, with nothing else on the line:
 
   ```bash

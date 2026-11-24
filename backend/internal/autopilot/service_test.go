@@ -228,12 +228,18 @@ func newEnv(t *testing.T) *env {
 }
 
 func (e *env) session(kind domain.SessionKind, at time.Time, mode domain.SessionMode) domain.SessionRecord {
+	return e.sessionAt(kind, at, mode, "/ws/"+string(kind))
+}
+
+// sessionAt is session with its workspace on a path the test chooses, for tests
+// that look at a real directory.
+func (e *env) sessionAt(kind domain.SessionKind, at time.Time, mode domain.SessionMode, workspace string) domain.SessionRecord {
 	e.t.Helper()
 	rec, err := e.db.CreateSession(e.ctx, domain.SessionRecord{
 		ProjectID: "mer", Kind: kind, Harness: domain.HarnessClaudeCode, Mode: mode,
 		DisplayName: string(kind) + "-x",
 		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: at},
-		Metadata:    domain.SessionMetadata{Branch: "ao/x", WorkspacePath: "/ws/" + string(kind)},
+		Metadata:    domain.SessionMetadata{Branch: "ao/x", WorkspacePath: workspace},
 		CreatedAt:   at, UpdatedAt: at,
 	})
 	if err != nil {

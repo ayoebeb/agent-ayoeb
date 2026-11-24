@@ -53,6 +53,13 @@ func (s *Service) HandleApproval(ctx context.Context, id domain.SessionID, n App
 		}
 		verdict = merged
 	}
+	if verdict.Allow && len(verdict.DeleteTargets) > 0 {
+		// The text of a path says where it should lead, not where it does: a link
+		// inside the workspace may point outside it.
+		if safe, reason := s.checkDelete(rec.Metadata.WorkspacePath, verdict.DeleteTargets); !safe {
+			verdict = deny(domain.HardLimitDataDelete, reason)
+		}
+	}
 	decision, ok := pickDecision(n.Decisions, verdict.Allow)
 	if !ok {
 		s.log.Warn("autopilot: the provider offered no decision to answer with", "session", id, "request", n.RequestID, "allow", verdict.Allow)

@@ -129,8 +129,10 @@ func gateDestructive(a Action, v Verdict) Verdict {
 		}
 		return deny(domain.HardLimitMainPush, "Autopilot merges only with `ao pr merge <number> --url <pull request URL> --expected-head-sha <sha>`; every other merge, `gh pr merge` included, is parked for you.")
 	case deletes:
-		if canonicalDelete(a) {
-			return allow("A plain delete of literal targets inside the workspace.")
+		if targets, ok := canonicalDeleteTargets(a); ok {
+			v := allow("A plain delete of literal targets inside the workspace.")
+			v.DeleteTargets = targets
+			return v
 		}
 		return deny(domain.HardLimitDataDelete, "AO only lets Autopilot delete with one plain rm, rmdir, del or Remove-Item on literal targets inside the workspace, with no cd, chaining, substitution, variables or PowerShell syntax; any other delete is parked for you.")
 	default:
@@ -159,7 +161,25 @@ var deleteProgramAliases = map[string]string{
 	"ri": "rm", "remove-item": "rm",
 }
 
-// canonicalDelete reports whether the command is one plain delete: a bare
+// absoluteTarget is the lexically cleaned absolute path a target names, relative
+// targets taken from the directory the command runs in (the provider's cwd, else
+// the workspace).
+func absoluteTarget(workspace, cwd, target string) string {
+	dir := normalizePath(strings.TrimSpace(cwd))
+	if dir == "" {
+		dir = normalizePath(workspace)
+	}
+	if !isAbsolute(dir) {
+		dir = path.Join(normalizePath(workspace), dir)
+	}
+	if abs := resolveIn(dir, target); abs != "" {
+		return abs
+	}
+	return normalizePath(target)
+}
+
+// canonicalDeleteTargets reports whether the command is one plain delete and, if
+// so, the absolute paths it deletes. A bare
 // rm/rmdir/del/erase/rd/ri/Remove-Item written as exactly that word, only the
 // flags above (and -Path or -LiteralPath with its value), and at least one
 // literal target that lies strictly inside the workspace. The directory it runs
@@ -167,20 +187,20 @@ var deleteProgramAliases = map[string]string{
 // changes. A command with cd, chaining, a subshell, a substitution, an
 // environment assignment, a glob, PowerShell syntax ($ @ ` : ( ) { } ; | ,) or a
 // directory or extension on the program name is not canonical.
-func canonicalDelete(a Action) bool {
+func canonicalDeleteTargets(a Action) ([]string, bool) {
 	command := strings.TrimSpace(a.Command)
 	if command == "" || plainCommand.MatchString(command) || powershellSyntax.MatchString(command) {
-		return false
+		return nil, false
 	}
 	tokens := tokenize(command)
 	if len(tokens) < 2 || !literalWords(command, tokens, 1) {
-		return false
+		return nil, false
 	}
 	// The program is the bare word: no directory, no extension. A name with
 	// either is normalized (and gated) but never auto-approved, because a file
 	// by that name in the working directory would be run instead of the tool.
 	if strings.ContainsAny(tokens[0], `/\=.`) || deleteProgramAliases[strings.ToLower(tokens[0])] == "" {
-		return false
+		return nil, false
 	}
 	dir := strings.TrimSpace(a.Cwd)
 	if dir == "" {
@@ -188,19 +208,19 @@ func canonicalDelete(a Action) bool {
 	}
 	dir = normalizePath(dir)
 	if dir == "" {
-		return false
+		return nil, false
 	}
 	if !isAbsolute(dir) {
 		dir = path.Join(normalizePath(a.Workspace), dir)
 	}
 	root := normalizePath(a.Workspace)
-	targets := 0
+	var targets []string
 	target := func(tok string) bool {
 		abs := resolveIn(dir, tok)
 		if abs == "" || !insideWorkspace(a.Workspace, abs) || sameDir(abs, root) {
 			return false
 		}
-		targets++
+		targets = append(targets, abs)
 		return true
 	}
 	for i := 1; i < len(tokens); i++ {
@@ -208,20 +228,20 @@ func canonicalDelete(a Action) bool {
 		switch {
 		case deletePathFlags[strings.ToLower(tok)]:
 			if i+1 >= len(tokens) || strings.HasPrefix(tokens[i+1], "-") || !target(tokens[i+1]) {
-				return false
+				return nil, false
 			}
 			i++
 		case strings.HasPrefix(tok, "-") || (len(tok) == 2 && strings.HasPrefix(tok, "/")):
 			if !deleteFlags[strings.ToLower(tok)] {
-				return false
+				return nil, false
 			}
 		default:
 			if !target(tok) {
-				return false
+				return nil, false
 			}
 		}
 	}
-	return targets > 0
+	return targets, len(targets) > 0
 }
 
 // literalWords reports whether the first n words of the command are written

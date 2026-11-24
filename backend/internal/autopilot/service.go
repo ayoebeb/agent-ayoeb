@@ -175,6 +175,9 @@ type Service struct {
 	// judging holds the sessions whose turn end is being judged, so the hook and
 	// the watchdog cannot both send the next message for one turn.
 	judging map[domain.SessionID]bool
+	// checkDelete resolves an allowed delete's targets on the filesystem; tests
+	// that do not touch a disk replace it.
+	checkDelete func(workspace string, targets []string) (bool, string)
 	// delivery fences the messages that tell a session to carry on against Stop:
 	// one lock per session, held while a message goes out and while Stop ends the
 	// run, so no continuation can land after Stop.
@@ -223,7 +226,7 @@ func New(d Deps) *Service {
 		store: d.Store, messenger: d.Messenger, interrupter: d.Interrupter, notifier: d.Notifier,
 		progress: d.Progress, approvals: d.Approvals, usageLimited: d.UsageLimited, verifyTests: d.VerifyTests,
 		clock: d.Clock, newID: d.NewID, log: d.Logger, idleGrace: d.IdleGrace, minNudgeGap: d.MinNudgeGap,
-		background: d.Background, judging: map[domain.SessionID]bool{}, delivery: map[domain.SessionID]*sync.Mutex{},
+		background: d.Background, checkDelete: checkDeleteTargets, judging: map[domain.SessionID]bool{}, delivery: map[domain.SessionID]*sync.Mutex{},
 	}
 	if s.clock == nil {
 		s.clock = func() time.Time { return time.Now().UTC() }

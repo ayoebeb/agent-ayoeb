@@ -25,6 +25,11 @@ type Verdict struct {
 	MergeTargets []MergeTarget
 	// Merge reports that the request is an `ao pr merge`, whatever the rest says.
 	Merge bool
+	// DeleteTargets are the absolute, lexically cleaned paths of an allowed
+	// delete. The text of a path is not enough to know where it leads, so the
+	// service resolves each one on the filesystem (checkDeleteTargets) before it
+	// answers the request.
+	DeleteTargets []string
 }
 
 // MergeTarget is the pull request a canonical `ao pr merge` names: its full URL
@@ -176,7 +181,11 @@ func Evaluate(a Action) Verdict {
 				return deny(domain.HardLimitDataDelete, "The request deletes "+p+", which is outside the workspace.")
 			}
 		}
-		return allow("Deletes only inside the workspace.")
+		v := allow("Deletes only inside the workspace.")
+		for _, p := range a.Paths {
+			v.DeleteTargets = append(v.DeleteTargets, absoluteTarget(a.Workspace, a.Cwd, p))
+		}
+		return v
 	case isWriteTool(a.Tool, a.Kind):
 		if len(a.Paths) == 0 {
 			return Verdict{Reason: "The request changes files without saying which, so AO cannot tell they stay inside the workspace."}
