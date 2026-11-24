@@ -70,7 +70,8 @@ func NewLANManager(handler http.Handler, state *authState, defaultPort int, log 
 // Codex account-management routes under /api/v1/agents/codex/accounts and
 // /api/v1/agents/codex/account-switches, and agent accounts under
 // /api/v1/agents/accounts (the harmless read-only Codex model
-// routes stay reachable so mobile can pick a model). Some routes
+// routes stay reachable so mobile can pick a model; isLANAccountRouteAllowed
+// lists the few account routes a paired desktop may use). Some routes
 // are gated in the shared router by localControlRequest, which trusts the
 // client-supplied Host header. That header is spoofable by any LAN client. The
 // LAN listener is the one thing a caller cannot spoof: it is the physical socket
@@ -99,7 +100,7 @@ var lanControlBlockedPrefixes = []string{
 // no 403/401 that would confirm the path exists.
 func lanControlBlock(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isLANControlBlockedPath(r.URL.Path) || isLANControlBlockedRequest(r.Method, r.URL.Path) {
+		if isLANControlBlocked(r.Method, r.URL.Path) {
 			notFoundJSON(w, r)
 			return
 		}
@@ -135,6 +136,34 @@ func isLANControlBlockedPath(path string) bool {
 	}
 	return false
 }
+
+// isLANAccountRouteAllowed reports the only /api/v1/agents/accounts routes a
+// paired desktop on another computer may reach, so its owner can see and switch
+// the account a session of this computer runs under: the account list, and one
+// session's account (read, and the switch). Sign-in, sign-in verification,
+// default-change, removal, reset credits, usage and the limit prompts stay
+// blocked. The controller additionally admits only a person's client on these
+// routes and sanitizes the list when it is served on the LAN listener.
+func isLANAccountRouteAllowed(method, path string) bool {
+	trimmed := strings.TrimSuffix(path, "/")
+	if trimmed == "/api/v1/agents/accounts" {
+		return method == http.MethodGet
+	}
+	id, ok := strings.CutPrefix(trimmed, "/api/v1/agents/accounts/sessions/")
+	if !ok || id == "" || id == "." || id == ".." || strings.Contains(id, "/") {
+		return false
+	}
+	return method == http.MethodGet || method == http.MethodPut
+}
+
+// isLANControlBlocked reports whether the LAN listener answers 404 for a
+// request of this method and path.
+func isLANControlBlocked(method, path string) bool {
+	return (isLANControlBlockedPath(path) && !isLANAccountRouteAllowed(method, path)) || isLANControlBlockedRequest(method, path)
+}
+
+// IsLANControlBlockedForTest is IsLANControlBlockedPathForTest for a method and path.
+func IsLANControlBlockedForTest(method, path string) bool { return isLANControlBlocked(method, path) }
 
 // IsLANControlBlockedPathForTest exposes the LAN block check to package-external
 // tests so route-level invariants can be asserted without a live listener.

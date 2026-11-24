@@ -2,8 +2,10 @@ import { apiErrorException } from "../lib/api-error-exception";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { components } from "../../api/schema";
+import { clientForSessionHost } from "../lib/host-clients";
 import { apiClient } from "../lib/api-client";
 import type { AgentReadinessSnapshot } from "./useAgentReadinessQuery";
+import { useHostConnection } from "./useHostConnection";
 import { sessionInterfaceTransitionQueryKey } from "./useSessionInterfaceTransition";
 
 export type AgentAccount = components["schemas"]["AgentAccountResponse"];
@@ -14,7 +16,19 @@ export type AgentAccountUsageRow = components["schemas"]["AgentAccountUsageRow"]
 
 export const agentAccountsQueryKey = ["agent-accounts"] as const;
 const usageQueryKey = ["agent-accounts", "usage"] as const;
-const sessionAccountsKey = (sessionId: string) => ["agent-accounts", "session", sessionId] as const;
+// A computer's accounts are its own: the local keys stay as they were and
+// another computer's rows live under their own host segment.
+const hostAccountsKey = (hostId: string | undefined) => hostId ? [...agentAccountsQueryKey, "host", hostId] as const : agentAccountsQueryKey;
+const sessionAccountsKey = (sessionId: string, hostId?: string) => hostId
+	? ["agent-accounts", "host", hostId, "session", sessionId] as const
+	: ["agent-accounts", "session", sessionId] as const;
+
+/** Whether the computer the accounts belong to can be asked: this one always,
+ * another one only while its connection is up. */
+function useAccountsHostReady(hostId: string | undefined): boolean {
+	const connection = useHostConnection(hostId);
+	return !hostId || Boolean(connection.baseUrl);
+}
 
 /** The account a harness signs in with, or null when it has none. */
 export function agentAccountProviderFor(harness: string | undefined): AgentAccountProvider | null {
@@ -34,13 +48,16 @@ function unwrap<T>({ data, error }: { data?: T; error?: unknown }): T {
 	return data as T;
 }
 
-export async function fetchAgentAccounts(refresh = false) {
-	return unwrap(await apiClient.GET("/api/v1/agents/accounts", { params: { query: refresh ? { refresh: true } : {} } }))?.accounts ?? [];
+export async function fetchAgentAccounts(refresh = false, hostId?: string) {
+	return unwrap(await clientForSessionHost(hostId).GET("/api/v1/agents/accounts", { params: { query: refresh ? { refresh: true } : {} } }))?.accounts ?? [];
 }
 
-/** Every account with its limits. The daemon reuses a reading for five minutes. */
-export function useAgentAccounts(enabled = true) {
-	return useQuery({ queryKey: agentAccountsQueryKey, queryFn: () => fetchAgentAccounts(), refetchInterval: 60_000, enabled });
+/** Every account with its limits. The daemon reuses a reading for five minutes.
+ * With a hostId these are another computer's accounts, as that computer shares
+ * them: the email is masked. */
+export function useAgentAccounts(enabled = true, hostId?: string) {
+	const ready = useAccountsHostReady(hostId);
+	return useQuery({ queryKey: hostAccountsKey(hostId), queryFn: () => fetchAgentAccounts(false, hostId), refetchInterval: 60_000, enabled: enabled && ready });
 }
 
 export const agentAccountProviderNames: Record<AgentAccountProvider, string> = { claude: "Claude Code", codex: "Codex" };
@@ -57,9 +74,9 @@ export function agentAccountName(account: Pick<AgentAccount, "email" | "provider
 }
 
 /** Names an account by id in status text, such as "Moved from … to …". */
-export function useAgentAccountLabel(enabled = true) {
+export function useAgentAccountLabel(enabled = true, hostId?: string) {
 	const { t } = useTranslation();
-	const accounts = useAgentAccounts(enabled);
+	const accounts = useAgentAccounts(enabled, hostId);
 	return (id: string | undefined) => {
 		const account = accounts.data?.find((candidate) => candidate.id === id);
 		return account ? agentAccountName(account, t) : t("settings.agentAccounts.removedAccount");
@@ -74,17 +91,18 @@ export function useAgentAccountUsage(days = 30) {
 	});
 }
 
-export function useSessionAgentAccounts(sessionId: string | undefined) {
+export function useSessionAgentAccounts(sessionId: string | undefined, hostId?: string) {
+	const ready = useAccountsHostReady(hostId);
 	return useQuery({
-		queryKey: sessionAccountsKey(sessionId ?? ""),
-		enabled: Boolean(sessionId),
-		queryFn: async () => unwrap(await apiClient.GET("/api/v1/agents/accounts/sessions/{sessionId}", { params: { path: { sessionId: sessionId ?? "" } } })) ?? {},
+		queryKey: sessionAccountsKey(sessionId ?? "", hostId),
+		enabled: Boolean(sessionId) && ready,
+		queryFn: async () => unwrap(await clientForSessionHost(hostId).GET("/api/v1/agents/accounts/sessions/{sessionId}", { params: { path: { sessionId: sessionId ?? "" } } })) ?? {},
 	});
 }
 
-export function useAgentAccountActions() {
+export function useAgentAccountActions(hostId?: string) {
 	const queryClient = useQueryClient();
-	const setAccounts = (accounts: AgentAccount[]) => queryClient.setQueryData(agentAccountsQueryKey, accounts);
+	const setAccounts = (accounts: AgentAccount[]) => queryClient.setQueryData(hostAccountsKey(hostId), accounts);
 	return {
 		refresh: async () => setAccounts(await fetchAgentAccounts(true)),
 		startLogin: async (provider: AgentAccountProvider) =>
@@ -112,19 +130,19 @@ export function useAgentAccountActions() {
 			await queryClient.invalidateQueries({ queryKey: agentAccountsQueryKey });
 			return result.outcome;
 		},
-		/** Starts the durable move; the shared interface-transition status shows its
+		/** Starts the durable move (on the computer the hostId names, when given); the shared interface-transition status shows its
 		 * progress. An orchestrator takes its project's live workers along; the
 		 * result says how many moved. */
 		switchSession: async (sessionId: string, accountId: string, stopTurn = false) => {
-			const result = unwrap(await apiClient.PUT("/api/v1/agents/accounts/sessions/{sessionId}", {
+			const result = unwrap(await clientForSessionHost(hostId).PUT("/api/v1/agents/accounts/sessions/{sessionId}", {
 				params: { path: { sessionId } }, body: { accountId, ...(stopTurn ? { stopTurn: true } : {}) },
 			}));
-			await queryClient.invalidateQueries({ queryKey: sessionInterfaceTransitionQueryKey(sessionId) });
+			await queryClient.invalidateQueries({ queryKey: sessionInterfaceTransitionQueryKey(sessionId, hostId) });
 			for (const worker of result.workers) {
-				if (worker.status === "moving") await queryClient.invalidateQueries({ queryKey: sessionInterfaceTransitionQueryKey(worker.sessionId) });
+				if (worker.status === "moving") await queryClient.invalidateQueries({ queryKey: sessionInterfaceTransitionQueryKey(worker.sessionId, hostId) });
 			}
 			return { transition: result.transition, movedWorkers: result.movedWorkers, workers: result.workers };
 		},
-		refreshSession: (sessionId: string) => queryClient.invalidateQueries({ queryKey: sessionAccountsKey(sessionId) }),
+		refreshSession: (sessionId: string) => queryClient.invalidateQueries({ queryKey: sessionAccountsKey(sessionId, hostId) }),
 	};
 }

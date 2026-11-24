@@ -216,7 +216,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 			Catalog: deps.Agents,
 		},
 		codexAccounts: &controllers.CodexAccountsController{Svc: deps.CodexAccounts},
-		agentAccounts: newAgentAccountsController(deps),
+		agentAccounts: newAgentAccountsController(cfg, deps),
 		projects: &controllers.ProjectsController{
 			Mgr: deps.Projects,
 		},
@@ -502,8 +502,9 @@ func memoryPressure(svc controllers.SessionMemoryService) controllers.MemoryPres
 
 // newAgentAccountsController moves sessions through the session service when
 // it can, so a move maps errors like every other session command.
-func newAgentAccountsController(deps APIDeps) *controllers.AgentAccountsController {
-	c := &controllers.AgentAccountsController{Svc: deps.AgentAccounts, Prompts: deps.UsageLimitPrompts}
+func newAgentAccountsController(cfg config.Config, deps APIDeps) *controllers.AgentAccountsController {
+	c := &controllers.AgentAccountsController{Svc: deps.AgentAccounts, Prompts: deps.UsageLimitPrompts,
+		LANUserClientGate: accountUserClientGate(cfg.AllowedOrigins, deps.CommandRunKey)}
 	if mover, ok := deps.Sessions.(controllers.AgentAccountSessionMover); ok {
 		c.Sessions = mover
 	}
