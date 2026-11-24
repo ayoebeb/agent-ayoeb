@@ -187,7 +187,7 @@ func existingHeadReason(runs []domain.ReviewRun, prURL, targetSHA string) string
 		if run.PRURL != prURL || run.TargetSHA != targetSHA {
 			continue
 		}
-		if run.Status == domain.ReviewRunRunning {
+		if run.Status == domain.ReviewRunRunning || run.Status == domain.ReviewRunPaused {
 			return "review_running"
 		}
 		if run.Status == domain.ReviewRunCancelled {

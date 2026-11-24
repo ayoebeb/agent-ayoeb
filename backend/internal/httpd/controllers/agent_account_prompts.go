@@ -33,7 +33,7 @@ func (c *AgentAccountsController) listLimitPrompts(w http.ResponseWriter, r *htt
 		}
 		for _, s := range p.Sessions {
 			item.Sessions = append(item.Sessions, UsageLimitPromptSession{
-				SessionID: s.ID, DisplayName: s.DisplayName, Kind: string(s.Kind), ProjectID: s.ProjectID,
+				SessionID: s.ID, ReviewID: s.ReviewID, DisplayName: s.DisplayName, Kind: string(s.Kind), ProjectID: s.ProjectID,
 			})
 		}
 		for _, o := range p.Options {

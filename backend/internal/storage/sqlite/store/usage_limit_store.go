@@ -62,6 +62,7 @@ func (s *Store) ListLimitStopCandidates(ctx context.Context, completedSince time
 			StoredResetsAt: timePtr(row.UsageLimitResetsAt), RetryArmed: row.UsageLimitAutoResume != 0,
 			ResumeState: row.ResumeState, SkipReason: row.SkipReason,
 			StopResetsAt: timePtr(row.StopResetsAt), RetryAt: timePtr(row.RetryAt), Attempts: int(row.Attempts),
+			ReviewID: row.ReviewID, ReviewHarness: domain.ReviewerHarness(row.ReviewHarness),
 		})
 	}
 	return out, nil
@@ -75,7 +76,7 @@ func (s *Store) InsertUsageLimitStop(ctx context.Context, stop domain.UsageLimit
 	n, err := s.qw.InsertUsageLimitStop(ctx, gen.InsertUsageLimitStopParams{
 		TurnID: stop.TurnID, SessionID: string(stop.SessionID), ProjectID: string(stop.ProjectID),
 		AccountKey: stop.AccountKey, WindowKey: stop.WindowKey, WindowLabel: stop.WindowLabel,
-		ResetsAt: nullableTime(utcOrZero(stop.ResetsAt)), DetectedAt: stop.DetectedAt.UTC(),
+		ResetsAt: nullableTime(utcOrZero(stop.ResetsAt)), DetectedAt: stop.DetectedAt.UTC(), ReviewID: stop.ReviewID,
 	})
 	if err != nil {
 		return false, fmt.Errorf("insert usage-limit stop %s: %w", stop.TurnID, err)
@@ -96,6 +97,7 @@ func usageLimitStopFromRow(row gen.UsageLimitStop) domain.UsageLimitStop {
 		AccountKey: row.AccountKey, WindowKey: row.WindowKey, WindowLabel: row.WindowLabel,
 		ResetsAt: timePtr(row.ResetsAt), DetectedAt: row.DetectedAt, ReportedAt: timePtr(row.ReportedAt),
 		ResumeState: row.ResumeState, SkipReason: row.SkipReason, Attempts: int(row.Attempts), RetryAt: timePtr(row.RetryAt),
+		ReviewID: row.ReviewID,
 	}
 }
 
@@ -199,10 +201,11 @@ func (s *Store) LastUsageLimitResumeAt(ctx context.Context) (time.Time, bool, er
 	return at.Time, true, nil
 }
 
-// CountRecentUsageLimitResumes is how many times AO continued the session since.
-func (s *Store) CountRecentUsageLimitResumes(ctx context.Context, session domain.SessionID, since time.Time) (int, error) {
+// CountRecentUsageLimitResumes is how many times AO continued the session (or,
+// with reviewID, that reviewer) since.
+func (s *Store) CountRecentUsageLimitResumes(ctx context.Context, session domain.SessionID, reviewID string, since time.Time) (int, error) {
 	n, err := s.qr.CountRecentUsageLimitResumes(ctx, gen.CountRecentUsageLimitResumesParams{
-		SessionID: string(session), ResumedAt: nullableTime(since.UTC()),
+		SessionID: string(session), ReviewID: reviewID, ResumedAt: nullableTime(since.UTC()),
 	})
 	return int(n), err
 }

@@ -1007,6 +1007,7 @@ type UsageLimitStop struct {
 	RetryAt      sql.NullTime
 	ResumedAt    sql.NullTime
 	ResumeTurnID string
+	ReviewID     string
 }
 
 type UsageMessageSummary struct {

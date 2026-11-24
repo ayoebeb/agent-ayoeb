@@ -466,3 +466,144 @@ func triggerWithSource(ctx context.Context, e *Engine, workerID domain.SessionID
 func triggerWithSourceAndMode(ctx context.Context, e *Engine, workerID domain.SessionID, harness domain.ReviewerHarness, config domain.AgentConfig, source domain.ReviewTriggerSource, mode domain.ReviewerInterfaceMode) (TriggerResult, error) {
 	return e.TriggerWithOptions(ctx, workerID, TriggerOptions{Harness: harness, Config: config, Source: source, InterfaceMode: mode})
 }
+
+// `ao review ls` plans per current PR head, so a pass left running on an older
+// commit must not make a rerun answer "already running": the guard reads the
+// same per-head state, and the stale pass is superseded by the new one.
+func TestTriggerRerunIgnoresRunningPassOnAnOlderHead(t *testing.T) {
+	store := &fakeStore{
+		reviews: map[domain.ReviewerHarness]domain.Review{
+			domain.ReviewerClaudeCode: {ID: "rev-claude-code", SessionID: "mer-1", Harness: domain.ReviewerClaudeCode, ReviewerHandleID: "claude-pane"},
+		},
+		runs: []domain.ReviewRun{requestedRun("run-old", domain.ReviewerClaudeCode, domain.ReviewRunRunning, domain.VerdictNone, 1)},
+	}
+	store.runs[0].TargetSHA = "sha0"
+	launcher := &fakeLauncher{alive: true}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	ls, err := eng.List(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(ls.Reviews) != 1 || ls.Reviews[0].Status != ReviewStateNeedsReview {
+		t.Fatalf("ls = %+v, want the current head to need review", ls.Reviews)
+	}
+	res, err := eng.TriggerWithOptions(context.Background(), "mer-1", TriggerOptions{Source: domain.ReviewTriggerAgent, Rerun: true})
+	if err != nil {
+		t.Fatalf("rerun must start although ls says needs_review: %v", err)
+	}
+	if !res.Created || len(res.CreatedRuns) != 1 || res.CreatedRuns[0].TargetSHA != "sha1" {
+		t.Fatalf("result = %+v, want one new pass on the current head", res)
+	}
+	if store.runs[0].Status != domain.ReviewRunFailed {
+		t.Fatalf("stale pass = %q, want superseded", store.runs[0].Status)
+	}
+}
+
+// A cancelled pass frees the slot: ls and the trigger guard agree afterwards.
+func TestTriggerRerunStartsAfterCancel(t *testing.T) {
+	store := &fakeStore{
+		reviews: map[domain.ReviewerHarness]domain.Review{
+			domain.ReviewerClaudeCode: {ID: "rev-claude-code", SessionID: "mer-1", Harness: domain.ReviewerClaudeCode, ReviewerHandleID: "claude-pane"},
+		},
+		runs: []domain.ReviewRun{requestedRun("run-1", domain.ReviewerClaudeCode, domain.ReviewRunRunning, domain.VerdictNone, 1)},
+	}
+	launcher := &fakeLauncher{alive: true}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	if _, err := eng.Cancel(context.Background(), "mer-1"); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	ls, err := eng.List(context.Background(), "mer-1")
+	if err != nil || ls.Reviews[0].Status != ReviewStateNeedsReview {
+		t.Fatalf("ls = %+v err=%v, want needs_review after cancel", ls.Reviews, err)
+	}
+	res, err := eng.TriggerWithOptions(context.Background(), "mer-1", TriggerOptions{Source: domain.ReviewTriggerAgent, Rerun: true})
+	if err != nil || !res.Created {
+		t.Fatalf("rerun after cancel = %+v, %v; want a new pass", res, err)
+	}
+}
+
+func twoReviewerStore() *fakeStore {
+	return &fakeStore{
+		reviews: map[domain.ReviewerHarness]domain.Review{
+			domain.ReviewerClaudeCode: {ID: "rev-claude-code", SessionID: "mer-1", Harness: domain.ReviewerClaudeCode, ReviewerHandleID: "claude-pane"},
+			domain.ReviewerCodex:      {ID: "rev-codex", SessionID: "mer-1", Harness: domain.ReviewerCodex, ReviewerHandleID: "codex-pane"},
+		},
+		runs: []domain.ReviewRun{
+			requestedRun("run-1", domain.ReviewerClaudeCode, domain.ReviewRunRunning, domain.VerdictNone, 1),
+			requestedRun("run-2", domain.ReviewerCodex, domain.ReviewRunRunning, domain.VerdictNone, 2),
+		},
+	}
+}
+
+// Cancelling one run by id leaves the other reviewer's run (and pane) alone.
+func TestCancelByRunIDCancelsOnlyThatRun(t *testing.T) {
+	store := twoReviewerStore()
+	launcher := &fakeLauncher{alive: true}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+
+	res, err := eng.CancelWithOptions(context.Background(), "mer-1", CancelOptions{RunID: "run-2"})
+	if err != nil {
+		t.Fatalf("CancelWithOptions: %v", err)
+	}
+	if len(res.CancelledRuns) != 1 || res.CancelledRuns[0].ID != "run-2" {
+		t.Fatalf("cancelled = %+v, want only run-2", res.CancelledRuns)
+	}
+	if store.runs[0].Status != domain.ReviewRunRunning || store.runs[1].Status != domain.ReviewRunCancelled {
+		t.Fatalf("runs = %+v, want run-1 running and run-2 cancelled", store.runs)
+	}
+}
+
+func TestCancelByAgentCancelsOnlyThatReviewer(t *testing.T) {
+	store := twoReviewerStore()
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, &fakeLauncher{alive: true})
+
+	res, err := eng.CancelWithOptions(context.Background(), "mer-1", CancelOptions{Harness: domain.ReviewerCodex})
+	if err != nil {
+		t.Fatalf("CancelWithOptions: %v", err)
+	}
+	if len(res.CancelledRuns) != 1 || res.CancelledRuns[0].Harness != domain.ReviewerCodex || res.ReviewerHandleID != "codex-pane" {
+		t.Fatalf("result = %+v, want only the codex run and its pane", res)
+	}
+	if store.runs[0].Status != domain.ReviewRunRunning {
+		t.Fatalf("claude run = %q, want it left running", store.runs[0].Status)
+	}
+}
+
+func TestCancelWithUnknownSelectorIsNotFound(t *testing.T) {
+	store := twoReviewerStore()
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, &fakeLauncher{alive: true})
+
+	for _, opts := range []CancelOptions{{RunID: "nope"}, {Harness: domain.ReviewerOpenCode}} {
+		if _, err := eng.CancelWithOptions(context.Background(), "mer-1", opts); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("opts %+v: err = %v, want ErrNotFound", opts, err)
+		}
+	}
+	for _, run := range store.runs {
+		if run.Status != domain.ReviewRunRunning {
+			t.Fatalf("a missed selector must cancel nothing: %+v", store.runs)
+		}
+	}
+}
+
+// Without a selector everything is cancelled, including a run whose reviewer
+// has no live handle, so no run keeps blocking a fresh trigger.
+func TestCancelWithoutSelectorAlsoFreesRunsWithoutAHandle(t *testing.T) {
+	store := twoReviewerStore()
+	store.reviews[domain.ReviewerCodex] = domain.Review{ID: "rev-codex", SessionID: "mer-1", Harness: domain.ReviewerCodex}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), fakeProjects{}, &fakeLauncher{alive: true})
+
+	res, err := eng.Cancel(context.Background(), "mer-1")
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if len(res.CancelledRuns) != 2 {
+		t.Fatalf("cancelled = %+v, want both runs listed", res.CancelledRuns)
+	}
+	for _, run := range store.runs {
+		if run.Status != domain.ReviewRunCancelled {
+			t.Fatalf("run %s = %q, want cancelled", run.ID, run.Status)
+		}
+	}
+}

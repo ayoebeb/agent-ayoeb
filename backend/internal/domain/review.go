@@ -122,6 +122,7 @@ const (
 	ReviewRunDelivered = contract.AOReviewRunDelivered
 	ReviewRunFailed    = contract.AOReviewRunFailed
 	ReviewRunCancelled = contract.AOReviewRunCancelled
+	ReviewRunPaused    = contract.AOReviewRunPaused
 )
 
 // ReviewVerdict is the outcome a reviewer reports. The empty verdict marks a

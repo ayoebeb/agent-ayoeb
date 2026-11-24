@@ -88,16 +88,16 @@ INSERT INTO review_run (id, review_id, session_id, batch_id, harness, trigger_so
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateReviewRunResult :execrows
-UPDATE review_run SET status = ?, verdict = ?, body = ?, github_review_id = ?, auto_inject_review = ? WHERE id = ? AND status = 'running';
+UPDATE review_run SET status = ?, verdict = ?, body = ?, github_review_id = ?, auto_inject_review = ? WHERE id = ? AND status IN ('running', 'paused');
 
 -- name: SupersedeStaleRunningReviewRuns :execrows
-UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND pr_url = ? AND target_sha != ? AND status = 'running' AND verdict = '';
+UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND pr_url = ? AND target_sha != ? AND status IN ('running', 'paused') AND verdict = '';
 
 -- name: CancelRunningReviewRunsBySession :execrows
-UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND status = 'running' AND verdict = '';
+UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND status IN ('running', 'paused') AND verdict = '';
 
 -- name: CancelRunningReviewRunsBySessionAndHarness :execrows
-UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND harness = ? AND status = 'running' AND verdict = '';
+UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND harness = ? AND status IN ('running', 'paused') AND verdict = '';
 
 -- name: GetReviewRun :one
 SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
@@ -117,7 +117,7 @@ FROM review_run WHERE session_id = ? ORDER BY created_at DESC;
 
 -- name: ListRunningReviewRunsBySession :many
 SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
-FROM review_run WHERE session_id = ? AND status = 'running' AND verdict = '' ORDER BY created_at DESC;
+FROM review_run WHERE session_id = ? AND status IN ('running', 'paused') AND verdict = '' ORDER BY created_at DESC;
 
 -- name: ListReviewRunsByBatch :many
 SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
@@ -193,3 +193,18 @@ WHERE status = 'running' AND verdict = '' AND batch_id != ''
 -- name: ArchiveReviewsBySession :exec
 UPDATE review SET is_archived = TRUE, reviewer_handle_id = '', reviewer_launch_id = '',
     controller_generation = '', reviewer_activity_state = 'exited', updated_at = ? WHERE session_id = ?;
+
+-- A reviewer that stopped on the provider usage limit has its running passes
+-- paused; they continue (or are released) from the usage-limit watcher.
+-- name: PauseRunningReviewRunsByReview :execrows
+UPDATE review_run SET status = 'paused', body = ? WHERE review_id = ? AND status = 'running' AND verdict = '';
+
+-- name: ResumePausedReviewRunsByReview :execrows
+UPDATE review_run SET status = 'running', body = '' WHERE review_id = ? AND status = 'paused' AND verdict = '';
+
+-- name: FailPausedReviewRunsByReview :execrows
+UPDATE review_run SET status = 'failed', body = ? WHERE review_id = ? AND status = 'paused' AND verdict = '';
+
+-- name: ListPausedReviewRunsByReview :many
+SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
+FROM review_run WHERE review_id = ? AND status = 'paused' AND verdict = '' ORDER BY created_at ASC, id ASC;

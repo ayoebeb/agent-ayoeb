@@ -1574,7 +1574,7 @@ type TerminalEndedStripProps = {
 	error?: string;
 	isRestoring: boolean;
 	onRestore: () => void;
-	reviewStatus?: "running" | "complete" | "delivered" | "failed" | "cancelled";
+	reviewStatus?: "running" | "complete" | "delivered" | "failed" | "cancelled" | "paused";
 	session?: WorkspaceSession;
 	variant: "reviewer" | "session" | "shell";
 };

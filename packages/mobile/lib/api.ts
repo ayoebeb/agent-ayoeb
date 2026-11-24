@@ -1165,7 +1165,7 @@ export type ReviewRun = {
 	triggerSource: "manual" | "auto";
 	prUrl: string;
 	targetSha: string;
-	status: "running" | "complete" | "delivered" | "failed" | "cancelled";
+	status: "running" | "complete" | "delivered" | "failed" | "cancelled" | "paused";
 	verdict: "" | "approved" | "changes_requested";
 	body: string;
 	githubReviewId: string;

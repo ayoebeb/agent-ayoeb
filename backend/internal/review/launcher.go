@@ -72,10 +72,13 @@ type LaunchSpec struct {
 	WorkerID        domain.SessionID
 	ProjectID       domain.ProjectID
 	ProjectEnv      map[string]string
-	Harness         domain.ReviewerHarness
-	AgentConfig     domain.AgentConfig
-	WorkspacePath   string
-	AgentSessionID  string
+	// AccountEnv runs the reviewer under another login than the computer's own: set
+	// when a usage-limit prompt moved the reviewer to a different account.
+	AccountEnv     map[string]string
+	Harness        domain.ReviewerHarness
+	AgentConfig    domain.AgentConfig
+	WorkspacePath  string
+	AgentSessionID string
 	// ProviderConversationID is the typed Chat driver's stable conversation id.
 	// Terminal reviewers continue to use AgentSessionID.
 	ProviderConversationID string
@@ -662,6 +665,9 @@ func outputContainsAny(output string, patterns []string) bool {
 
 func (l *agentLauncher) runtimeEnv(ctx context.Context, spec LaunchSpec, argv []string, base map[string]string) map[string]string {
 	env := agentlaunch.MergeEnv(spec.ProjectEnv, base)
+	for k, v := range spec.AccountEnv {
+		env[k] = v
+	}
 	delete(env, sessionmanager.EnvSessionID)
 	env["AO_REVIEW_SESSION_ID"] = spec.ReviewSessionID
 	env["AO_REVIEW_WORKER_SESSION_ID"] = string(spec.WorkerID)

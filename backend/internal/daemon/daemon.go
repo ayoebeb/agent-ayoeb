@@ -829,17 +829,25 @@ func Run(buildVersion string) error {
 	}); ok {
 		limitMover = usageLimitMover{move: mover.StartAccountTransition}
 	}
+	// A reviewer's Chat can stop on the limit too: its passes are paused, continued
+	// after the reset, and moved with the sessions when the owner switches account.
+	var reviewerLimits usagelimit.Reviewers
+	if control, ok := reviewSvc.(reviewerLimitControl); ok {
+		reviewerLimits = usageLimitReviewers{reviews: control}
+		control.SetReviewerAccountEnv(agentAccountSvc.SessionLaunchEnvWith)
+	}
 	usageLimitSvc := usagelimit.New(usagelimit.Deps{
-		Store:    store,
-		Settings: settingsSvc,
-		Accounts: usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID},
-		Headroom: agentAccountSvc,
-		Lister:   agentAccountSvc,
-		Mover:    limitMover,
-		Notifier: notificationWriter,
-		Reporter: usageLimitReporter{reports: reportSvc},
-		Sender:   usageLimitSender{sessions: reportSessions},
-		Logger:   log,
+		Store:     store,
+		Settings:  settingsSvc,
+		Accounts:  usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID, defaultAccount: agentAccountSvc.DefaultAccountID},
+		Reviewers: reviewerLimits,
+		Headroom:  agentAccountSvc,
+		Lister:    agentAccountSvc,
+		Mover:     limitMover,
+		Notifier:  notificationWriter,
+		Reporter:  usageLimitReporter{reports: reportSvc},
+		Sender:    usageLimitSender{sessions: reportSessions},
+		Logger:    log,
 	})
 	// A session moved to another account while stopped on the old account's
 	// usage limit continues at once on the new one.

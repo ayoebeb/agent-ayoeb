@@ -4600,7 +4600,7 @@ export interface components {
             number: number;
         };
         /** @enum {string} */
-        AOReviewRunStatus: "running" | "complete" | "delivered" | "failed" | "cancelled";
+        AOReviewRunStatus: "running" | "complete" | "delivered" | "failed" | "cancelled" | "paused";
         /** @enum {string} */
         AOReviewVerdict: "" | "approved" | "changes_requested";
         /** @enum {string} */

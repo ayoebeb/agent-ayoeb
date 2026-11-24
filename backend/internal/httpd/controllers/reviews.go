@@ -63,6 +63,16 @@ type TriggerReviewResponse struct {
 type CancelReviewResponse struct {
 	ReviewerHandleID string                     `json:"reviewerHandleId"`
 	Reviews          []reviewcore.PRReviewState `json:"reviews"`
+	// CancelledRuns lists the runs this request cancelled, so a caller can see
+	// exactly what it stopped.
+	CancelledRuns []domain.ReviewRun `json:"cancelledRuns"`
+}
+
+// CancelReviewQuery narrows a cancel to one run or one reviewer. Without either,
+// every running review of the worker is cancelled.
+type CancelReviewQuery struct {
+	RunID string `query:"runId,omitempty" description:"Cancel only the review run with this id."`
+	Agent string `query:"agent,omitempty" description:"Cancel only the running reviews of this reviewer harness."`
 }
 
 // RestoreReviewResponse is the body of reviewer session restore (200).
@@ -273,7 +283,12 @@ func (c *ReviewsController) cancel(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/reviews/cancel")
 		return
 	}
-	res, err := c.Svc.Cancel(r.Context(), sessionID(r))
+	opts := reviewcore.CancelOptions{RunID: strings.TrimSpace(r.URL.Query().Get("runId")), Harness: domain.ReviewerHarness(strings.TrimSpace(r.URL.Query().Get("agent")))}
+	if opts.Harness != "" && !opts.Harness.IsKnown() {
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "REVIEW_INVALID", "Unknown reviewer agent "+string(opts.Harness), nil)
+		return
+	}
+	res, err := c.Svc.CancelWithOptions(r.Context(), sessionID(r), opts)
 	if err != nil {
 		writeReviewError(w, r, err)
 		return
@@ -282,9 +297,14 @@ func (c *ReviewsController) cancel(w http.ResponseWriter, r *http.Request) {
 	if reviews == nil {
 		reviews = []reviewcore.PRReviewState{}
 	}
+	cancelledRuns := res.CancelledRuns
+	if cancelledRuns == nil {
+		cancelledRuns = []domain.ReviewRun{}
+	}
 	envelope.WriteJSON(w, http.StatusOK, CancelReviewResponse{
 		ReviewerHandleID: res.ReviewerHandleID,
 		Reviews:          reviews,
+		CancelledRuns:    cancelledRuns,
 	})
 }
 

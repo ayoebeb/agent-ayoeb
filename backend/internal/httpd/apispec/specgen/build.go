@@ -648,6 +648,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersReviewRunResponse":     "ReviewRunResponse",
 	"ControllersTriggerReviewResponse": "TriggerReviewResponse",
 	"ControllersCancelReviewResponse":  "CancelReviewResponse",
+	"ControllersCancelReviewQuery":     "CancelReviewQuery",
 	"ControllersKillReviewResponse":    "KillReviewResponse",
 	"ControllersRestoreReviewResponse": "RestoreReviewResponse",
 	"ControllersSubmitReviewItem":      "SubmitReviewItem",
@@ -3027,7 +3028,7 @@ func reviewOperations() []operation {
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/reviews/cancel", id: "cancelReview", tag: "reviews",
 			summary:    "Cancel a running code review",
-			pathParams: []any{controllers.SessionIDParam{}},
+			pathParams: []any{controllers.SessionIDParam{}, controllers.CancelReviewQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.CancelReviewResponse{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
