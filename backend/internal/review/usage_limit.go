@@ -126,7 +126,7 @@ func (e *Engine) resumeReviewerLocked(ctx stdctx.Context, workerID domain.Sessio
 	if err != nil {
 		return err
 	}
-	spec := reviewLaunchSpec(worker, review.Harness, config, paused[0], reviewQueue(paused), 0, review.AgentSessionID, review.ReviewerLaunchID)
+	spec := reviewLaunchSpec(worker, review.Harness, config, paused[0], reviewQueue(paused), review.AgentSessionID, review.ReviewerLaunchID)
 	// A fresh batch id: the Chat message of the original batch carries the old one,
 	// and a repeated client message id would be dropped as a duplicate.
 	spec.BatchID = e.newID()

@@ -295,7 +295,7 @@ func canonicalMerge(command string) (MergeTarget, bool) {
 		}
 	}
 	m := prURL.FindStringSubmatch(url)
-	if m == nil || m[2] != number || !headSHA.MatchString(sha) {
+	if len(m) < 3 || m[2] != number || !headSHA.MatchString(sha) {
 		return MergeTarget{}, false
 	}
 	return MergeTarget{Ref: url, Number: number, HeadSHA: strings.ToLower(sha)}, true
