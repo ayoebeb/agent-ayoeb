@@ -43,6 +43,12 @@ func checkDeleteTargets(workspace string, targets []string) (bool, string) {
 }
 
 func checkDeleteTarget(realRoot, target string) (bool, string) {
+	// The path is used exactly as given and never cleaned: cleaning `link/../x` to
+	// `x` would judge a place the delete does not go. A target that still has a
+	// ".." in it is parked.
+	if hasParentSegment(target) {
+		return false, fmt.Sprintf("%s has a \"..\" in it; AO cannot tell where it leads when a parent is a link.", target)
+	}
 	info, err := os.Lstat(target)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

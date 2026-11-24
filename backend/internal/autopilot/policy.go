@@ -183,6 +183,9 @@ func Evaluate(a Action) Verdict {
 		}
 		v := allow("Deletes only inside the workspace.")
 		for _, p := range a.Paths {
+			if hasParentSegment(p) {
+				return deny(domain.HardLimitDataDelete, "The request deletes "+p+", a path with a \"..\" in it; AO cannot tell where it leads when a parent is a link, so it is parked for you.")
+			}
 			v.DeleteTargets = append(v.DeleteTargets, absoluteTarget(a.Workspace, a.Cwd, p))
 		}
 		return v
