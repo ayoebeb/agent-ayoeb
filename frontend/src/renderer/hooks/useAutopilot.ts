@@ -8,6 +8,7 @@ import {
 	autopilotViewQueryKey,
 	fetchAutopilotRuns,
 	fetchAutopilotView,
+	isOpenAutopilotRun,
 	refreshAutopilot,
 	runForProject,
 	type AutopilotRunOnHost,
@@ -49,7 +50,12 @@ export function useAutopilotView(hostId: HostId, sessionId: string | undefined, 
 		queryFn: () => fetchAutopilotView(hostId, sessionId as string),
 		enabled: enabled && Boolean(sessionId),
 		retry: 1,
-		refetchInterval: 8_000,
+		// A session that has no open run cannot change on its own, and every session
+		// switch mounts a fresh read: it is fetched once and kept for a while, and
+		// only a session with an open run (which parks, pauses and finishes by
+		// itself) is polled.
+		staleTime: 30_000,
+		refetchInterval: (query: { state: { data?: AutopilotView } }) => (isOpenAutopilotRun(query.state.data?.run) ? 8_000 : false),
 	});
 }
 
