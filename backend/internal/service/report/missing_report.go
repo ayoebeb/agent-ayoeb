@@ -211,18 +211,68 @@ func (f *MissingReportFallback) settle(rec domain.SessionRecord, gen uint64) boo
 }
 
 func (f *MissingReportFallback) file(ctx context.Context, rec domain.SessionRecord, finalMessage string) error {
+	return f.fileOnce(ctx, rec, finalMessage, missingReportNote)
+}
+
+// since is when the worker last received a message: the point a report has to
+// follow to count as its answer. With no message seen in this daemon run (it
+// restarted mid-turn) it falls back to the latest human prompt, the latest
+// deliberate direction, and then the session's start.
+func (f *MissingReportFallback) since(rec domain.SessionRecord) time.Time {
 	f.mu.Lock()
 	since := f.lastMsg[rec.ID]
 	f.mu.Unlock()
-	// With no message seen in this daemon run (it restarted mid-turn) fall back
-	// to the latest human prompt and then the session's start: any report filed
-	// since, including an earlier automatic one, still counts.
-	if rec.Metadata.LatestUserPromptAt.After(since) {
-		since = rec.Metadata.LatestUserPromptAt
+	for _, at := range []time.Time{rec.Metadata.LatestUserPromptAt, rec.Metadata.LatestInteractionAt, rec.CreatedAt} {
+		if at.After(since) {
+			since = at
+		}
 	}
-	if rec.CreatedAt.After(since) {
-		since = rec.CreatedAt
+	return since
+}
+
+// Unfinished reports whether the worker has not run `ao report --done` since the
+// message it last received.
+func (f *MissingReportFallback) Unfinished(ctx context.Context, rec domain.SessionRecord) (bool, error) {
+	since := f.since(rec)
+	existing, err := f.store.ListReportsBySession(ctx, rec.ID)
+	if err != nil {
+		return false, err
 	}
+	for _, r := range existing {
+		if r.State == domain.ReportDone && !r.CreatedAt.Before(since) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// FileStopped files the one automatic report for a worker whose agent stopped
+// and could not be kept running. Unlike the missing report it does not yield to
+// an earlier report: the orchestrator must hear that the worker is gone.
+func (f *MissingReportFallback) FileStopped(ctx context.Context, rec domain.SessionRecord, reason string) error {
+	text := fmt.Sprintf("[AUTOMATIC REPORT from AO, not written by the worker] worker %s stopped and could not be resumed: %s",
+		rec.ID, cmp.Or(strings.TrimSpace(reason), "no error recorded"))
+	_, err := f.reports.Create(ctx, CreateInput{
+		SessionID: rec.ID, State: domain.ReportStuck, Immediate: true,
+		Note: truncateRunes(text, domain.MaxReportTextCharacters),
+	})
+	return err
+}
+
+// FileStalled files the watchdog's one automatic report for a worker with
+// unfinished work that has sat in state for idleFor without any report. It
+// shares the missing report's "already reported" check, so it files at most one
+// report per received message.
+func (f *MissingReportFallback) FileStalled(ctx context.Context, rec domain.SessionRecord, state string, idleFor time.Duration) error {
+	return f.fileOnce(ctx, rec, "", func(message string, prs []domain.PullRequest) string {
+		return stalledNote(state, idleFor, message, prs)
+	})
+}
+
+// fileOnce files an automatic checkpoint unless the worker already reported
+// since its last message; an earlier automatic report counts.
+func (f *MissingReportFallback) fileOnce(ctx context.Context, rec domain.SessionRecord, finalMessage string, note func(string, []domain.PullRequest) string) error {
+	since := f.since(rec)
 	existing, err := f.store.ListReportsBySession(ctx, rec.ID)
 	if err != nil {
 		return err
@@ -245,9 +295,19 @@ func (f *MissingReportFallback) file(ctx context.Context, rec domain.SessionReco
 	message = cmp.Or(message, strings.TrimSpace(rec.Metadata.LatestAssistantUpdate))
 	_, err = f.reports.Create(ctx, CreateInput{
 		SessionID: rec.ID, State: domain.ReportCheckpoint, Immediate: true,
-		Note: missingReportNote(message, prs),
+		Note: note(message, prs),
 	})
 	return err
+}
+
+// stalledNote words the watchdog's report with the missing report's marker and
+// layout, so the orchestrator reads both alike.
+func stalledNote(state string, idleFor time.Duration, message string, prs []domain.PullRequest) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[AUTOMATIC REPORT from AO, not written by the worker] The worker has been %s for %d minutes with unfinished work and has not run `ao report`.",
+		state, int(idleFor.Minutes()))
+	writeReportTail(&b, message, prs)
+	return truncateRunes(b.String(), domain.MaxReportTextCharacters)
 }
 
 // missingReportNote words the automatic report. It opens with a fixed marker so
@@ -255,6 +315,12 @@ func (f *MissingReportFallback) file(ctx context.Context, rec domain.SessionReco
 func missingReportNote(message string, prs []domain.PullRequest) string {
 	var b strings.Builder
 	b.WriteString("[AUTOMATIC REPORT from AO, not written by the worker] The worker stopped without running `ao report` after its last message.")
+	writeReportTail(&b, message, prs)
+	return truncateRunes(b.String(), domain.MaxReportTextCharacters)
+}
+
+// writeReportTail adds the worker's last message and the PRs AO tracks for it.
+func writeReportTail(b *strings.Builder, message string, prs []domain.PullRequest) {
 	b.WriteString("\nLast message: ")
 	if message == "" {
 		b.WriteString("(none available)")
@@ -265,15 +331,14 @@ func missingReportNote(message string, prs []domain.PullRequest) string {
 		b.WriteString("\nPRs AO tracks for it:")
 		for i, p := range prs {
 			if i == missingReportMaxPRs {
-				fmt.Fprintf(&b, "\n(+%d more)", len(prs)-i)
+				fmt.Fprintf(b, "\n(+%d more)", len(prs)-i)
 				break
 			}
-			fmt.Fprintf(&b, "\n%s (%s)", p.URL, prState(p))
+			fmt.Fprintf(b, "\n%s (%s)", p.URL, prState(p))
 		}
 	} else {
 		b.WriteString("\nPRs AO tracks for it: none")
 	}
-	return truncateRunes(b.String(), domain.MaxReportTextCharacters)
 }
 
 func prState(p domain.PullRequest) string {
