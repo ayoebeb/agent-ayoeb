@@ -3369,6 +3369,16 @@ func (m *Manager) recordAgentExited(ctx context.Context, rec domain.SessionRecor
 		State:     domain.ActivityExited,
 		Timestamp: m.clock(),
 	}
+	// Every caller stops the agent on purpose (exit-agent, an update, an account
+	// switch). The mark goes down before the exit does, so the worker keeper never
+	// sees this exit without it and resumes it as a crash or a restart.
+	if marker, ok := m.store.(interface {
+		MarkAgentStop(context.Context, domain.SessionID, time.Time, string) error
+	}); ok {
+		if err := marker.MarkAgentStop(ctx, rec.ID, signal.Timestamp, "agent stopped on purpose"); err != nil {
+			m.logger.Warn("record deliberate agent stop failed", "sessionID", rec.ID, "error", err)
+		}
+	}
 	if domain.NormalizeSessionMode(rec.Mode) == domain.SessionModeChat {
 		signal.Event = "chat.controller.stopped"
 		signal.ControllerGeneration = strings.TrimSpace(rec.Metadata.ControllerGeneration)

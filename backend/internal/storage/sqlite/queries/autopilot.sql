@@ -1,4 +1,4 @@
--- Autopilot task runs and their log. See migration 20261124120000000.
+-- Autopilot task runs and their log. See migration 20261124130000000.
 
 -- name: CreateAutopilotRun :one
 INSERT INTO autopilot_runs (

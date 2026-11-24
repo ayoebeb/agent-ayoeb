@@ -81,6 +81,12 @@ type AgentNativeSession struct {
 	LastUsedAt       time.Time
 }
 
+type AgentStopMark struct {
+	SessionID string
+	StoppedAt time.Time
+	Reason    string
+}
+
 type AgentSwitch struct {
 	ID                      string
 	SessionID               string
