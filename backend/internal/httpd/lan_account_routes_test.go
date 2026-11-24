@@ -1,11 +1,9 @@
 package httpd
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
-
-	"context"
-	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/requestscope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentaccounts"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 )
