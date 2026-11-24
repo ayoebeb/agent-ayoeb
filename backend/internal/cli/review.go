@@ -116,6 +116,14 @@ type reviewSubmitOptions struct {
 
 type reviewSessionOptions struct {
 	session string
+	// runID and agent narrow a cancel to one run or one reviewer.
+	runID string
+	agent string
+}
+
+// cancelReviewResponse mirrors controllers.CancelReviewResponse.
+type cancelReviewResponse struct {
+	CancelledRuns []reviewRun `json:"cancelledRuns"`
 }
 
 type reviewTriggerOptions struct {
@@ -338,13 +346,21 @@ func newReviewCancelCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cancel [worker-session-id]",
 		Aliases: []string{"stop"},
-		Short:   "Cancel every running review for a worker's PR (default: this session)",
+		Short:   "Cancel running reviews for a worker's PR (default: all of this session's)",
+		Long: `Cancel the running reviews of a worker session (default: this session).
+
+Without a selector every running review of the worker is cancelled and the
+command prints each run it cancelled. Pass --run <id> to cancel one run, or
+--agent <harness> to cancel only that reviewer's runs; the other reviewers keep
+running.`,
 		Args:    atMostOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ctx.stopReview(cmd, args, opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.session, "session", "", "Worker session id (or pass it as the positional argument)")
+	cmd.Flags().StringVar(&opts.runID, "run", "", "Cancel only the review run with this id")
+	cmd.Flags().StringVar(&opts.agent, "agent", "", "Cancel only the running reviews of this reviewer agent (e.g. claude-code, codex)")
 	return cmd
 }
 
@@ -473,11 +489,34 @@ func (c *commandContext) stopReview(cmd *cobra.Command, args []string, opts revi
 		return usageError{errors.New("usage: worker session id is required (positional or --session) outside an Orchestrator-managed session")}
 	}
 	path := "sessions/" + url.PathEscape(session) + "/reviews/cancel"
-	if err := c.postJSON(cmd.Context(), path, struct{}{}, nil); err != nil {
+	query := url.Values{}
+	if opts.runID != "" {
+		query.Set("runId", opts.runID)
+	}
+	if opts.agent != "" {
+		query.Set("agent", opts.agent)
+	}
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var res cancelReviewResponse
+	if err := c.postJSON(cmd.Context(), path, struct{}{}, &res); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "cancelled review for %s\n", session)
-	return err
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "cancelled review for %s\n", session); err != nil {
+		return err
+	}
+	for _, run := range res.CancelledRuns {
+		if _, err := fmt.Fprintf(out, "  cancelled run %s (%s, commit %s)\n", run.ID, run.Harness, shortReviewSHA(run.TargetSHA)); err != nil {
+			return err
+		}
+	}
+	if len(res.CancelledRuns) == 0 {
+		_, err := fmt.Fprintln(out, "  no running review runs were left")
+		return err
+	}
+	return nil
 }
 
 func writeReviewList(cmd *cobra.Command, session string, res listReviewsResponse) error {

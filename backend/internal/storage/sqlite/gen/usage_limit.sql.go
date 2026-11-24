@@ -13,17 +13,18 @@ import (
 
 const countRecentUsageLimitResumes = `-- name: CountRecentUsageLimitResumes :one
 SELECT COUNT(*) FROM usage_limit_stops
-WHERE session_id = ? AND resume_state = 'resumed' AND resumed_at >= ?
+WHERE session_id = ? AND review_id = ? AND resume_state = 'resumed' AND resumed_at >= ?
 `
 
 type CountRecentUsageLimitResumesParams struct {
 	SessionID string
+	ReviewID  string
 	ResumedAt sql.NullTime
 }
 
 // A session that stopped on the limit again right after AO continued it.
 func (q *Queries) CountRecentUsageLimitResumes(ctx context.Context, arg CountRecentUsageLimitResumesParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countRecentUsageLimitResumes, arg.SessionID, arg.ResumedAt)
+	row := q.db.QueryRowContext(ctx, countRecentUsageLimitResumes, arg.SessionID, arg.ReviewID, arg.ResumedAt)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -143,8 +144,8 @@ func (q *Queries) InsertUsageLimitPrompt(ctx context.Context, arg InsertUsageLim
 
 const insertUsageLimitStop = `-- name: InsertUsageLimitStop :execrows
 INSERT INTO usage_limit_stops (
-    turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, review_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (turn_id) DO NOTHING
 `
 
@@ -157,6 +158,7 @@ type InsertUsageLimitStopParams struct {
 	WindowLabel string
 	ResetsAt    sql.NullTime
 	DetectedAt  time.Time
+	ReviewID    string
 }
 
 func (q *Queries) InsertUsageLimitStop(ctx context.Context, arg InsertUsageLimitStopParams) (int64, error) {
@@ -169,6 +171,7 @@ func (q *Queries) InsertUsageLimitStop(ctx context.Context, arg InsertUsageLimit
 		arg.WindowLabel,
 		arg.ResetsAt,
 		arg.DetectedAt,
+		arg.ReviewID,
 	)
 	if err != nil {
 		return 0, err
@@ -300,9 +303,46 @@ SELECT CAST(conversations.current_session_id AS TEXT) AS session_id,
        COALESCE(stops.skip_reason, '') AS skip_reason,
        stops.resets_at AS stop_resets_at,
        stops.retry_at AS retry_at,
-       COALESCE(stops.attempts, 0) AS attempts
+       COALESCE(stops.attempts, 0) AS attempts,
+       CAST('' AS TEXT) AS review_id,
+       CAST('' AS TEXT) AS review_harness
 FROM conversation_turns AS turns
 JOIN conversations ON conversations.id = turns.conversation_id AND conversations.current_session_id IS NOT NULL
+LEFT JOIN usage_limit_stops AS stops ON stops.turn_id = turns.id
+WHERE turns.state = 'failed'
+  AND turns.rolled_back_at IS NULL
+  AND turns.promoted_to_turn_id IS NULL
+  AND (stops.turn_id IS NULL OR stops.resume_state = 'pending')
+  AND (stops.resume_state = 'pending' OR turns.completed_at >= ?1)
+  AND NOT EXISTS (
+      SELECT 1 FROM conversation_turns AS newer
+      WHERE newer.conversation_id = turns.conversation_id
+        AND newer.promoted_to_turn_id IS NULL
+        AND newer.rolled_back_at IS NULL
+        AND newer.state NOT IN ('cancelled', 'queued')
+        AND (newer.requested_at > turns.requested_at
+             OR (newer.requested_at = turns.requested_at AND newer.rowid > turns.rowid))
+  )
+
+UNION ALL
+
+SELECT CAST(review.session_id AS TEXT) AS session_id,
+       turns.id AS turn_id,
+       turns.error_message AS error_message,
+       turns.completed_at AS completed_at,
+       turns.requested_at AS requested_at,
+       turns.usage_limit_resets_at AS usage_limit_resets_at,
+       turns.usage_limit_auto_resume AS usage_limit_auto_resume,
+       COALESCE(stops.resume_state, '') AS resume_state,
+       COALESCE(stops.skip_reason, '') AS skip_reason,
+       stops.resets_at AS stop_resets_at,
+       stops.retry_at AS retry_at,
+       COALESCE(stops.attempts, 0) AS attempts,
+       CAST(review.id AS TEXT) AS review_id,
+       CAST(review.harness AS TEXT) AS review_harness
+FROM conversation_turns AS turns
+JOIN conversations ON conversations.id = turns.conversation_id AND conversations.current_review_id IS NOT NULL
+JOIN review ON review.id = conversations.current_review_id AND review.is_archived = 0
 LEFT JOIN usage_limit_stops AS stops ON stops.turn_id = turns.id
 WHERE turns.state = 'failed'
   AND turns.rolled_back_at IS NULL
@@ -333,6 +373,8 @@ type ListLimitStopCandidatesRow struct {
 	StopResetsAt         sql.NullTime
 	RetryAt              sql.NullTime
 	Attempts             int64
+	ReviewID             string
+	ReviewHarness        string
 }
 
 // Every failed turn that is still the latest of its session conversation and
@@ -341,6 +383,8 @@ type ListLimitStopCandidatesRow struct {
 // days, and the watcher closes a stop only when its turn stopped being the
 // latest). A queued turn behind the failed one does not make it older (see
 // ListLatestFailedTurns). This is the watcher sweep.
+// The same for a reviewer's own Chat: its stop is recorded under the worker the
+// review belongs to, with the reviewer named in review_id.
 func (q *Queries) ListLimitStopCandidates(ctx context.Context, completedSince sql.NullTime) ([]ListLimitStopCandidatesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listLimitStopCandidates, completedSince)
 	if err != nil {
@@ -363,6 +407,8 @@ func (q *Queries) ListLimitStopCandidates(ctx context.Context, completedSince sq
 			&i.StopResetsAt,
 			&i.RetryAt,
 			&i.Attempts,
+			&i.ReviewID,
+			&i.ReviewHarness,
 		); err != nil {
 			return nil, err
 		}
@@ -416,7 +462,7 @@ func (q *Queries) ListOpenUsageLimitPrompts(ctx context.Context) ([]UsageLimitPr
 }
 
 const listPendingUsageLimitStops = `-- name: ListPendingUsageLimitStops :many
-SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id FROM usage_limit_stops
+SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id, review_id FROM usage_limit_stops
 WHERE resume_state = 'pending'
 ORDER BY resets_at IS NULL, resets_at, detected_at, turn_id
 `
@@ -446,6 +492,7 @@ func (q *Queries) ListPendingUsageLimitStops(ctx context.Context) ([]UsageLimitS
 			&i.RetryAt,
 			&i.ResumedAt,
 			&i.ResumeTurnID,
+			&i.ReviewID,
 		); err != nil {
 			return nil, err
 		}
@@ -461,7 +508,7 @@ func (q *Queries) ListPendingUsageLimitStops(ctx context.Context) ([]UsageLimitS
 }
 
 const listUnreportedUsageLimitStops = `-- name: ListUnreportedUsageLimitStops :many
-SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id FROM usage_limit_stops
+SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id, review_id FROM usage_limit_stops
 WHERE reported_at IS NULL
   AND skip_reason NOT IN ('stopped', 'expired', 'superseded')
 ORDER BY detected_at, turn_id
@@ -496,6 +543,7 @@ func (q *Queries) ListUnreportedUsageLimitStops(ctx context.Context) ([]UsageLim
 			&i.RetryAt,
 			&i.ResumedAt,
 			&i.ResumeTurnID,
+			&i.ReviewID,
 		); err != nil {
 			return nil, err
 		}
@@ -511,7 +559,7 @@ func (q *Queries) ListUnreportedUsageLimitStops(ctx context.Context) ([]UsageLim
 }
 
 const listUsageLimitPromptStops = `-- name: ListUsageLimitPromptStops :many
-SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id FROM usage_limit_stops
+SELECT turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, reported_at, resume_state, skip_reason, attempts, retry_at, resumed_at, resume_turn_id, review_id FROM usage_limit_stops
 WHERE window_key = ?
   AND resume_state != 'resumed'
   AND NOT (resume_state = 'skipped' AND skip_reason IN ('stopped', 'superseded', 'expired'))
@@ -546,6 +594,7 @@ func (q *Queries) ListUsageLimitPromptStops(ctx context.Context, windowKey strin
 			&i.RetryAt,
 			&i.ResumedAt,
 			&i.ResumeTurnID,
+			&i.ReviewID,
 		); err != nil {
 			return nil, err
 		}
@@ -580,7 +629,8 @@ SET resume_state = 'resumed', resumed_at = ?1, attempts = attempts + 1,
     resume_turn_id = COALESCE((
         SELECT turns.id FROM conversation_turns AS turns
         JOIN conversations ON conversations.id = turns.conversation_id
-        WHERE conversations.current_session_id = usage_limit_stops.session_id
+        WHERE ((usage_limit_stops.review_id = '' AND conversations.current_session_id = usage_limit_stops.session_id)
+               OR (usage_limit_stops.review_id != '' AND conversations.current_review_id = usage_limit_stops.review_id))
           AND turns.requested_at >= ?2
         ORDER BY turns.requested_at DESC, turns.rowid DESC
         LIMIT 1

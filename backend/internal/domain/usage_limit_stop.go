@@ -75,6 +75,10 @@ type LimitStopTurn struct {
 	StopResetsAt *time.Time
 	RetryAt      *time.Time
 	Attempts     int
+	// ReviewID is set when the turn belongs to a reviewer's own Chat; SessionID is
+	// then the worker the review is of, and ReviewHarness the reviewer's agent.
+	ReviewID      string
+	ReviewHarness ReviewerHarness
 }
 
 // Limit is the usage limit the turn stopped on, or nil when it failed for
@@ -114,6 +118,8 @@ type UsageLimitStop struct {
 	SkipReason  string
 	Attempts    int
 	RetryAt     *time.Time
+	// ReviewID names the reviewer that stopped; empty for a stop of the session itself.
+	ReviewID string
 }
 
 // UsageLimitWindowKey identifies one limit window of one account: the account

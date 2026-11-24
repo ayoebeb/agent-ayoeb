@@ -573,3 +573,48 @@ func (s *Store) ArchiveReviewsBySession(ctx context.Context, workerID domain.Ses
 	defer s.writeMu.Unlock()
 	return s.qw.ArchiveReviewsBySession(ctx, gen.ArchiveReviewsBySessionParams{SessionID: workerID, UpdatedAt: now})
 }
+
+// PauseRunningReviewRunsByReview pauses the running passes of one reviewer, the
+// way its usage-limit stop does, and returns the runs it paused.
+func (s *Store) PauseRunningReviewRunsByReview(ctx context.Context, reviewID, body string) ([]domain.ReviewRun, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if _, err := s.qw.PauseRunningReviewRunsByReview(ctx, gen.PauseRunningReviewRunsByReviewParams{Body: body, ReviewID: reviewID}); err != nil {
+		return nil, fmt.Errorf("pause review runs of %s: %w", reviewID, err)
+	}
+	return s.listPausedReviewRuns(ctx, reviewID)
+}
+
+// ListPausedReviewRunsByReview returns a reviewer's usage-limit paused passes,
+// oldest first.
+func (s *Store) ListPausedReviewRunsByReview(ctx context.Context, reviewID string) ([]domain.ReviewRun, error) {
+	return s.listPausedReviewRuns(ctx, reviewID)
+}
+
+func (s *Store) listPausedReviewRuns(ctx context.Context, reviewID string) ([]domain.ReviewRun, error) {
+	rows, err := s.qr.ListPausedReviewRunsByReview(ctx, reviewID)
+	if err != nil {
+		return nil, fmt.Errorf("list paused review runs of %s: %w", reviewID, err)
+	}
+	out := make([]domain.ReviewRun, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, reviewRunFromRow(row))
+	}
+	return out, nil
+}
+
+// ResumePausedReviewRunsByReview turns a reviewer's paused passes back into
+// running ones and reports how many it changed.
+func (s *Store) ResumePausedReviewRunsByReview(ctx context.Context, reviewID string) (int64, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.qw.ResumePausedReviewRunsByReview(ctx, reviewID)
+}
+
+// FailPausedReviewRunsByReview ends a reviewer's paused passes as failed, so
+// they stop holding the review slot, and reports how many it changed.
+func (s *Store) FailPausedReviewRunsByReview(ctx context.Context, reviewID, body string) (int64, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.qw.FailPausedReviewRunsByReview(ctx, gen.FailPausedReviewRunsByReviewParams{Body: body, ReviewID: reviewID})
+}

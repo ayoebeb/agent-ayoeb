@@ -21,7 +21,7 @@ export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
 export const MERGEABILITY_STATES = ["unknown", "mergeable", "conflicting", "blocked", "unstable"] as const;
 export type MergeabilityState = (typeof MERGEABILITY_STATES)[number];
 
-export const AO_REVIEW_RUN_STATUSES = ["running", "complete", "delivered", "failed", "cancelled"] as const;
+export const AO_REVIEW_RUN_STATUSES = ["running", "complete", "delivered", "failed", "cancelled", "paused"] as const;
 export type AOReviewRunStatus = (typeof AO_REVIEW_RUN_STATUSES)[number];
 
 // The empty value is AO's existing stored "no verdict yet" vocabulary.

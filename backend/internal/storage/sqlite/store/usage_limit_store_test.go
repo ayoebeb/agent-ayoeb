@@ -199,10 +199,10 @@ func TestResumeTracksTheContinuedTurn(t *testing.T) {
 	if at, ok, err := s.LastUsageLimitResumeAt(ctx); err != nil || !ok || !at.Equal(resumedAt) {
 		t.Fatalf("last resume = %v, %v, %v", at, ok, err)
 	}
-	if n, err := s.CountRecentUsageLimitResumes(ctx, session.ID, resumedAt.Add(-time.Minute)); err != nil || n != 1 {
+	if n, err := s.CountRecentUsageLimitResumes(ctx, session.ID, "", resumedAt.Add(-time.Minute)); err != nil || n != 1 {
 		t.Fatalf("recent resumes = %d, %v", n, err)
 	}
-	if n, err := s.CountRecentUsageLimitResumes(ctx, session.ID, resumedAt.Add(time.Minute)); err != nil || n != 0 {
+	if n, err := s.CountRecentUsageLimitResumes(ctx, session.ID, "", resumedAt.Add(time.Minute)); err != nil || n != 0 {
 		t.Fatalf("recent resumes after the window = %d, %v", n, err)
 	}
 

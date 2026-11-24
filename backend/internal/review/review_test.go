@@ -238,7 +238,7 @@ func (f *fakeStore) UpdateReviewAgentSessionID(_ context.Context, id, agentSessi
 func (f *fakeStore) UpdateReviewRunResult(_ context.Context, id string, status domain.ReviewRunStatus, verdict domain.ReviewVerdict, body, githubReviewID string, autoInjectReview bool) (bool, error) {
 	for i := range f.runs {
 		if f.runs[i].ID == id {
-			if f.runs[i].Status != domain.ReviewRunRunning {
+			if f.runs[i].Status != domain.ReviewRunRunning && f.runs[i].Status != domain.ReviewRunPaused {
 				return false, nil
 			}
 			f.runs[i].Status = status
@@ -254,7 +254,7 @@ func (f *fakeStore) UpdateReviewRunResult(_ context.Context, id string, status d
 func (f *fakeStore) SupersedeStaleRunningReviewRuns(_ context.Context, sessionID domain.SessionID, prURL, targetSHA, body string) (int64, error) {
 	var n int64
 	for i := range f.runs {
-		if f.runs[i].SessionID == sessionID && f.runs[i].PRURL == prURL && f.runs[i].TargetSHA != targetSHA && f.runs[i].Status == domain.ReviewRunRunning && f.runs[i].Verdict == domain.VerdictNone {
+		if f.runs[i].SessionID == sessionID && f.runs[i].PRURL == prURL && f.runs[i].TargetSHA != targetSHA && (f.runs[i].Status == domain.ReviewRunRunning || f.runs[i].Status == domain.ReviewRunPaused) && f.runs[i].Verdict == domain.VerdictNone {
 			f.runs[i].Status = domain.ReviewRunFailed
 			f.runs[i].Body = body
 			n++
@@ -265,7 +265,7 @@ func (f *fakeStore) SupersedeStaleRunningReviewRuns(_ context.Context, sessionID
 func (f *fakeStore) CancelRunningReviewRunsBySession(_ context.Context, sessionID domain.SessionID, body string) (int64, error) {
 	var n int64
 	for i := range f.runs {
-		if f.runs[i].SessionID == sessionID && f.runs[i].Status == domain.ReviewRunRunning && f.runs[i].Verdict == domain.VerdictNone {
+		if f.runs[i].SessionID == sessionID && (f.runs[i].Status == domain.ReviewRunRunning || f.runs[i].Status == domain.ReviewRunPaused) && f.runs[i].Verdict == domain.VerdictNone {
 			f.runs[i].Status = domain.ReviewRunCancelled
 			f.runs[i].Body = body
 			n++
@@ -276,7 +276,7 @@ func (f *fakeStore) CancelRunningReviewRunsBySession(_ context.Context, sessionI
 func (f *fakeStore) CancelRunningReviewRunsBySessionAndHarness(_ context.Context, sessionID domain.SessionID, harness domain.ReviewerHarness, body string) (int64, error) {
 	var n int64
 	for i := range f.runs {
-		if f.runs[i].SessionID == sessionID && (f.runs[i].Harness == harness || f.runs[i].Harness == "") && f.runs[i].Status == domain.ReviewRunRunning && f.runs[i].Verdict == domain.VerdictNone {
+		if f.runs[i].SessionID == sessionID && (f.runs[i].Harness == harness || f.runs[i].Harness == "") && (f.runs[i].Status == domain.ReviewRunRunning || f.runs[i].Status == domain.ReviewRunPaused) && f.runs[i].Verdict == domain.VerdictNone {
 			f.runs[i].Status = domain.ReviewRunCancelled
 			f.runs[i].Body = body
 			n++
@@ -315,7 +315,7 @@ func (f *fakeStore) ListReviewRunsBySession(_ context.Context, _ domain.SessionI
 func (f *fakeStore) ListRunningReviewRunsBySession(_ context.Context, sessionID domain.SessionID) ([]domain.ReviewRun, error) {
 	out := make([]domain.ReviewRun, 0)
 	for _, run := range f.runs {
-		if run.SessionID == sessionID && run.Status == domain.ReviewRunRunning && run.Verdict == domain.VerdictNone {
+		if run.SessionID == sessionID && (run.Status == domain.ReviewRunRunning || run.Status == domain.ReviewRunPaused) && run.Verdict == domain.VerdictNone {
 			out = append(out, run)
 		}
 	}
@@ -3442,4 +3442,48 @@ func TestTerminateReviewerPaneDestroyFailureStillCleansUp(t *testing.T) {
 	if store.review.ReviewerHandleID != "" {
 		t.Fatalf("reviewer handle = %q, want cleared", store.review.ReviewerHandleID)
 	}
+}
+
+func (f *fakeStore) PauseRunningReviewRunsByReview(_ context.Context, reviewID, body string) ([]domain.ReviewRun, error) {
+	for i := range f.runs {
+		if f.runs[i].ReviewID == reviewID && (f.runs[i].Status == domain.ReviewRunRunning || f.runs[i].Status == domain.ReviewRunPaused) && f.runs[i].Verdict == domain.VerdictNone {
+			f.runs[i].Status = domain.ReviewRunPaused
+			f.runs[i].Body = body
+		}
+	}
+	return f.ListPausedReviewRunsByReview(context.Background(), reviewID)
+}
+
+func (f *fakeStore) ListPausedReviewRunsByReview(_ context.Context, reviewID string) ([]domain.ReviewRun, error) {
+	var out []domain.ReviewRun
+	for _, r := range f.runs {
+		if r.ReviewID == reviewID && r.Status == domain.ReviewRunPaused && r.Verdict == domain.VerdictNone {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) ResumePausedReviewRunsByReview(_ context.Context, reviewID string) (int64, error) {
+	var n int64
+	for i := range f.runs {
+		if f.runs[i].ReviewID == reviewID && f.runs[i].Status == domain.ReviewRunPaused {
+			f.runs[i].Status = domain.ReviewRunRunning
+			f.runs[i].Body = ""
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeStore) FailPausedReviewRunsByReview(_ context.Context, reviewID, body string) (int64, error) {
+	var n int64
+	for i := range f.runs {
+		if f.runs[i].ReviewID == reviewID && f.runs[i].Status == domain.ReviewRunPaused {
+			f.runs[i].Status = domain.ReviewRunFailed
+			f.runs[i].Body = body
+			n++
+		}
+	}
+	return n, nil
 }

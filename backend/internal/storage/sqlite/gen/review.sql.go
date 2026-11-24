@@ -28,7 +28,7 @@ func (q *Queries) ArchiveReviewsBySession(ctx context.Context, arg ArchiveReview
 }
 
 const cancelRunningReviewRunsBySession = `-- name: CancelRunningReviewRunsBySession :execrows
-UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND status = 'running' AND verdict = ''
+UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND status IN ('running', 'paused') AND verdict = ''
 `
 
 type CancelRunningReviewRunsBySessionParams struct {
@@ -45,7 +45,7 @@ func (q *Queries) CancelRunningReviewRunsBySession(ctx context.Context, arg Canc
 }
 
 const cancelRunningReviewRunsBySessionAndHarness = `-- name: CancelRunningReviewRunsBySessionAndHarness :execrows
-UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND harness = ? AND status = 'running' AND verdict = ''
+UPDATE review_run SET status = 'cancelled', body = ? WHERE session_id = ? AND harness = ? AND status IN ('running', 'paused') AND verdict = ''
 `
 
 type CancelRunningReviewRunsBySessionAndHarnessParams struct {
@@ -125,6 +125,23 @@ type ClearReviewerHandleByHarnessParams struct {
 func (q *Queries) ClearReviewerHandleByHarness(ctx context.Context, arg ClearReviewerHandleByHarnessParams) error {
 	_, err := q.db.ExecContext(ctx, clearReviewerHandleByHarness, arg.SessionID, arg.Harness)
 	return err
+}
+
+const failPausedReviewRunsByReview = `-- name: FailPausedReviewRunsByReview :execrows
+UPDATE review_run SET status = 'failed', body = ? WHERE review_id = ? AND status = 'paused' AND verdict = ''
+`
+
+type FailPausedReviewRunsByReviewParams struct {
+	Body     string
+	ReviewID string
+}
+
+func (q *Queries) FailPausedReviewRunsByReview(ctx context.Context, arg FailPausedReviewRunsByReviewParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, failPausedReviewRunsByReview, arg.Body, arg.ReviewID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const failUnsubmittedReviewBatchForChatTurn = `-- name: FailUnsubmittedReviewBatchForChatTurn :exec
@@ -620,6 +637,50 @@ func (q *Queries) ListLiveReviewerHandles(ctx context.Context) ([]ListLiveReview
 	return items, nil
 }
 
+const listPausedReviewRunsByReview = `-- name: ListPausedReviewRunsByReview :many
+SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
+FROM review_run WHERE review_id = ? AND status = 'paused' AND verdict = '' ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListPausedReviewRunsByReview(ctx context.Context, reviewID string) ([]ReviewRun, error) {
+	rows, err := q.db.QueryContext(ctx, listPausedReviewRunsByReview, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReviewRun{}
+	for rows.Next() {
+		var i ReviewRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReviewID,
+			&i.SessionID,
+			&i.Harness,
+			&i.PRURL,
+			&i.TargetSha,
+			&i.Status,
+			&i.Verdict,
+			&i.Body,
+			&i.CreatedAt,
+			&i.GithubReviewID,
+			&i.DeliveredAt,
+			&i.BatchID,
+			&i.AutoInjectReview,
+			&i.TriggerSource,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecoverableChatReviews = `-- name: ListRecoverableChatReviews :many
 SELECT id, session_id, project_id, harness, pr_url, reviewer_handle_id, agent_session_id, reviewer_activity_state, reviewer_launch_id, interface_mode, provider_conversation_id, controller_generation, controller_error, is_archived, created_at, updated_at
 FROM review WHERE interface_mode = 'chat' AND is_archived = FALSE AND provider_conversation_id != '' ORDER BY updated_at, id
@@ -843,7 +904,7 @@ func (q *Queries) ListReviewsBySession(ctx context.Context, sessionID domain.Ses
 
 const listRunningReviewRunsBySession = `-- name: ListRunningReviewRunsBySession :many
 SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
-FROM review_run WHERE session_id = ? AND status = 'running' AND verdict = '' ORDER BY created_at DESC
+FROM review_run WHERE session_id = ? AND status IN ('running', 'paused') AND verdict = '' ORDER BY created_at DESC
 `
 
 func (q *Queries) ListRunningReviewRunsBySession(ctx context.Context, sessionID domain.SessionID) ([]ReviewRun, error) {
@@ -883,6 +944,25 @@ func (q *Queries) ListRunningReviewRunsBySession(ctx context.Context, sessionID 
 		return nil, err
 	}
 	return items, nil
+}
+
+const pauseRunningReviewRunsByReview = `-- name: PauseRunningReviewRunsByReview :execrows
+UPDATE review_run SET status = 'paused', body = ? WHERE review_id = ? AND status = 'running' AND verdict = ''
+`
+
+type PauseRunningReviewRunsByReviewParams struct {
+	Body     string
+	ReviewID string
+}
+
+// A reviewer that stopped on the provider usage limit has its running passes
+// paused; they continue (or are released) from the usage-limit watcher.
+func (q *Queries) PauseRunningReviewRunsByReview(ctx context.Context, arg PauseRunningReviewRunsByReviewParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pauseRunningReviewRunsByReview, arg.Body, arg.ReviewID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const recordReviewChatControllerError = `-- name: RecordReviewChatControllerError :execrows
@@ -945,6 +1025,18 @@ func (q *Queries) RestoreReviewLaunchState(ctx context.Context, arg RestoreRevie
 	return result.RowsAffected()
 }
 
+const resumePausedReviewRunsByReview = `-- name: ResumePausedReviewRunsByReview :execrows
+UPDATE review_run SET status = 'running', body = '' WHERE review_id = ? AND status = 'paused' AND verdict = ''
+`
+
+func (q *Queries) ResumePausedReviewRunsByReview(ctx context.Context, reviewID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, resumePausedReviewRunsByReview, reviewID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setReviewInterfaceMode = `-- name: SetReviewInterfaceMode :execrows
 UPDATE review SET interface_mode = ?, reviewer_handle_id = CASE WHEN ? = 'chat' THEN '' ELSE reviewer_handle_id END,
     provider_conversation_id = CASE WHEN ? = 'tui' THEN '' ELSE provider_conversation_id END,
@@ -977,7 +1069,7 @@ func (q *Queries) SetReviewInterfaceMode(ctx context.Context, arg SetReviewInter
 }
 
 const supersedeStaleRunningReviewRuns = `-- name: SupersedeStaleRunningReviewRuns :execrows
-UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND pr_url = ? AND target_sha != ? AND status = 'running' AND verdict = ''
+UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND pr_url = ? AND target_sha != ? AND status IN ('running', 'paused') AND verdict = ''
 `
 
 type SupersedeStaleRunningReviewRunsParams struct {
@@ -1056,7 +1148,7 @@ func (q *Queries) UpdateReviewAgentSessionID(ctx context.Context, arg UpdateRevi
 }
 
 const updateReviewRunResult = `-- name: UpdateReviewRunResult :execrows
-UPDATE review_run SET status = ?, verdict = ?, body = ?, github_review_id = ?, auto_inject_review = ? WHERE id = ? AND status = 'running'
+UPDATE review_run SET status = ?, verdict = ?, body = ?, github_review_id = ?, auto_inject_review = ? WHERE id = ? AND status IN ('running', 'paused')
 `
 
 type UpdateReviewRunResultParams struct {

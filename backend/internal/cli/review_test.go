@@ -19,6 +19,7 @@ import (
 type reviewCapture struct {
 	method string
 	path   string
+	query  string
 	body   string
 }
 
@@ -29,6 +30,7 @@ func reviewServer(t *testing.T, status int, respBody string) (*httptest.Server, 
 		body, _ := io.ReadAll(r.Body)
 		capture.method = r.Method
 		capture.path = r.URL.Path
+		capture.query = r.URL.RawQuery
 		capture.body = string(body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -734,5 +736,35 @@ func TestReviewListDefaultsToCallingSession(t *testing.T) {
 	}
 	if capture.path != "/api/v1/sessions/mer-3/reviews" {
 		t.Fatalf("path = %q, want the calling session", capture.path)
+	}
+}
+
+func TestReviewCancelPrintsEachCancelledRun(t *testing.T) {
+	cfg := setReviewEnv(t)
+	srv, capture := reviewServer(t, http.StatusOK, `{"cancelledRuns":[{"id":"run-9","harness":"codex","targetSha":"0123456789abcdef"}]}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "review", "cancel", "mer-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if capture.query != "" {
+		t.Fatalf("query = %q, want none without a selector", capture.query)
+	}
+	if !strings.Contains(out, "cancelled run run-9 (codex, commit 0123456789ab)") {
+		t.Fatalf("stdout = %q, want the cancelled run listed", out)
+	}
+}
+
+func TestReviewCancelSendsRunAndAgentSelectors(t *testing.T) {
+	cfg := setReviewEnv(t)
+	srv, capture := reviewServer(t, http.StatusOK, `{"cancelledRuns":[]}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, aliveDeps(), "review", "cancel", "mer-1", "--run", "run-2", "--agent", "codex"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if capture.query != "agent=codex&runId=run-2" {
+		t.Fatalf("query = %q, want both selectors", capture.query)
 	}
 }

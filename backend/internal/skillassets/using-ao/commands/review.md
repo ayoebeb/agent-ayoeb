@@ -95,7 +95,7 @@ echo "Please fix the null check on line 42." | ao review submit --session mer-3 
 
 ### ao review cancel
 
-Cancel every running review for a worker's PR (default: the calling session). Alias: `stop`.
+Cancel the running reviews of a worker's PR (default: the calling session). Without a selector every running review is cancelled and each cancelled run is printed; `--run` or `--agent` cancels just one run or one reviewer. Alias: `stop`.
 
 **Syntax:**
 ```
@@ -107,11 +107,14 @@ ao review cancel [worker-session-id] [flags]
 | Flag | Meaning | Default / Required |
 |---|---|---|
 | `--session string` | Worker session id (or pass it positionally) | - |
+| `--run string` | Cancel only the review run with this id | - |
+| `--agent string` | Cancel only the running reviews of this reviewer agent (e.g. claude-code, codex) | - |
 
 **Example:**
 
 ```bash
 ao review cancel mer-3
+ao review cancel mer-3 --agent codex
 ```
 
 ---

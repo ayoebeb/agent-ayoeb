@@ -93,7 +93,7 @@ function PromptDialog({ prompt, onLater }: { prompt: UsageLimitPrompt; onLater: 
 				<div className={cn(settingsDialogBodyClass, "px-5 pt-0 pb-3")}>
 					<p className="text-caption text-muted-foreground">{t("usageLimitPrompt.sessions", { count: prompt.sessions.length })}</p>
 					<ul className="mt-1 text-control leading-5" data-testid="usage-limit-prompt-sessions">
-						{listed.map((session) => <li key={session.sessionId} className="truncate">
+						{listed.map((session) => <li key={`${session.sessionId}:${session.reviewId ?? ""}`} className="truncate">
 							{session.displayName || session.sessionId}
 							{session.kind === "orchestrator" ? <span className="text-muted-foreground"> · {t("usageLimitPrompt.orchestrator")}</span> : null}
 						</li>)}
