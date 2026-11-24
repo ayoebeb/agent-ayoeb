@@ -210,6 +210,9 @@ func interfaceHandoff(policy domain.SessionInterfaceTransitionPolicy) controller
 
 // Controller drives one Chat session.
 type Controller struct {
+	// approvals hears every permission request this session raises (Autopilot
+	// answers them by policy). Nil when nothing listens.
+	approvals    ApprovalObserver
 	sessionID    domain.SessionID
 	reviewID     string
 	conversation domain.ConversationRecord
@@ -412,8 +415,10 @@ func newController(
 	prChanged func(domain.SessionID),
 	onCodexCapacityChanged func(domain.SessionID, string, ports.CodexCapacityObservation),
 	reader SnapshotReader,
+	approvals ApprovalObserver,
 ) *Controller {
 	c := &Controller{
+		approvals:              approvals,
 		sessionID:              sessionID,
 		reviewID:               reviewOwnerID(owner),
 		conversation:           conversation,
@@ -3613,7 +3618,7 @@ func (c *Controller) apply(ctx context.Context, event ports.ChatEvent) error {
 	case ports.ChatEventApprovalRequested:
 		c.noteRememberableDecisions(event)
 		detail := mergeApprovalDetail(event)
-		return c.store.UpsertActivity(ctx, c.conversation.ID, event.ProviderTurnID,
+		if err := c.store.UpsertActivity(ctx, c.conversation.ID, event.ProviderTurnID,
 			domain.ConversationActivity{
 				ID:             c.newID(),
 				Kind:           domain.ActivityKindApproval,
@@ -3622,7 +3627,11 @@ func (c *Controller) apply(ctx context.Context, event ports.ChatEvent) error {
 				Detail:         detail,
 				RequestID:      event.RequestID,
 				ProviderItemID: event.ProviderItemID,
-			}, now)
+			}, now); err != nil {
+			return err
+		}
+		c.announceApproval(ctx, event, detail)
+		return nil
 
 	case ports.ChatEventThreadRenamed:
 		return c.applyThreadTitle(ctx, event.Title, now)
@@ -4304,6 +4313,37 @@ func mergeApprovalDetail(event ports.ChatEvent) []byte {
 		return event.Detail
 	}
 	return encoded
+}
+
+// announceApproval tells the approval observer about a stored request. It runs on
+// its own goroutine: the observer answers through Resolve, which this event
+// goroutine must not wait for. An AO reviewer's own approvals are never offered:
+// its controller carries the reviewed session's id, and nobody may auto-answer a
+// reviewer's prompt on the worker's behalf.
+//
+// The observer gets a fresh context, never one derived from the event's: that one
+// carries the projection transaction, which is closed by the time the observer
+// writes, so anything it did with that context would fail.
+func (c *Controller) announceApproval(_ context.Context, event ports.ChatEvent, detail []byte) {
+	if c.approvals == nil || c.reviewID != "" || event.RequestID == "" {
+		return
+	}
+	notice := ApprovalNotice{
+		RequestID: event.RequestID,
+		Summary:   event.Summary,
+		Detail:    detail,
+		Decisions: append([]ports.ChatDecisionOption(nil), event.Decisions...),
+	}
+	observer, id := c.approvals, c.sessionID
+	//nolint:gosec // G118: deliberately not the event's context, which carries the closed projection transaction (see above)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.log.Error("chat: approval observer panicked", "session", id, "panic", r)
+			}
+		}()
+		observer.ApprovalRequested(context.Background(), id, notice)
+	}()
 }
 
 func normalizeOrigin(origin domain.MessageOrigin) domain.MessageOrigin {

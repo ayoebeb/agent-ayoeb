@@ -79,6 +79,8 @@ func Build() ([]byte, error) {
 			"Code-review runs and findings"),
 		*(&openapi31.Tag{Name: "notifications"}).WithDescription(
 			"Durable dashboard notifications"),
+		*(&openapi31.Tag{Name: "autopilot"}).WithDescription(
+			"Autopilot: run one task to completion without the user, with a stop control and a log"),
 		*(&openapi31.Tag{Name: "reports"}).WithDescription(
 			"Durable worker reports"),
 		*(&openapi31.Tag{Name: "usage"}).WithDescription(
@@ -235,6 +237,24 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersClearOrchestratorWaitingResponse":          "ClearOrchestratorWaitingResponse",
 	"ControllersOrchestratorWaitingResponse":               "OrchestratorWaitingResponse",
 	"ControllersListOrchestratorWaitingResponse":           "ListOrchestratorWaitingResponse",
+	"ControllersStartAutopilotRequest":                     "StartAutopilotRequest",
+	"ControllersAutopilotRunResponse":                      "AutopilotRunResponse",
+	"ControllersAutopilotEventResponse":                    "AutopilotEventResponse",
+	"ControllersAutopilotMergedPRResponse":                 "AutopilotMergedPRResponse",
+	"ControllersAutopilotReportResponse":                   "AutopilotReportResponse",
+	"ControllersAutopilotViewResponse":                     "AutopilotViewResponse",
+	"ControllersListAutopilotResponse":                     "ListAutopilotResponse",
+	"ControllersStopAutopilotResponse":                     "StopAutopilotResponse",
+	"ControllersStopAllAutopilotResponse":                  "StopAllAutopilotResponse",
+	"ControllersAutopilotCriteriaRequest":                  "AutopilotCriteriaRequest",
+	"ControllersAutopilotDoneRequest":                      "AutopilotDoneRequest",
+	"ControllersAutopilotDoneResponse":                     "AutopilotDoneResponse",
+	"ControllersAutopilotDecideRequest":                    "AutopilotDecideRequest",
+	"ControllersAutopilotDecideResponse":                   "AutopilotDecideResponse",
+	"ControllersAutopilotParkRequest":                      "AutopilotParkRequest",
+	"ControllersAutopilotParkResponse":                     "AutopilotParkResponse",
+	"ControllersResolveAutopilotItemResponse":              "ResolveAutopilotItemResponse",
+	"ControllersUpdateAutopilotSettingsRequest":            "UpdateAutopilotSettingsRequest",
 	"ControllersConversationSnapshotResponse":              "ConversationSnapshotResponse",
 	"ControllersConversationTurnResponse":                  "ConversationTurnResponse",
 	"ControllersConversationUsageLimitResponse":            "ConversationUsageLimitResponse",
@@ -838,6 +858,7 @@ func operations() []operation {
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, notificationOperations()...)
+	ops = append(ops, autopilotOperations()...)
 	ops = append(ops, reportOperations()...)
 	ops = append(ops, usageOperations()...)
 	ops = append(ops, pushOperations()...)
@@ -1371,6 +1392,17 @@ func shellTerminalOperations() []operation {
 			method: http.MethodPatch, path: "/api/v1/settings/session-retention", id: "updateSessionRetention", tag: "settings",
 			summary: "Choose how long archived sessions are kept before they are deleted",
 			reqBody: controllers.UpdateSessionRetentionRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPatch, path: "/api/v1/settings/autopilot", id: "updateAutopilotSettings", tag: "settings",
+			summary: "Choose how many iterations an Autopilot task run may take before it parks itself",
+			reqBody: controllers.UpdateAutopilotSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
@@ -4304,6 +4336,107 @@ func awakeOperations() []operation {
 		common(http.MethodPost, "/api/v1/awake/recover", "recoverAwake", nil, nil),
 		common(http.MethodDelete, "/api/v1/awake/history", "clearAwakeHistory", nil, nil),
 		common(http.MethodPost, "/api/v1/awake/downloads", "awakeDownloads", controllers.AwakeDownloadsRequest{}, nil),
+	}
+}
+
+func autopilotOperations() []operation {
+	errs := func(codes ...int) []respUnit {
+		out := make([]respUnit, 0, len(codes))
+		for _, code := range codes {
+			out = append(out, respUnit{code, envelope.APIError{}})
+		}
+		return out
+	}
+	with := func(ok any, codes ...int) []respUnit {
+		return append([]respUnit{{http.StatusOK, ok}}, errs(codes...)...)
+	}
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/autopilot", id: "listAutopilot", tag: "autopilot",
+			summary: "List every Autopilot task run that is still open (running, paused or parked)",
+			resps:   with(controllers.ListAutopilotResponse{}, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/autopilot/stop", id: "stopAllAutopilot", tag: "autopilot",
+			summary: "Emergency stop: end every open Autopilot run and cut the sessions' current turns",
+			resps:   with(controllers.StopAllAutopilotResponse{}, http.StatusForbidden, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/autopilot/items/{eventId}/resolve", id: "resolveAutopilotItem", tag: "autopilot",
+			summary:    "Mark a parked Autopilot item handled",
+			pathParams: []any{controllers.AutopilotItemIDParam{}},
+			resps: with(controllers.ResolveAutopilotItemResponse{},
+				http.StatusForbidden, http.StatusNotFound, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/autopilot/items/{eventId}/undo", id: "undoAutopilotDecision", tag: "autopilot",
+			summary:    "Ask the agent to undo one of its recorded Autopilot decisions",
+			pathParams: []any{controllers.AutopilotItemIDParam{}},
+			resps: with(controllers.ResolveAutopilotItemResponse{},
+				http.StatusForbidden, http.StatusNotFound, http.StatusInternalServerError, http.StatusNotImplemented, http.StatusServiceUnavailable),
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/autopilot", id: "getAutopilot", tag: "autopilot",
+			summary:    "Read a session's Autopilot run, its log and the return report",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps:      with(controllers.AutopilotViewResponse{}, http.StatusNotFound, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/autopilot", id: "startAutopilot", tag: "autopilot",
+			summary:    "Give a session one task to finish on its own, without waiting for the user",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.StartAutopilotRequest{},
+			resps: with(controllers.AutopilotViewResponse{},
+				http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict,
+				http.StatusInternalServerError, http.StatusNotImplemented, http.StatusServiceUnavailable),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/autopilot/stop", id: "stopAutopilot", tag: "autopilot",
+			summary:    "Stop a session's Autopilot run at once and cut its current turn",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps:      with(controllers.StopAutopilotResponse{}, http.StatusForbidden, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/autopilot/resume", id: "resumeAutopilot", tag: "autopilot",
+			summary:    "Continue a parked Autopilot run",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: with(controllers.AutopilotViewResponse{},
+				http.StatusForbidden, http.StatusNotFound, http.StatusConflict,
+				http.StatusInternalServerError, http.StatusNotImplemented, http.StatusServiceUnavailable),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/autopilot/criteria", id: "setAutopilotCriteria", tag: "autopilot",
+			summary:    "Record the acceptance criteria the agent drafted for its Autopilot task",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.AutopilotCriteriaRequest{},
+			resps: with(controllers.AutopilotRunResponse{},
+				http.StatusBadRequest, http.StatusForbidden, http.StatusConflict, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/autopilot/done", id: "declareAutopilotDone", tag: "autopilot",
+			summary:    "Declare the Autopilot task done; AO checks the verification gates before it finishes the run",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.AutopilotDoneRequest{},
+			resps: with(controllers.AutopilotDoneResponse{},
+				http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusConflict,
+				http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/autopilot/decisions", id: "recordAutopilotDecision", tag: "autopilot",
+			summary:    "Record a choice the agent made instead of asking the user",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.AutopilotDecideRequest{},
+			resps: with(controllers.AutopilotDecideResponse{},
+				http.StatusBadRequest, http.StatusForbidden, http.StatusConflict, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/autopilot/parked", id: "parkAutopilotItem", tag: "autopilot",
+			summary:    "Park one item that needs a hard limit crossed; the user is told once and the run carries on",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.AutopilotParkRequest{},
+			resps: with(controllers.AutopilotParkResponse{},
+				http.StatusBadRequest, http.StatusForbidden, http.StatusConflict, http.StatusInternalServerError, http.StatusNotImplemented),
+		},
 	}
 }
 

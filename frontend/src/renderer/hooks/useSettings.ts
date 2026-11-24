@@ -47,6 +47,8 @@ export interface Settings {
 	orchestratorWaitingEnabled?: boolean;
 	/** Minutes a question stays unanswered before it is announced a second time; 0 turns the reminder off. */
 	orchestratorWaitingRenotifyMinutes?: number;
+	/** Most iterations an Autopilot task run may take before it parks itself. Absent on a daemon that predates Autopilot. */
+	autopilotMaxIterations?: number;
 }
 
 const settingsReadTimeoutMs = 10_000;
@@ -94,6 +96,8 @@ export function useSettings(hostId?: string, enabled = true) {
 				// Absent on a daemon that predates the notification, where its controls would do nothing.
 				orchestratorWaitingEnabled: data?.orchestratorWaitingEnabled,
 				orchestratorWaitingRenotifyMinutes: data?.orchestratorWaitingRenotifyMinutes,
+				// Absent on a daemon that predates Autopilot, where its setting would do nothing.
+				autopilotMaxIterations: data?.autopilotMaxIterations,
 			};
 		},
 	});
@@ -226,6 +230,26 @@ export function useUpdateOrchestratorWaiting() {
 
 	return {
 		update: (next: { enabled: boolean; renotifyMinutes: number }) => mutation.mutate(next),
+		saving: mutation.isPending,
+		error: mutation.error ? apiErrorMessage(mutation.error) : undefined,
+	};
+}
+
+/** Saves how many iterations an Autopilot task run may take before it parks itself. */
+export function useUpdateAutopilotMaxIterations() {
+	const queryClient = useQueryClient();
+	const mutation = useMutation({
+		mutationFn: async (maxIterations: number) => {
+			const { data, error } = await apiClient.PATCH("/api/v1/settings/autopilot", { body: { maxIterations } });
+			if (error) throw error;
+			return data;
+		},
+		// The daemon is the source of truth: refetch instead of assuming the write.
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsQueryKey }),
+	});
+
+	return {
+		update: (maxIterations: number) => mutation.mutate(maxIterations),
 		saving: mutation.isPending,
 		error: mutation.error ? apiErrorMessage(mutation.error) : undefined,
 	};

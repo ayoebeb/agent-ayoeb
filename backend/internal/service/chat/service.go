@@ -77,6 +77,7 @@ type Service struct {
 	stopProviderHost func(context.Context, domain.SessionID) error
 	reports          *reportsvc.Coordinator
 	replyObserver    HumanReplyObserver
+	approvalObserver ApprovalObserver
 	renders          RenderFiles
 	dataDir          string
 	reconcileOutput  func(context.Context, domain.SessionID) error
@@ -167,6 +168,30 @@ func (s *Service) notifyHumanReply(ctx context.Context, id domain.SessionID, msg
 	s.replyObserver.UserReplied(ctx, id)
 }
 
+// ApprovalNotice is one permission request a provider is waiting on.
+type ApprovalNotice struct {
+	RequestID string
+	// Summary is the provider's one-line label for the request.
+	Summary string
+	// Detail is the provider payload as JSON: the tool's input, its name and kind.
+	Detail    []byte
+	Decisions []ports.ChatDecisionOption
+}
+
+// ApprovalObserver hears of every permission request a session raises, once the
+// request is stored. Autopilot uses it to answer by policy instead of waiting for
+// the user. It is called off the event goroutine, so it may call back into the
+// service (Resolve) without deadlocking.
+type ApprovalObserver interface {
+	ApprovalRequested(ctx context.Context, id domain.SessionID, notice ApprovalNotice)
+}
+
+// SetApprovalObserver registers who hears of every permission request. Call it
+// before sessions start; controllers read it when they are built.
+func (s *Service) SetApprovalObserver(observer ApprovalObserver) {
+	s.approvalObserver = observer
+}
+
 // controllerGate serializes start/stop for one session without making provider
 // I/O for that session block lookups or commands for every other Chat session.
 type controllerGate chan struct{}
@@ -245,6 +270,10 @@ type Options struct {
 	// harness release moves to the installed one on its next message, and the
 	// quiet time required first. Nil never moves a session.
 	VersionRefresh func() (time.Duration, bool)
+	// ApprovalObserver hears every permission request a session raises. The
+	// daemon also sets it after construction with SetApprovalObserver; either
+	// must happen before sessions start.
+	ApprovalObserver ApprovalObserver
 }
 
 // New builds a Chat service.
@@ -279,6 +308,7 @@ func New(opts Options) *Service {
 		reconcileOutput:        opts.ReconcileOutputType,
 		hibernationEnabled:     opts.HibernationEnabled,
 		versionRefresh:         opts.VersionRefresh,
+		approvalObserver:       opts.ApprovalObserver,
 		controllers:            make(map[domain.SessionID]*Controller),
 		handoffInterrupted:     make(map[domain.SessionID]string),
 		ownerControllers:       make(map[domain.ConversationOwner]*Controller),
@@ -1093,7 +1123,7 @@ func (s *Service) startLocked(ctx context.Context, cfg StartConfig) (*Controller
 	// A fresh generation per launch, so events from the controller this one
 	// replaced can be told apart from the current one's.
 	controller := newController(
-		cfg.SessionID, owner, conversation, generation, cfg.Harness, conv, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.recheckAccount, s.prChanged, s.onCodexCapacityChanged, s.reader)
+		cfg.SessionID, owner, conversation, generation, cfg.Harness, conv, s.store, s.activity, s.log, s.newID, s.now, s.onAccountChanged, s.recheckAccount, s.prChanged, s.onCodexCapacityChanged, s.reader, s.approvalObserver)
 	controller.permissionMemory = s.permissionMemory
 	var commitProviderHistory func(context.Context) error
 	if liveReconnect {

@@ -199,6 +199,10 @@ vi.mock("../hooks/useOrchestratorWaiting", () => ({
 	useOrchestratorWaiting: () => ({ waiting: [] }),
 }));
 
+// Autopilot runs come from the daemon too; these tests decide them per project.
+const { autopilotMock } = vi.hoisted(() => ({ autopilotMock: vi.fn() }));
+vi.mock("../hooks/useAutopilot", () => ({ useProjectAutopilot: autopilotMock }));
+
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock, POST: postMock },
 	hasTrustedApiBaseUrl: () => trustedApi.current,
@@ -594,6 +598,7 @@ beforeEach(() => {
 	spawnMock.mockReset();
 	resumeOrchestratorMock.mockReset().mockResolvedValue(undefined);
 	orchestratorWaitingMock.mockReset().mockReturnValue(undefined);
+	autopilotMock.mockReset().mockReturnValue(undefined);
 	updateStatusMock.mockReset().mockResolvedValue({ state: "idle" });
 	downloadUpdateMock.mockReset().mockResolvedValue(undefined);
 	checkUpdateMock.mockReset().mockResolvedValue(undefined);
@@ -905,6 +910,56 @@ describe("Sidebar", () => {
 		it("looks the wait up by this project on this computer", () => {
 			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
 			expect(orchestratorWaitingMock).toHaveBeenCalledWith("local", "proj-1");
+		});
+	});
+
+	describe("Autopilot on a session of the project", () => {
+		const run = (state: string) => ({
+			id: "ap_1",
+			sessionId: "proj-1-orch",
+			projectId: "proj-1",
+			task: "Ship it",
+			state,
+			iteration: 2,
+			maxIterations: 30,
+			hostId: "local",
+		});
+
+		it.each([
+			["running", "Autopilot on"],
+			["paused_usage_limit", "Autopilot paused"],
+			["parked", "Autopilot parked: needs you"],
+		])("marks the project row for a %s run, and names it in words", (state, label) => {
+			autopilotMock.mockImplementation((_host: string, projectId: string) =>
+				projectId === "proj-1" ? run(state) : undefined,
+			);
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
+
+			const marker = document.querySelector('[data-project-marker="autopilot"]');
+			expect(marker).toHaveAttribute("aria-label", label);
+			expect(marker).toHaveAttribute("role", "img");
+			expect(marker).toHaveAttribute("data-autopilot-state", state);
+		});
+
+		// A parked run needs the user, so the collapsed rail shows the same red dot
+		// the other "needs you" states use; a running one does not.
+		it("lights the collapsed rail's attention dot for a parked run", () => {
+			autopilotMock.mockReturnValue(run("parked"));
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
+			expect(document.querySelector('[data-project-marker="attention"]')).not.toBeNull();
+		});
+
+		it("leaves the attention dot off for a run that is only working", () => {
+			autopilotMock.mockReturnValue(run("running"));
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
+			expect(document.querySelector('[data-project-marker="attention"]')).toBeNull();
+		});
+
+		it("shows nothing for a project with no open run, and looks it up by project on this computer", () => {
+			renderSidebar({ workspaces: [{ ...workspace, sessions: [exitedOrchestrator] }] });
+
+			expect(document.querySelector('[data-project-marker="autopilot"]')).toBeNull();
+			expect(autopilotMock).toHaveBeenCalledWith("local", "proj-1");
 		});
 	});
 

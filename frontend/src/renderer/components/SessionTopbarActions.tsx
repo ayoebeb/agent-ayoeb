@@ -38,6 +38,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { CueRunMenu } from "./chat/CueRunMenu";
 import { captureTopbarAction } from "../lib/topbar-telemetry";
 import { SessionOwnerTag } from "./SessionOwnerTag";
+import { AutopilotTopbarControl } from "./AutopilotTopbarControl";
 
 // The action cluster a session's tab strip hosts: open-in-editor, cues, and
 // the orchestrator / board / new-task launchers. The page frame itself is
@@ -178,6 +179,16 @@ export function SessionTopbarActions({
 					key={`coder-workspace-${session.id}`}
 					url={session.cloud.coderWorkspaceUrl}
 					style={noDragStyle}
+				/>
+			) : null}
+			{/* Autopilot: give the session one task to finish on its own. The state
+			    badge and the Stop button stay in the bar while a run is open. A
+			    cloud session's run would live on a daemon this app does not read. */}
+			{session && !hostId && !session.cloud ? (
+				<AutopilotTopbarControl
+					key={`autopilot-${session.id}`}
+					sessionId={session.id}
+					sessionTerminated={session.isTerminated}
 				/>
 			) : null}
 			{/* Cues run from the topbar into the selected session. */}

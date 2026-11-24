@@ -67,13 +67,21 @@ type Settings interface {
 	OrchestratorWaiting(ctx context.Context) (enabled bool, renotifyAfter time.Duration, err error)
 }
 
+// Autopilot takes a declared wait while the orchestrator runs on Autopilot: the
+// user is not told, because Autopilot has the orchestrator decide the question
+// itself and records that decision. It reports whether it took the wait.
+type Autopilot interface {
+	OnWaitDeclared(ctx context.Context, id domain.SessionID, question string) (bool, error)
+}
+
 // Service declares, clears and reminds about orchestrator waits.
 type Service struct {
-	store    Store
-	notifier Notifier
-	settings Settings
-	clock    func() time.Time
-	newKey   func() string
+	store     Store
+	notifier  Notifier
+	settings  Settings
+	autopilot Autopilot
+	clock     func() time.Time
+	newKey    func() string
 }
 
 // Deps configures a Service.
@@ -81,18 +89,24 @@ type Deps struct {
 	Store    Store
 	Notifier Notifier
 	Settings Settings
-	Clock    func() time.Time
+	// Autopilot is optional; without it every wait notifies the user.
+	Autopilot Autopilot
+	Clock     func() time.Time
 }
 
 // New constructs the service.
 func New(d Deps) *Service {
-	s := &Service{store: d.Store, notifier: d.Notifier, settings: d.Settings, clock: d.Clock}
+	s := &Service{store: d.Store, notifier: d.Notifier, settings: d.Settings, autopilot: d.Autopilot, clock: d.Clock}
 	if s.clock == nil {
 		s.clock = func() time.Time { return time.Now().UTC() }
 	}
 	s.newKey = func() string { return domain.OrchestratorWaitingSourceKeyPrefix + uuid.NewString() }
 	return s
 }
+
+// SetAutopilot binds the Autopilot service after construction: it needs services
+// that are built later than this one. Call it before the API starts serving.
+func (s *Service) SetAutopilot(autopilot Autopilot) { s.autopilot = autopilot }
 
 // Outcome reports what Declare did.
 type Outcome string
@@ -105,6 +119,9 @@ const (
 	OutcomeUnchanged Outcome = "unchanged"
 	// OutcomeDisabled means the user switched the notification off.
 	OutcomeDisabled Outcome = "disabled"
+	// OutcomeAutopilot means Autopilot is running for this orchestrator, so the
+	// user was not notified: the orchestrator decides the question itself.
+	OutcomeAutopilot Outcome = "autopilot"
 )
 
 // Declare records that the orchestrator's turn ended waiting on the user, with a
@@ -119,6 +136,17 @@ func (s *Service) Declare(ctx context.Context, id domain.SessionID, question str
 	rec, err := s.orchestrator(ctx, id)
 	if err != nil {
 		return "", err
+	}
+	if s.autopilot != nil {
+		// While Autopilot runs, the orchestrator never waits on the user: nothing
+		// is sent to them, whatever the notification setting says.
+		taken, err := s.autopilot.OnWaitDeclared(ctx, id, question)
+		if err != nil {
+			return "", fmt.Errorf("orchestrator waiting: autopilot: %w", err)
+		}
+		if taken {
+			return OutcomeAutopilot, nil
+		}
 	}
 	enabled, _, err := s.settings.OrchestratorWaiting(ctx)
 	if err != nil {

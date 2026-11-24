@@ -201,6 +201,33 @@ the orchestrator runs `ao notify-user --clear`, or when the session ends; it is
 announced once more after the delay set in Settings (10 minutes by default) and
 never again. Declaring the same question while it is open is a no-op.
 
+`ao autopilot` runs one task to completion without the human. The human starts
+it (`ao autopilot start "<task>" --session <id>`, or the Autopilot control in the
+app); an agent cannot switch it on or off for itself, because the CLI sends the
+calling session and the daemon refuses an agent on those routes. While a run is
+open the daemon sends the session the task and its rules, then at every turn end
+(the lifecycle manager's idle transition, for Chat and terminal sessions alike)
+sends the task again with the iteration, the recorded acceptance criteria and
+what is still open, until the agent runs `ao autopilot done --evidence`. `done`
+finishes the run only when the gates pass: criteria recorded, evidence given, an
+approved AO review of each open PR's exact head, and green CI. CI that cannot
+start is recorded as a gap by `--ci-cannot-run`, never counted as a pass. The loop
+parks itself, with one notification, at the iteration cap (30 by default,
+`PATCH /api/v1/settings/autopilot`) and after three iterations in a row with no
+change to the workspace, the PRs or the recorded evidence. `ao notify-user
+--waiting` does not notify the human while a run is open for that orchestrator;
+the agent decides and records it with `ao autopilot decide`. Permission requests
+of the run's Chat session and of the project workers started after the run began
+are answered by a policy: allow inside the workspace, deny the hard limits (money,
+CI, main, deleting outside the workspace, admin, messaging outsiders, credentials,
+other PCs) and park the denied item with one notification; `gh pr merge` is
+decided against the PR's review and check facts. A terminal session's prompts
+cannot be answered through the API, so a run on one parks if a prompt sits
+unanswered for about 90 seconds. `POST /api/v1/autopilot/stop` ends every open
+run and interrupts the sessions' current turns (the emergency stop). Usage-limit
+pause is a marked integration point (`autopilot.UsageLimitCheck`) for the
+usage-limit state of PR #23; until it is wired the loop never pauses.
+
 When a browser-displayable file is the requested artifact, agents should call
 `ao preview <workspace-path>` immediately after creating or materially updating
 the primary output. Markdown, HTML, PDF, SVG, and common images can be served

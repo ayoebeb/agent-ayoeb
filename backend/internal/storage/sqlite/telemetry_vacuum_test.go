@@ -94,8 +94,13 @@ func TestTelemetryIncrementalVacuumUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := pages()
-	if reclaimed := before - after; reclaimed <= 0 || reclaimed > 256 {
-		t.Fatalf("reclaimed %d pages, want 1..256", reclaimed)
+	// 256 free pages are asked for. With auto_vacuum the file also drops the
+	// pointer-map page that no longer has anything to map when the shrink crosses a
+	// pointer-map boundary, so one more page can go. Which side of a boundary the
+	// database sits on depends on how many tables and indexes the migrations
+	// create, so a new migration can tip it; 256 pages never cross two boundaries.
+	if reclaimed := before - after; reclaimed <= 0 || reclaimed > 257 {
+		t.Fatalf("reclaimed %d pages, want 1..257 (256 asked for, plus at most one pointer-map page)", reclaimed)
 	}
 	bytesAfter := fileSize()
 	if bytesAfter >= bytesBefore {

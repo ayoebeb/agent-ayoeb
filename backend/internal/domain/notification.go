@@ -31,13 +31,18 @@ const (
 	// turn that ended with a question the orchestrator declared with
 	// `ao notify-user --waiting`. It stays open until the user responds.
 	NotificationOrchestratorWaiting NotificationType = "orchestrator_waiting"
+	// NotificationAutopilotParked means Autopilot parked one item for the user: a
+	// hard limit it must not cross, or a task run it could not finish on its own.
+	// It is sent once per parked item and stays open until the user handles it.
+	NotificationAutopilotParked NotificationType = "autopilot_parked"
 )
 
 // Valid reports whether t is one of the v1 notification kinds.
 func (t NotificationType) Valid() bool {
 	switch t {
 	case NotificationNeedsInput, NotificationReadyToMerge, NotificationPRMerged, NotificationPRClosedUnmerged,
-		NotificationReviewCompleted, NotificationReviewChangesRequested, NotificationOrchestratorWaiting, NotificationUsageLimit:
+		NotificationReviewCompleted, NotificationReviewChangesRequested, NotificationOrchestratorWaiting, NotificationUsageLimit,
+		NotificationAutopilotParked:
 		return true
 	default:
 		return false
@@ -64,8 +69,14 @@ func OrchestratorWaitingSourceKey(id SessionID, at time.Time) string {
 // Terminal facts — a PR that merged or closed — describe something that already
 // happened, so they are surfaced once as unseen and never held as unresolved.
 func (t NotificationType) NeedsResolution() bool {
-	return t == NotificationNeedsInput || t == NotificationReadyToMerge || t == NotificationOrchestratorWaiting
+	return t == NotificationNeedsInput || t == NotificationReadyToMerge || t == NotificationOrchestratorWaiting ||
+		t == NotificationAutopilotParked
 }
+
+// AutopilotParkedSourceKeyPrefix starts the source key of every autopilot_parked
+// row. Each parked item has a key of its own (the id of its log line), so two
+// parked items are two rows and one item can never notify twice.
+const AutopilotParkedSourceKeyPrefix = "autopilot_parked:"
 
 // NotificationStatus is the seen state for a stored notification. The stored
 // values remain "unread"/"read" for wire and schema compatibility; "unread"

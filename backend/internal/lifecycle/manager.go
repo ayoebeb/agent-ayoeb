@@ -254,6 +254,8 @@ type Manager struct {
 	projects         projectConfigLoader
 	operationGateMu  sync.RWMutex
 	operationGate    sessionOperationGate
+	turnEndMu        sync.RWMutex
+	turnEndObservers []TurnEndObserver
 	turnObserverMu   sync.RWMutex
 	turnObserver     TurnObserver
 	// dataDir backs ReconcileSessionOutputType's artifact-dir fallback for
@@ -338,6 +340,24 @@ func (m *Manager) SetUsageFinalizer(finalizer sessionUsageFinalizer) {
 	defer m.mu.Unlock()
 	m.usageFinalizer = finalizer
 	m.usageReactivator, _ = finalizer.(sessionUsageReactivator)
+}
+
+// TurnEndObserver hears that a session's turn ended: its activity went from
+// working (or waiting on the user) to idle. It is called for Chat and terminal
+// sessions alike, after the new state is stored, and must not block: Autopilot
+// uses it to send the task again, off the caller's goroutine.
+type TurnEndObserver interface {
+	SessionTurnEnded(domain.SessionRecord)
+}
+
+// AddTurnEndObserver registers an observer of every turn that ends.
+func (m *Manager) AddTurnEndObserver(observer TurnEndObserver) {
+	if observer == nil {
+		return
+	}
+	m.turnEndMu.Lock()
+	m.turnEndObservers = append(m.turnEndObservers, observer)
+	m.turnEndMu.Unlock()
 }
 
 // SetSessionOperationGate prevents observation-driven terminal facts from
@@ -1182,6 +1202,12 @@ retryProjection:
 		// turn that ends. It must not block.
 		if ender, ok := gate.(interface{ SessionTurnEnded(domain.SessionRecord) }); ok {
 			ender.SessionTurnEnded(next)
+		}
+		m.turnEndMu.RLock()
+		observers := m.turnEndObservers
+		m.turnEndMu.RUnlock()
+		for _, observer := range observers {
+			observer.SessionTurnEnded(next)
 		}
 		if o := m.currentTurnObserver(); o != nil && prevState == domain.ActivityActive {
 			o.SessionTurnIdle(next, s.Event, cmp.Or(s.FinalAssistantMessage, s.LatestAssistantUpdate))

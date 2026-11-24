@@ -28,7 +28,7 @@ SELECT *
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting')
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting', 'autopilot_parked')
   AND (
     CAST(sqlc.arg(before_id) AS TEXT) = ''
     OR created_at < sqlc.arg(before_created_at)
@@ -60,7 +60,7 @@ SELECT COUNT(*)
 FROM notifications
 WHERE resolved_at IS NULL
   AND dismissed_at IS NULL
-  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting');
+  AND type IN ('needs_input', 'ready_to_merge', 'orchestrator_waiting', 'autopilot_parked');
 
 -- name: MarkNotificationRead :one
 UPDATE notifications

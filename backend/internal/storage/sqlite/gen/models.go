@@ -197,6 +197,7 @@ type AppSetting struct {
 	OrchestratorWaitingRenotifyMinutes int64
 	UsageLimitAutoResume               bool
 	UsageLimitMaxResumes               int64
+	AutopilotMaxIterations             int64
 }
 
 type Automation struct {
@@ -234,6 +235,41 @@ type AutomationRun struct {
 	ErrorMessage   sql.NullString
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+type AutopilotEvent struct {
+	ID         string
+	RunID      string
+	SessionID  string
+	Kind       string
+	Iteration  int64
+	Summary    string
+	Detail     string
+	CreatedAt  time.Time
+	ResolvedAt sql.NullTime
+}
+
+type AutopilotRun struct {
+	ID                 string
+	SessionID          string
+	ProjectID          sql.NullString
+	Task               string
+	Criteria           string
+	State              string
+	EndReason          string
+	Iteration          int64
+	MaxIterations      int64
+	StagnantIterations int64
+	Fingerprint        string
+	LastGap            string
+	Evidence           string
+	CIGap              string
+	PermissionsAllowed int64
+	PermissionsDenied  int64
+	StartedAt          time.Time
+	UpdatedAt          time.Time
+	LastNudgeAt        sql.NullTime
+	EndedAt            sql.NullTime
 }
 
 type AwakeState struct {

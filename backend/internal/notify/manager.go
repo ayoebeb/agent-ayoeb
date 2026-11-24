@@ -54,6 +54,7 @@ type Manager struct {
 	newID          func() string
 	projectName    func(context.Context, domain.ProjectID) string
 	waitingEnabled func(context.Context) bool
+	suppress       func(context.Context, ports.NotificationIntent) bool
 }
 
 // Deps configures a Manager.
@@ -72,13 +73,19 @@ type Deps struct {
 	// is stored as the ordinary needs_input notification, which is exactly what
 	// an orchestrator produced before the feature existed. Nil means on.
 	WaitingEnabled func(context.Context) bool
+	// Suppress reports that an intent must not be stored because something else
+	// is already answering it: Autopilot answers the permission requests of the
+	// sessions it covers by policy, so a "needs your input" row for them would
+	// only flash a toast for a question that is gone a moment later. It is asked
+	// about needs_input and orchestrator_waiting intents only. Nil suppresses nothing.
+	Suppress func(context.Context, ports.NotificationIntent) bool
 }
 
 // New constructs a write-side notification manager.
 func New(d Deps) *Manager {
 	m := &Manager{
 		store: d.Store, publisher: d.Publisher, barrier: d.Barrier, clock: d.Clock, newID: d.NewID,
-		projectName: d.ProjectName, waitingEnabled: d.WaitingEnabled,
+		projectName: d.ProjectName, waitingEnabled: d.WaitingEnabled, suppress: d.Suppress,
 	}
 	if m.barrier == nil {
 		m.barrier = &sync.Mutex{}
@@ -100,6 +107,10 @@ func (m *Manager) Notify(ctx context.Context, intent Intent) error {
 	}
 	if intent.CreatedAt.IsZero() {
 		intent.CreatedAt = m.clock().UTC()
+	}
+	if m.suppress != nil && (intent.Type == domain.NotificationNeedsInput || intent.Type == domain.NotificationOrchestratorWaiting) &&
+		m.suppress(ctx, intent) {
+		return nil
 	}
 	if intent.Type == domain.NotificationOrchestratorWaiting {
 		if m.waitingEnabled != nil && !m.waitingEnabled(ctx) {

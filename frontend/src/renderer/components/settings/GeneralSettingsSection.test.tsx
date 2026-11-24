@@ -5,11 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings } from "../../hooks/useSettings";
 import { useUiStore } from "../../stores/ui-store";
 
-const { settingsMock, updateRetentionMock, updateUsageLimitResumeMock, updateOrchestratorWaitingMock, setSoundMock } = vi.hoisted(() => ({
+const { settingsMock, updateRetentionMock, updateUsageLimitResumeMock, updateOrchestratorWaitingMock, updateAutopilotMock, setSoundMock } = vi.hoisted(() => ({
 	settingsMock: vi.fn(),
 	updateRetentionMock: vi.fn(),
 	updateUsageLimitResumeMock: vi.fn(),
 	updateOrchestratorWaitingMock: vi.fn(),
+	updateAutopilotMock: vi.fn(),
 	setSoundMock: vi.fn(),
 }));
 
@@ -21,6 +22,7 @@ vi.mock("../../hooks/useSettings", () => ({
 	useUpdateSessionRetention: () => ({ update: updateRetentionMock, saving: false, error: undefined }),
 	useUpdateUsageLimitResume: () => ({ update: updateUsageLimitResumeMock, saving: false, error: undefined }),
 	useUpdateOrchestratorWaiting: () => ({ update: updateOrchestratorWaitingMock, saving: false, error: undefined }),
+	useUpdateAutopilotMaxIterations: () => ({ update: updateAutopilotMock, saving: false, error: undefined }),
 }));
 
 // The desktop app plays the sound, so its switch lives in the app's own UI settings.
@@ -79,7 +81,37 @@ beforeEach(() => {
 	updateRetentionMock.mockReset();
 	updateUsageLimitResumeMock.mockReset();
 	updateOrchestratorWaitingMock.mockReset();
+	updateAutopilotMock.mockReset();
 	setSoundMock.mockReset().mockResolvedValue({});
+});
+
+describe("autopilot iteration cap", () => {
+	const cap = { name: "Most iterations per task" };
+
+	it("shows the daemon's cap and saves the one the user picks", async () => {
+		settingsMock.mockReturnValue(settings({ autopilotMaxIterations: 30 }));
+		renderSection();
+
+		expect(screen.getByRole("button", cap)).toHaveTextContent("30 iterations");
+		await userEvent.click(screen.getByRole("button", cap));
+		await userEvent.click(await screen.findByRole("menuitem", { name: "50 iterations" }));
+
+		expect(updateAutopilotMock).toHaveBeenCalledWith(50);
+	});
+
+	it("shows a cap set outside the menu as itself", () => {
+		settingsMock.mockReturnValue(settings({ autopilotMaxIterations: 7 }));
+		renderSection();
+
+		expect(screen.getByRole("button", cap)).toHaveTextContent("7 iterations");
+	});
+
+	it("hides the control on a daemon that predates Autopilot", () => {
+		settingsMock.mockReturnValue(settings({}));
+		renderSection();
+
+		expect(screen.queryByRole("button", cap)).not.toBeInTheDocument();
+	});
 });
 
 describe("orchestrator waiting alerts", () => {

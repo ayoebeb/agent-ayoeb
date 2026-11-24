@@ -21,7 +21,8 @@ func enrich(intent Intent) (domain.NotificationRecord, error) {
 	if !intent.Type.Valid() {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationType
 	}
-	if intent.Type != domain.NotificationNeedsInput && intent.Type != domain.NotificationOrchestratorWaiting && intent.Type != domain.NotificationUsageLimit && rec.PRURL == "" {
+	if intent.Type != domain.NotificationNeedsInput && intent.Type != domain.NotificationOrchestratorWaiting &&
+		intent.Type != domain.NotificationUsageLimit && intent.Type != domain.NotificationAutopilotParked && rec.PRURL == "" {
 		return domain.NotificationRecord{}, domain.ErrInvalidNotificationRecord
 	}
 	rec.Title = titleForIntent(intent)
@@ -56,6 +57,8 @@ func titleForIntent(intent Intent) string {
 		return usageLimitTitle(intent)
 	case domain.NotificationOrchestratorWaiting:
 		return OrchestratorWaitingTitle(intent.ProjectName, string(intent.ProjectID))
+	case domain.NotificationAutopilotParked:
+		return fmt.Sprintf("%s: Autopilot parked an item for you", sessionLabel(intent))
 	default:
 		return "Notification"
 	}
@@ -121,6 +124,11 @@ func bodyForIntent(intent Intent) string {
 			return detail
 		}
 		return OrchestratorWaitingFallbackBody
+	case domain.NotificationAutopilotParked:
+		if detail := strings.TrimSpace(intent.Detail); detail != "" {
+			return detail
+		}
+		return "Autopilot parked an item it must not do on its own and carried on with the rest."
 	default:
 		return ""
 	}

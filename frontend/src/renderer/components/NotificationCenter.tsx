@@ -58,6 +58,7 @@ import { TooltipProvider } from "./ui/tooltip";
 import { useCloudNotifications } from "../hooks/useCloudNotifications";
 import { useOrchestratorWaiting } from "../hooks/useOrchestratorWaiting";
 import { localizedNotificationCopy, NOTIFICATION_TYPE_ORCHESTRATOR_WAITING, waitsBeyondUnread } from "../lib/orchestrator-waiting";
+import { NOTIFICATION_TYPE_AUTOPILOT_PARKED } from "../lib/autopilot";
 import { labelForHost } from "../lib/host-clients";
 import { clearRemoteNotification, clearRemoteNotifications, connectRemoteNotificationStreams, fetchRemoteNotificationsPage, markRemoteNotificationsRead, remoteNotificationsQueryKey, useRemoteNotificationHosts } from "../hooks/useRemoteNotifications";
 import type { CloudCpNotification } from "../lib/cloud-cp/types";
@@ -1370,7 +1371,9 @@ function notificationPRTitleLink(
 
 function notificationCopy(notification: NotificationDTO, sessionName?: string): NotificationCopy {
 	// An orchestrator wait reads in the user's own language; the daemon stores English.
-	if (notification.type === NOTIFICATION_TYPE_ORCHESTRATOR_WAITING) return localizedNotificationCopy(notification);
+	if (notification.type === NOTIFICATION_TYPE_ORCHESTRATOR_WAITING || notification.type === NOTIFICATION_TYPE_AUTOPILOT_PARKED) {
+		return localizedNotificationCopy(notification);
+	}
 	if (notification.type !== "ready_to_merge") {
 		return { title: notification.title, body: notification.body };
 	}
@@ -1410,6 +1413,7 @@ function notificationIcon(type: string) {
 		case "needs_input":
 			return MessageSquareDot;
 		case NOTIFICATION_TYPE_ORCHESTRATOR_WAITING:
+		case NOTIFICATION_TYPE_AUTOPILOT_PARKED:
 			return CircleAlert;
 		case "review_feedback":
 		case "review_changes_requested":
@@ -1447,6 +1451,8 @@ function notificationIconClass(type: string): string {
 		// The orchestrator is the user's main contact: its wait reads as "needs
 		// you now", the red alert the sidebar marker uses.
 		case NOTIFICATION_TYPE_ORCHESTRATOR_WAITING:
+		// Autopilot parked an item it must not do alone: it needs the user, too.
+		case NOTIFICATION_TYPE_AUTOPILOT_PARKED:
 			return "text-error";
 		case "agent_completed":
 		case "pr_opened":

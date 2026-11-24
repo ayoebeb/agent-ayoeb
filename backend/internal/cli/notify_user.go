@@ -17,6 +17,13 @@ import (
 // import the service; the daemon enforces the cap and cuts a longer one.
 const notifyUserMaxQuestionRunes = 240
 
+// autopilotWaitGuidance is what the agent is told when it declares a wait while
+// Autopilot runs for it. It mirrors autopilot.WaitDivertedGuidance, which the
+// daemon also puts in the next iteration message.
+const autopilotWaitGuidance = "Autopilot is on, so do not wait for the user. Choose your recommended option, " +
+	"record it with `ao autopilot decide --question \"...\" --choice \"...\" --why \"...\"`, and continue. " +
+	"If every option would cross a hard limit, park only that item with `ao autopilot park`."
+
 type notifyUserOptions struct {
 	waiting string
 	clear   bool
@@ -105,6 +112,8 @@ func (c *commandContext) notifyUser(ctx context.Context, opts notifyUserOptions)
 		_, _ = fmt.Fprintln(c.deps.Out, "The user has been notified. It stays open until they reply.")
 	case "unchanged":
 		_, _ = fmt.Fprintln(c.deps.Out, "That question is already open; the user was not notified again.")
+	case "autopilot":
+		_, _ = fmt.Fprintln(c.deps.Out, "Nothing was sent to the user: "+autopilotWaitGuidance)
 	case "disabled":
 		_, _ = fmt.Fprintln(c.deps.Out, "The user turned this notification off in Settings; nothing was sent. Ask in your reply as usual.")
 	default:

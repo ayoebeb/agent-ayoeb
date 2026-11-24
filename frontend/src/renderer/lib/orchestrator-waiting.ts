@@ -3,6 +3,7 @@ import type { components } from "../../api/schema";
 import { appI18n } from "../i18n";
 import { apiErrorException } from "./api-error-exception";
 import { apiClient } from "./api-client";
+import { AUTOPILOT_PARKED_TITLE_SUFFIX, NOTIFICATION_TYPE_AUTOPILOT_PARKED } from "./autopilot";
 import { clientForHost } from "./host-clients";
 import { LOCAL_HOST, type HostId } from "./hosts";
 
@@ -33,6 +34,17 @@ export function localizedNotificationCopy(notification: { type: string; title: s
 	title: string;
 	body: string;
 } {
+	if (notification.type === NOTIFICATION_TYPE_AUTOPILOT_PARKED) {
+		// "<session>: Autopilot parked an item for you". The item text after it is
+		// the agent's own and is never altered.
+		const session = notification.title.endsWith(AUTOPILOT_PARKED_TITLE_SUFFIX)
+			? notification.title.slice(0, notification.title.length - AUTOPILOT_PARKED_TITLE_SUFFIX.length)
+			: undefined;
+		return {
+			title: session === undefined ? notification.title : appI18n.t("notify.autopilotParked.title", { session }),
+			body: notification.body,
+		};
+	}
 	if (notification.type !== NOTIFICATION_TYPE_ORCHESTRATOR_WAITING) {
 		return { title: notification.title, body: notification.body };
 	}

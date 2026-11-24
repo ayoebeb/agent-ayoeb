@@ -18,7 +18,23 @@ const ALL_TYPES: NotificationType[] = [
 	"pr_merged",
 	"pr_closed_unmerged",
 	"orchestrator_waiting",
+	"autopilot_parked",
 ];
+
+// Autopilot parked an item it must not do alone: it needs the user like a blocked
+// agent does, so it toasts, flashes the taskbar and keeps the dock bouncing.
+describe("autopilot_parked", () => {
+	it("toasts, flashes the taskbar and bounces the dock until the app is opened", () => {
+		expect(shouldToast({ title: "Orchestrator: Autopilot parked an item for you" }, true)).toBe(true);
+		expect(shouldSignalAttention("autopilot_parked")).toBe(true);
+		expect(dockBounceType("autopilot_parked")).toBe("critical");
+	});
+
+	it("keeps the ordinary focused-window rule and the general sound switch", () => {
+		expect(lookingAtNotification("autopilot_parked", { windowFocused: true, watched: false })).toBe(true);
+		expect(soundEnabledFor("autopilot_parked", { general: false, orchestratorWaiting: true })).toBe(false);
+	});
+});
 
 describe("orchestrator_waiting", () => {
 	it("toasts, flashes the taskbar and bounces the dock until the app is opened", () => {
@@ -143,7 +159,7 @@ describe("dockBounceType", () => {
 	});
 
 	it("bounces once for the other backend types", () => {
-		for (const type of ALL_TYPES.filter((t) => t !== "needs_input" && t !== "orchestrator_waiting")) {
+		for (const type of ALL_TYPES.filter((t) => t !== "needs_input" && t !== "orchestrator_waiting" && t !== "autopilot_parked")) {
 			expect(dockBounceType(type)).toBe("informational");
 		}
 	});

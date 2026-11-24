@@ -22,6 +22,7 @@ trigger: "Using the ao CLI in an Orchestrator workspace: creating Cues, spawning
 | `send` | Send a message to a running agent session | Messaging a live agent; use `--steer` to correct it mid-turn. Never use it to answer a worker's pending approval; use `ao session approvals resolve` | [commands/send.md](commands/send.md) |
 | `report` | Persist a meaningful worker report | Checkpoints, blockers, decisions, outputs, and completion | [commands/report.md](commands/report.md) |
 | `notify-user` | Tell the human this orchestrator is waiting for their decision | An orchestrator ending a turn that asks the human something; never a worker | [commands/notify-user.md](commands/notify-user.md) |
+| `autopilot` | Keep a session on one task, without the human, until it is verifiably done | AO tells you "Autopilot is ON": record criteria, decide instead of asking, park hard-limit items, declare done. Only the human starts or stops it | [commands/autopilot.md](commands/autopilot.md) |
 | `preview` | Start a session-owned app or open an exact URL/file | Running and showing the worker's relevant app, Markdown, HTML, PDF, or image | [commands/preview.md](commands/preview.md) |
 | `render` | Show a self-contained HTML page inline in a chat thread | Answering with a chart, table, diagram, or mockup | [commands/render.md](commands/render.md) |
 | `browser` | Inspect and control the session's shared live browser | Verifying a web app through snapshots, interactions, waits, screenshots, console, and errors | [commands/browser.md](commands/browser.md) |
