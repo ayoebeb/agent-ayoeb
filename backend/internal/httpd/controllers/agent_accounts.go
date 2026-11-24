@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/requestscope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentaccounts"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
@@ -52,11 +54,34 @@ type AgentAccountsController struct {
 	Svc      AgentAccountService
 	Sessions AgentAccountSessionMover
 	Prompts  UsageLimitPromptService
+	// LANUserClientGate admits, on the LAN listener only, a person's client: a
+	// paired desktop reading or switching the account of a session on this
+	// computer. The listener lets just the account list and the session account
+	// routes through; without a gate they are refused there. Loopback requests
+	// are not gated here (the ao CLI and the local desktop use them).
+	LANUserClientGate func(http.Handler) http.Handler
+}
+
+// onLAN wraps a handler of a route the LAN listener allows: a request that came
+// in over the LAN must pass the user-client gate, and fails closed without one.
+func (c *AgentAccountsController) onLAN(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !requestscope.IsLAN(r.Context()) {
+			h(w, r)
+			return
+		}
+		if c.LANUserClientGate == nil {
+			envelope.WriteAPIError(w, r, http.StatusForbidden, "forbidden", "ACCOUNT_USER_CLIENT_REQUIRED",
+				"Accounts can only be managed from the Orchestrator app", nil)
+			return
+		}
+		c.LANUserClientGate(h).ServeHTTP(w, r)
+	}
 }
 
 // Register adds the account routes.
 func (c *AgentAccountsController) Register(r chi.Router) {
-	r.Get("/agents/accounts", c.list)
+	r.Get("/agents/accounts", c.onLAN(c.list))
 	r.Get("/agents/accounts/usage", c.usage)
 	// Outside /agents/accounts on purpose: that prefix is blocked on the LAN
 	// listener, and another computer's desktop needs these limits (read-only).
@@ -64,11 +89,11 @@ func (c *AgentAccountsController) Register(r chi.Router) {
 	r.Post("/agents/accounts/login", c.startLogin)
 	r.Post("/agents/accounts/login/{operationId}/verify", c.verifyLogin)
 	r.Post("/agents/accounts/login/{operationId}/cancel", c.cancelLogin)
-	r.Get("/agents/accounts/limit-prompts", c.listLimitPrompts)
-	r.Post("/agents/accounts/limit-prompts/{promptId}/switch", c.switchLimitPrompt)
-	r.Post("/agents/accounts/limit-prompts/{promptId}/wait", c.waitLimitPrompt)
-	r.Get("/agents/accounts/sessions/{sessionId}", c.sessionAccounts)
-	r.Put("/agents/accounts/sessions/{sessionId}", c.switchSession)
+	r.Get("/agents/accounts/limit-prompts", c.onLAN(c.listLimitPrompts))
+	r.Post("/agents/accounts/limit-prompts/{promptId}/switch", c.onLAN(c.switchLimitPrompt))
+	r.Post("/agents/accounts/limit-prompts/{promptId}/wait", c.onLAN(c.waitLimitPrompt))
+	r.Get("/agents/accounts/sessions/{sessionId}", c.onLAN(c.sessionAccounts))
+	r.Put("/agents/accounts/sessions/{sessionId}", c.onLAN(c.switchSession))
 	r.Post("/agents/accounts/{accountId}/login", c.signInAgain)
 	r.Post("/agents/accounts/{accountId}/default", c.setDefault)
 	r.Post("/agents/accounts/{accountId}/reset-credit", c.consumeResetCredit)
@@ -80,7 +105,49 @@ func (c *AgentAccountsController) list(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/agents/accounts")
 		return
 	}
+	if requestscope.IsLAN(r.Context()) {
+		// A computer's own account list, for another desktop to pick an account
+		// from: sanitized, and never refreshed (a refresh signs in to providers).
+		views, err := c.Svc.List(r.Context(), false)
+		if err != nil {
+			writeAgentAccountError(w, r, err)
+			return
+		}
+		out := AgentAccountsResponse{Accounts: make([]AgentAccountResponse, 0, len(views))}
+		for _, view := range views {
+			out.Accounts = append(out.Accounts, remoteAgentAccountResponse(view))
+		}
+		envelope.WriteJSON(w, http.StatusOK, out)
+		return
+	}
 	c.writeAccounts(w, r, r.URL.Query().Get("refresh") == "true" || r.URL.Query().Get("refresh") == "1")
+}
+
+// remoteAgentAccountResponse is an account row as another computer sees it: id,
+// provider, a masked email, plan, sign-in state, default and limits. The
+// creation time and the free-text problem (which can quote CLI output) stay
+// home; no token or credential is ever part of the row.
+func remoteAgentAccountResponse(view agentaccounts.AccountView) AgentAccountResponse {
+	return AgentAccountResponse{
+		ID: view.Account.ID, Provider: view.Account.Provider, Device: view.Account.Device(),
+		Email: maskEmail(view.Account.Email), Plan: view.Account.Plan, Default: view.Default,
+		SignedIn: view.SignedIn, LoggedIn: view.LoggedIn, Limits: view.Limits,
+	}
+}
+
+// maskEmail keeps enough of an address to tell two accounts apart: the first
+// character of the name and the whole domain ("a***@example.com").
+func maskEmail(email string) string {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return ""
+	}
+	name, domainPart, ok := strings.Cut(email, "@")
+	if !ok || name == "" {
+		return "***"
+	}
+	first, _ := utf8.DecodeRuneInString(name)
+	return string(first) + "***@" + domainPart
 }
 
 // accountLimits is the read-only view of the accounts' limits that a desktop on

@@ -161,6 +161,16 @@ var deleteProgramAliases = map[string]string{
 	"ri": "rm", "remove-item": "rm",
 }
 
+// hasParentSegment reports whether a path, as written, has a ".." segment.
+func hasParentSegment(p string) bool {
+	for _, seg := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // absoluteTarget is the lexically cleaned absolute path a target names, relative
 // targets taken from the directory the command runs in (the provider's cwd, else
 // the workspace).
@@ -213,9 +223,19 @@ func canonicalDeleteTargets(a Action) ([]string, bool) {
 	if !isAbsolute(dir) {
 		dir = path.Join(normalizePath(a.Workspace), dir)
 	}
+	if hasParentSegment(a.Cwd) {
+		return nil, false
+	}
 	root := normalizePath(a.Workspace)
 	var targets []string
 	target := func(tok string) bool {
+		// A ".." is never cleaned away before the disk is consulted: cleaning
+		// `link/../x` to `x` forgets that the link may lead elsewhere, so the
+		// target would be judged somewhere it is not. A target that names a
+		// parent directory is parked as written.
+		if hasParentSegment(tok) {
+			return false
+		}
 		abs := resolveIn(dir, tok)
 		if abs == "" || !insideWorkspace(a.Workspace, abs) || sameDir(abs, root) {
 			return false

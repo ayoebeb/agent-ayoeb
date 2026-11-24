@@ -88,6 +88,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/terminaltitle"
 	usagesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/usage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/usagelimit"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/workerkeeper"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -827,9 +828,30 @@ func Run(buildVersion string) error {
 	chatSvc.SetReportCoordinator(reportCoordinator)
 	// A worker that ends a turn without running `ao report` gets one automatic
 	// report to its orchestrator, for Chat and terminal workers alike.
-	lcStack.LCM.SetTurnObserver(reportsvc.NewMissingReportFallback(reportsvc.MissingReportDeps{
+	missingReports := reportsvc.NewMissingReportFallback(reportsvc.MissingReportDeps{
 		Store: store, Reports: reportSvc, Turns: chatSvc, Sessions: store, Busy: chatSvc, Logger: log,
-	}))
+	})
+	lcStack.LCM.SetTurnObserver(missingReports)
+	// A worker whose agent exited without anyone stopping it (Ayo restarted under
+	// it, or it crashed) is resumed, and a worker that sits idle or exited with
+	// unfinished work and no report gets one automatic report. It reuses the
+	// missing-report fallback and the resume-agent path.
+	agentResumer, ok := sessMgr.(interface {
+		ResumeAgentWithMode(context.Context, domain.SessionID) (sessionmanager.RestoreResult, error)
+	})
+	if !ok {
+		return errors.New("wire worker keeper: session manager lacks agent resume support")
+	}
+	workerKeeper := workerkeeper.New(workerkeeper.Deps{
+		Store: store, Reports: missingReports, Busy: chatSvc, Stagger: workerkeeper.DefaultStagger, Logger: log,
+		Resume: func(ctx context.Context, id domain.SessionID) error {
+			_, err := agentResumer.ResumeAgentWithMode(ctx, id)
+			return err
+		},
+		Send: func(ctx context.Context, id domain.SessionID, message string) error {
+			return sessMgr.Send(ctx, id, message, nil)
+		},
+	})
 	// A turn that stops on the provider's usage limit is followed up exactly once:
 	// the orchestrator is told, the person gets one notification per account and
 	// window, and the session is continued after the reset (staggered and capped).
@@ -1608,6 +1630,12 @@ func Run(buildVersion string) error {
 				case <-ticker.C:
 				}
 			}
+		}()
+		go func() {
+			defer sentryobs.RecoverBackground()
+			// Restart recovery waits for boot reconciliation, which settles which
+			// agents are really gone, like the usage-limit resume.
+			workerKeeper.Run(ctx, done, workerkeeper.DefaultSweepEvery)
 		}()
 		go func() {
 			defer sentryobs.RecoverBackground()

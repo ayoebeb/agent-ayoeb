@@ -2,6 +2,7 @@ import { LoaderCircle } from "@/components/app-icons";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { agentAccountName, agentAccountProviderFor, useAgentAccountActions, useAgentAccountLabel, useAgentAccounts, useSessionAgentAccounts } from "../hooks/useAgentAccounts";
+import { useHostConnection } from "../hooks/useHostConnection";
 import { interfaceTransitionIsActive, useSessionInterfaceTransitionStatus } from "../hooks/useSessionInterfaceTransition";
 import type { WorkspaceSession } from "../types/workspace";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -9,21 +10,26 @@ import { AccountLimits } from "./settings/AgentAccountsSection";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 /** The account the session's agent runs under, its limits, and the move to
- * another account. A move is the session's durable controller handoff: the
+ * another account. For a session on another computer (hostId) the accounts, the
+ * session's account and the move all go to that computer's own daemon; its
+ * accounts are listed with masked emails, and an older computer that does not
+ * share them leaves the section out. A move is the session's durable controller handoff: the
  * agent restarts in the same conversation on the new account, or stays on the
  * old one if that fails. Moving a working agent stops its turn after asking. */
-export function SessionAccountSummary({ session }: { session: WorkspaceSession }) {
+export function SessionAccountSummary({ session, hostId }: { session: WorkspaceSession; hostId?: string }) {
 	const { t } = useTranslation();
 	const provider = agentAccountProviderFor(session.provider);
 	// Only a live local Claude Code or Codex session has an account to show; no
 	// other session asks the local daemon for accounts, its account or a move.
-	const shown = Boolean(provider) && !session.cloud && !session.isTerminated;
+	// Another computer is asked only while its connection is up.
+	const hostReady = !hostId || Boolean(useHostConnection(hostId).baseUrl);
+	const shown = Boolean(provider) && !session.cloud && !session.isTerminated && hostReady;
 	const shownId = shown ? session.id : undefined;
-	const accounts = useAgentAccounts(shown);
-	const current = useSessionAgentAccounts(shownId);
-	const actions = useAgentAccountActions();
-	const label = useAgentAccountLabel(shown);
-	const { transition } = useSessionInterfaceTransitionStatus(shownId);
+	const accounts = useAgentAccounts(shown, hostId);
+	const current = useSessionAgentAccounts(shownId, hostId);
+	const actions = useAgentAccountActions(hostId);
+	const label = useAgentAccountLabel(shown, hostId);
+	const { transition } = useSessionInterfaceTransitionStatus(shownId, hostId);
 	const [message, setMessage] = useState("");
 	const [confirming, setConfirming] = useState<string | null>(null);
 	const [movedWorkers, setMovedWorkers] = useState(0);
@@ -37,7 +43,9 @@ export function SessionAccountSummary({ session }: { session: WorkspaceSession }
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [settledPhase, accountMove?.id, session.id]);
 
-	if (!provider || session.cloud || session.isTerminated) return null;
+	if (!shown || !provider) return null;
+	// Another computer that is too old to share its accounts.
+	if (hostId && !accounts.data) return null;
 	const options = (accounts.data ?? []).filter((account) => account.provider === provider);
 	const currentId = current.data?.[provider];
 	const account = options.find((option) => option.id === currentId);

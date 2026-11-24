@@ -10,6 +10,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/requestscope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/usagelimit"
 )
 
@@ -42,6 +43,14 @@ func (c *AgentAccountsController) listLimitPrompts(w http.ResponseWriter, r *htt
 				FiveHourUsedPercent: o.FiveHourUsedPercent, FiveHourResetsAt: o.FiveHourResetsAt,
 				WeeklyUsedPercent: o.WeeklyUsedPercent, WeeklyResetsAt: o.WeeklyResetsAt, Full: o.Full,
 			})
+		}
+		if requestscope.IsLAN(r.Context()) {
+			// Another computer's desktop reads this: the addresses are masked, as in
+			// the account list it can already read.
+			item.AccountEmail = maskEmail(item.AccountEmail)
+			for i := range item.Options {
+				item.Options[i].Email = maskEmail(item.Options[i].Email)
+			}
 		}
 		out.Prompts = append(out.Prompts, item)
 	}

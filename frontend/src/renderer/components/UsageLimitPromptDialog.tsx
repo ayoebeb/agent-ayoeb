@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { agentAccountProviderNames, type AgentAccountProvider } from "../hooks/useAgentAccounts";
-import { useUsageLimitPromptActions, useUsageLimitPrompts, type UsageLimitPrompt, type UsageLimitPromptOption } from "../hooks/useUsageLimitPrompts";
+import { useHostUsageLimitPrompts, useUsageLimitPromptActions, useUsageLimitPrompts, type HostUsageLimitPrompt, type UsageLimitPrompt, type UsageLimitPromptOption } from "../hooks/useUsageLimitPrompts";
 import { Button } from "./ui/button";
 import { CloseButton } from "./ui/close-button";
 import {
@@ -40,15 +40,29 @@ function optionLabel(option: UsageLimitPromptOption, fallback: string): string {
  * limit event. Closing it only hides it here; it stays open until answered. */
 export function UsageLimitPromptDialog() {
 	const prompts = useUsageLimitPrompts();
+	const hostPrompts = useHostUsageLimitPrompts();
 	const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
-	const prompt = prompts.data?.find((candidate) => !dismissed.has(candidate.id));
-	if (!prompt) return null;
-	return <PromptDialog key={prompt.id} prompt={prompt} onLater={() => setDismissed((previous) => new Set(previous).add(prompt.id))} />;
+	// This computer's questions first, then each linked computer's. One dialog at a
+	// time, so one alert per question however many computers raise one. A question
+	// answered on either PC drops out of its computer's list and so out of this one.
+	const queue: HostUsageLimitPrompt[] = [
+		...(prompts.data ?? []).map((prompt) => ({ key: prompt.id, prompt })),
+		...hostPrompts,
+	];
+	const open = queue.find((candidate) => !dismissed.has(candidate.key));
+	if (!open) return null;
+	return <PromptDialog
+		key={open.key}
+		prompt={open.prompt}
+		hostId={open.hostId}
+		hostLabel={open.hostLabel}
+		onLater={() => setDismissed((previous) => new Set(previous).add(open.key))}
+	/>;
 }
 
-function PromptDialog({ prompt, onLater }: { prompt: UsageLimitPrompt; onLater: () => void }) {
+function PromptDialog({ prompt, hostId, hostLabel, onLater }: { prompt: UsageLimitPrompt; hostId?: string; hostLabel?: string; onLater: () => void }) {
 	const { t, i18n } = useTranslation();
-	const { switchTo, wait } = useUsageLimitPromptActions();
+	const { switchTo, wait } = useUsageLimitPromptActions(hostId);
 	const firstUsable = useMemo(() => prompt.options.find((option) => !option.full)?.accountId ?? "", [prompt.options]);
 	const [chosen, setChosen] = useState(firstUsable);
 	const confirmRef = useRef<HTMLButtonElement>(null);
@@ -66,6 +80,7 @@ function PromptDialog({ prompt, onLater }: { prompt: UsageLimitPrompt; onLater: 
 	const error = (switchTo.error ?? wait.error)?.message ?? null;
 	const listed = prompt.sessions.slice(0, MAX_LISTED_SESSIONS);
 	const percent = (value: number | null | undefined) => (value == null ? "–" : `${Math.round(value)}%`);
+	const title = prompt.windowLabel ? t("usageLimitPrompt.titleWindow", { provider, window: prompt.windowLabel }) : t("usageLimitPrompt.title", { provider });
 
 	return (
 		<Dialog open onOpenChange={(open) => { if (!open && !busy) onLater(); }}>
@@ -81,7 +96,7 @@ function PromptDialog({ prompt, onLater }: { prompt: UsageLimitPrompt; onLater: 
 				</DialogClose>
 				<div className={cn(settingsDialogHeaderClass, "border-b-0 p-5 pr-12")}>
 					<DialogTitle className="settings-dialog-title text-base">
-						{prompt.windowLabel ? t("usageLimitPrompt.titleWindow", { provider, window: prompt.windowLabel }) : t("usageLimitPrompt.title", { provider })}
+						{hostLabel ? `${hostLabel}: ${title}` : title}
 					</DialogTitle>
 					<DialogDescription asChild>
 						<div className="text-control leading-5 text-settings-muted">

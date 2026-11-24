@@ -115,7 +115,8 @@ it can prove, and parks every other one for the human.
   with only ordinary flags such as `-rf`, `-Recurse`, `-Force`, `-Path` or
   `-LiteralPath`, and literal targets strictly inside your workspace. No `cd`,
   `pushd`, `Set-Location`, `&&`, `||`, `;`, pipe, subshell, substitution, variable,
-  glob, environment assignment, comma list, or PowerShell syntax (`$ @ ` : ( ) { }`).
+  glob, environment assignment, comma list, `..` segment in a path (a link in front
+  of it could lead anywhere), or PowerShell syntax (`$ @ ` : ( ) { }`).
   `find -delete`, `git clean`, `xargs rm` and a delete inside `bash -c` or `pwsh -c`
   are parked. Run the delete as its own command, from the workspace.
   Before it answers, AO also resolves the real path of the target and every parent

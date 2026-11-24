@@ -61,6 +61,15 @@ func liveServerGate(allowedOrigins []string, key string) func(http.Handler) http
 		"Running servers can only be managed from the Orchestrator app")
 }
 
+// accountUserClientGate admits only a person's client to the few account routes
+// the LAN listener lets through (the account list and one session's account),
+// by the same rule as commandRunGate. An agent, the ao CLI or any other process
+// is refused: the routes switch which subscription a session spends.
+func accountUserClientGate(allowedOrigins []string, key string) func(http.Handler) http.Handler {
+	return userClientGate(allowedOrigins, key, "ACCOUNT_USER_CLIENT_REQUIRED",
+		"Accounts can only be managed from the Orchestrator app")
+}
+
 func userClientGate(allowedOrigins []string, key, code, message string) func(http.Handler) http.Handler {
 	allowed := exactAllowedOrigins(allowedOrigins)
 	return func(next http.Handler) http.Handler {

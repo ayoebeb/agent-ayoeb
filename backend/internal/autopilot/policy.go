@@ -173,6 +173,18 @@ func Evaluate(a Action) Verdict {
 		if len(a.Paths) == 0 {
 			return Verdict{Reason: "The request deletes files without saying which."}
 		}
+		// Before any path is normalized: a ".." in the directory the request runs in
+		// or in a target, as written, is parked. Cleaning `link/..` forgets that the
+		// link may lead outside the workspace, so the path would be judged somewhere
+		// the delete does not go.
+		if hasParentSegment(a.Cwd) {
+			return deny(domain.HardLimitDataDelete, "The request runs in a directory with a \"..\" in it ("+a.Cwd+"); AO cannot tell where it leads when a parent is a link, so the delete is parked for you.")
+		}
+		for _, p := range a.Paths {
+			if hasParentSegment(p) {
+				return deny(domain.HardLimitDataDelete, "The request deletes "+p+", a path with a \"..\" in it; AO cannot tell where it leads when a parent is a link, so it is parked for you.")
+			}
+		}
 		for _, p := range a.Paths {
 			if limit, ok := credentialStorePath(p); ok {
 				return deny(limit, "The request touches a credential store: "+p+".")
