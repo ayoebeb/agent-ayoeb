@@ -73,6 +73,10 @@ type Store interface {
 	GetReviewRunBySessionPRSHAAndHarness(ctx stdctx.Context, id domain.SessionID, prURL, targetSHA string, harness domain.ReviewerHarness) (domain.ReviewRun, bool, error)
 	ListReviewRunsBySession(ctx stdctx.Context, id domain.SessionID) ([]domain.ReviewRun, error)
 	ListRunningReviewRunsBySession(ctx stdctx.Context, id domain.SessionID) ([]domain.ReviewRun, error)
+	PauseRunningReviewRunsByReview(ctx stdctx.Context, reviewID, body string) ([]domain.ReviewRun, error)
+	ListPausedReviewRunsByReview(ctx stdctx.Context, reviewID string) ([]domain.ReviewRun, error)
+	ResumePausedReviewRunsByReview(ctx stdctx.Context, reviewID string) (int64, error)
+	FailPausedReviewRunsByReview(ctx stdctx.Context, reviewID, body string) (int64, error)
 	ListRecoverableChatReviews(ctx stdctx.Context) ([]domain.Review, error)
 	RecordReviewChatControllerError(ctx stdctx.Context, id, message string, now time.Time) (bool, error)
 }
@@ -104,6 +108,10 @@ type Deps struct {
 	// ChatRecoveryDone gates operations that could mistake a recovering reviewer for an exited one.
 	ChatRecoveryDone <-chan struct{}
 
+	// AccountEnv resolves the launch environment of a signed-in account for a
+	// worker, so a reviewer can be moved to another account. Optional.
+	AccountEnv func(ctx stdctx.Context, worker domain.SessionID, accountID string) (map[string]string, error)
+
 	// Clock and NewID are injectable for deterministic tests.
 	Clock func() time.Time
 	NewID func() string
@@ -116,6 +124,7 @@ type Engine struct {
 	sessions   Sessions
 	prs        PRs
 	projects   Projects
+	accountEnv func(ctx stdctx.Context, worker domain.SessionID, accountID string) (map[string]string, error)
 	launcher   Launcher
 	clock      func() time.Time
 	newID      func() string
@@ -127,6 +136,11 @@ type Engine struct {
 	// lockWorker). Distinct workers never contend.
 	triggerMu    sync.Mutex
 	triggerLocks map[domain.SessionID]*sync.Mutex
+
+	// reviewerEnv holds the account environment of reviewers a usage-limit prompt
+	// moved, by review id; it lives as long as the daemon.
+	envMu       sync.Mutex
+	reviewerEnv map[string]map[string]string
 }
 
 const autoReviewFailedRetryLimit = 3
@@ -141,19 +155,23 @@ func New(d Deps) *Engine {
 	if newID == nil {
 		newID = uuid.NewString
 	}
-	return &Engine{
+	e := &Engine{
 		store:        d.Store,
 		harnessUse:   d.HarnessUse,
 		sessions:     d.Sessions,
 		prs:          d.PRs,
 		projects:     d.Projects,
 		launcher:     d.Launcher,
+		accountEnv:   d.AccountEnv,
+		reviewerEnv:  make(map[string]map[string]string),
 		clock:        clock,
 		newID:        newID,
 		triggerLocks: make(map[domain.SessionID]*sync.Mutex),
 
 		chatRecoveryDone: d.ChatRecoveryDone,
 	}
+	e.launcher = envLauncher{Launcher: d.Launcher, eng: e}
+	return e
 }
 
 // lockWorker serialises Trigger calls for a single worker session and returns
@@ -446,7 +464,10 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 		// already reviewing one. Reconciliation above has proved the reviewer
 		// terminal is still alive, so do not append work to its active batch. A
 		// later sweep can start the remaining PR after the current run terminates.
-		if hadRunningReviewer {
+		// Only a pass on a head that is still current counts: a run left over on
+		// an older commit is not what `ao review ls` shows for the PR, and must
+		// not keep a fresh pass from starting (it is superseded below).
+		if runningOnCurrentHead(reviews, runs, harness) {
 			// A person's rerun reuses the pass already running for this reviewer;
 			// an agent asked for new work and must hear that none started.
 			if opts.Rerun && source == domain.ReviewTriggerAgent {
@@ -806,7 +827,20 @@ func headHasReview(runs []domain.ReviewRun, prURL, targetSHA string) bool {
 		if run.PRURL != prURL || run.TargetSHA != targetSHA {
 			continue
 		}
-		if run.Status == domain.ReviewRunRunning || run.Verdict == domain.VerdictApproved || run.Verdict == domain.VerdictChangesRequested {
+		if runInFlight(run) || run.Verdict == domain.VerdictApproved || run.Verdict == domain.VerdictChangesRequested {
+			return true
+		}
+	}
+	return false
+}
+
+// runningOnCurrentHead reports whether harness has an in-flight pass on the
+// current head of any eligible PR in reviews. It reads the same per-head state
+// `ao review ls` plans from, so a pass left running on an older commit never
+// blocks a new one.
+func runningOnCurrentHead(reviews []PRReviewState, runs []domain.ReviewRun, harness domain.ReviewerHarness) bool {
+	for _, review := range reviews {
+		if review.Status != ReviewStateIneligible && headRunningForHarness(runs, review.PRURL, review.TargetSHA, harness) {
 			return true
 		}
 	}
@@ -815,7 +849,7 @@ func headHasReview(runs []domain.ReviewRun, prURL, targetSHA string) bool {
 
 func headRunningForHarness(runs []domain.ReviewRun, prURL, targetSHA string, harness domain.ReviewerHarness) bool {
 	for _, run := range runs {
-		if run.PRURL == prURL && run.TargetSHA == targetSHA && run.Status == domain.ReviewRunRunning && (run.Harness == harness || run.Harness == "") {
+		if run.PRURL == prURL && run.TargetSHA == targetSHA && runInFlight(run) && (run.Harness == harness || run.Harness == "") {
 			return true
 		}
 	}
@@ -836,7 +870,7 @@ func nothingToReviewError(reviews []PRReviewState, runs []domain.ReviewRun, harn
 			return fmt.Errorf("%w: %s is already reviewing PR #%d head %s; wait for it, cancel it with `ao review cancel`, or choose another reviewer with --agent", ErrReviewAlreadyRunning, harness, review.PRNumber, sha)
 		}
 		for _, run := range runs {
-			if run.PRURL == review.PRURL && run.TargetSHA == review.TargetSHA && run.Status == domain.ReviewRunRunning {
+			if run.PRURL == review.PRURL && run.TargetSHA == review.TargetSHA && runInFlight(run) {
 				return fmt.Errorf("%w: %s is already reviewing PR #%d head %s; wait for its result, or pass --rerun to add another reviewer", ErrReviewAlreadyRunning, run.Harness, review.PRNumber, sha)
 			}
 		}
@@ -941,7 +975,7 @@ func reviewerPaneReusable(reviewRow domain.Review, hadRunningReviewer bool) bool
 
 func reviewRunsContainRunningForHarness(runs []domain.ReviewRun, harness domain.ReviewerHarness) bool {
 	for _, run := range runs {
-		if (run.Harness == harness || run.Harness == "") && run.Status == domain.ReviewRunRunning {
+		if (run.Harness == harness || run.Harness == "") && runInFlight(run) {
 			return true
 		}
 	}
@@ -980,7 +1014,7 @@ func (e *Engine) destroyIdleOtherReviewerHandles(ctx stdctx.Context, workerID do
 
 func reviewRunsContainRunningForReview(runs []domain.ReviewRun, review domain.Review) bool {
 	for _, run := range runs {
-		if run.Status == domain.ReviewRunRunning && (run.ReviewID == review.ID || run.Harness == review.Harness) {
+		if runInFlight(run) && (run.ReviewID == review.ID || run.Harness == review.Harness) {
 			return true
 		}
 	}
@@ -1603,7 +1637,7 @@ func reviewerRowActive(review domain.Review, runs []domain.ReviewRun) bool {
 		return true
 	}
 	for _, run := range runs {
-		if run.ReviewID == review.ID && run.Status == domain.ReviewRunRunning {
+		if run.ReviewID == review.ID && runInFlight(run) {
 			return true
 		}
 	}
@@ -1677,6 +1711,25 @@ func legacyReviewerHandle(review domain.Review) string {
 // Cancel interrupts the live reviewer pane for a worker and marks running
 // review runs as cancelled so they no longer block a fresh trigger.
 func (e *Engine) Cancel(ctx stdctx.Context, workerID domain.SessionID) (CancelResult, error) {
+	return e.CancelWithOptions(ctx, workerID, CancelOptions{})
+}
+
+// CancelOptions narrows a cancel to one run or one reviewer. The zero value
+// cancels every running review of the worker.
+type CancelOptions struct {
+	// RunID cancels only the run with this id.
+	RunID string
+	// Harness cancels only that reviewer's running runs.
+	Harness domain.ReviewerHarness
+}
+
+func (o CancelOptions) selective() bool { return o.RunID != "" || o.Harness != "" }
+
+// CancelWithOptions is Cancel with an optional selector. A selector that matches
+// no running run is ErrNotFound, so a typo never reads as a successful cancel.
+// A run is cancelled on its own; the reviewer pane is interrupted only when no
+// other run of that reviewer is left, so cancelling one run never stops another.
+func (e *Engine) CancelWithOptions(ctx stdctx.Context, workerID domain.SessionID, opts CancelOptions) (CancelResult, error) {
 	if workerID == "" {
 		return CancelResult{}, fmt.Errorf("%w: worker session id is required", ErrInvalid)
 	}
@@ -1717,15 +1770,15 @@ func (e *Engine) Cancel(ctx stdctx.Context, workerID domain.SessionID) (CancelRe
 		}
 		return CancelResult{ReviewerHandleID: handle, Reviews: Plan(prs, runs)}, nil
 	}
+	if opts.selective() {
+		return e.cancelSelected(ctx, workerID, harness, running, opts)
+	}
 	// Several reviewers may be running on this worker at once; cancel stops
 	// all of them. The selected reviewer is cancelled first and its handle is
 	// the one reported, so single-reviewer clients see what they did before.
 	reviewers, err := e.runningReviewersForCancel(ctx, workerID, harness, running)
 	if err != nil {
 		return CancelResult{}, err
-	}
-	if len(reviewers) == 0 {
-		return CancelResult{}, fmt.Errorf("%w: reviewer for worker session %q", ErrNotFound, workerID)
 	}
 	cancelledHarness := make(map[domain.ReviewerHarness]bool, len(reviewers))
 	for _, review := range reviewers {
@@ -1743,7 +1796,26 @@ func (e *Engine) Cancel(ctx stdctx.Context, workerID domain.SessionID) (CancelRe
 		}
 		cancelledHarness[review.Harness] = true
 	}
-	primary := reviewers[0]
+	primaryHandle := ""
+	if len(reviewers) > 0 {
+		primaryHandle = reviewers[0].ReviewerHandleID
+	}
+	// A run whose reviewer has no live handle has no pane to interrupt, but it
+	// must still stop counting as running: a cancelled run frees its slot.
+	leftover := false
+	for _, run := range running {
+		if run.Harness != "" && !cancelledHarness[run.Harness] {
+			leftover = true
+		}
+	}
+	if leftover {
+		if _, err := e.store.CancelRunningReviewRunsBySession(ctx, workerID, "cancelled by user"); err != nil {
+			return CancelResult{}, err
+		}
+		for _, run := range running {
+			cancelledHarness[run.Harness] = true
+		}
+	}
 	// Legacy rows have no harness; they belong to the reported reviewer.
 	hasLegacy := false
 	for _, run := range running {
@@ -1773,7 +1845,88 @@ func (e *Engine) Cancel(ctx stdctx.Context, workerID domain.SessionID) (CancelRe
 	if err != nil {
 		return CancelResult{}, err
 	}
-	return CancelResult{ReviewerHandleID: primary.ReviewerHandleID, Reviews: Plan(prs, runs), CancelledRuns: cancelled}, nil
+	return CancelResult{ReviewerHandleID: primaryHandle, Reviews: Plan(prs, runs), CancelledRuns: cancelled}, nil
+}
+
+// cancelSelected cancels the running runs that match opts.
+func (e *Engine) cancelSelected(ctx stdctx.Context, workerID domain.SessionID, selected domain.ReviewerHarness, running []domain.ReviewRun, opts CancelOptions) (CancelResult, error) {
+	harnessOf := func(run domain.ReviewRun) domain.ReviewerHarness {
+		if run.Harness == "" {
+			return selected // legacy rows belong to the current reviewer
+		}
+		return run.Harness
+	}
+	var targets, rest []domain.ReviewRun
+	for _, run := range running {
+		if (opts.RunID == "" || run.ID == opts.RunID) && (opts.Harness == "" || harnessOf(run) == opts.Harness) {
+			targets = append(targets, run)
+		} else {
+			rest = append(rest, run)
+		}
+	}
+	if len(targets) == 0 {
+		what := "run " + opts.RunID
+		if opts.RunID == "" {
+			what = "run of reviewer " + string(opts.Harness)
+		}
+		return CancelResult{}, fmt.Errorf("%w: no running review %s for worker session %q", ErrNotFound, what, workerID)
+	}
+	handle := ""
+	paneDone := map[domain.ReviewerHarness]bool{}
+	for _, run := range targets {
+		h := harnessOf(run)
+		if paneDone[h] {
+			continue
+		}
+		paneDone[h] = true
+		others := false
+		for _, other := range rest {
+			others = others || harnessOf(other) == h
+		}
+		if others {
+			continue
+		}
+		review, ok, err := e.store.GetReviewBySessionAndHarness(ctx, workerID, h)
+		if err != nil {
+			return CancelResult{}, err
+		}
+		if !ok || review.ReviewerHandleID == "" {
+			continue
+		}
+		if err := e.launcher.Cancel(ctx, review.ReviewerHandleID, review.Harness); err != nil {
+			alive, aliveErr := e.launcher.Alive(ctx, review.ReviewerHandleID, review.ReviewerLaunchID)
+			if aliveErr != nil || alive {
+				return CancelResult{}, err
+			}
+		}
+		if handle == "" {
+			handle = review.ReviewerHandleID
+		}
+	}
+	cancelled := make([]domain.ReviewRun, 0, len(targets))
+	for _, run := range targets {
+		ok, err := e.store.UpdateReviewRunResult(ctx, run.ID, domain.ReviewRunCancelled, domain.VerdictNone, "cancelled by user", "", run.AutoInjectReview)
+		if err != nil {
+			return CancelResult{}, err
+		}
+		if !ok {
+			continue // finished on its own meanwhile
+		}
+		run.Status = domain.ReviewRunCancelled
+		run.Verdict = domain.VerdictNone
+		run.Body = "cancelled by user"
+		run.GithubReviewID = ""
+		cancelled = append(cancelled, run)
+	}
+	prs, err := e.prs.ListPRsBySession(ctx, workerID)
+	if err != nil {
+		return CancelResult{}, err
+	}
+	runs, err := e.store.ListReviewRunsBySession(ctx, workerID)
+	if err != nil {
+		return CancelResult{}, err
+	}
+	return CancelResult{ReviewerHandleID: handle, Reviews: Plan(prs, runs), CancelledRuns: cancelled}, nil
 }
 
 // runningReviewersForCancel returns every reviewer row with a live handle that

@@ -104,6 +104,7 @@ export function reviewStatusVisual(status: PRReviewState["status"]): {
 
 export function reviewVerdictLabel(run: ReviewRun): string {
 	if (run.status === "running") return "Reviewing";
+	if (run.status === "paused") return "Review paused (usage limit)";
 	if (run.status === "failed") return "Review failed";
 	if (run.status === "cancelled") return "Review cancelled";
 	if (run.verdict === "approved") return "Approved";

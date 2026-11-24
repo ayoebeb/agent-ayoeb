@@ -62,7 +62,7 @@ type Store interface {
 	MarkUsageLimitStopResumed(ctx context.Context, turnID string, resumedAt, since time.Time) error
 	CountRunningUsageLimitResumes(ctx context.Context) (int, error)
 	LastUsageLimitResumeAt(ctx context.Context) (time.Time, bool, error)
-	CountRecentUsageLimitResumes(ctx context.Context, session domain.SessionID, since time.Time) (int, error)
+	CountRecentUsageLimitResumes(ctx context.Context, session domain.SessionID, reviewID string, since time.Time) (int, error)
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 }
 
@@ -74,6 +74,28 @@ type Settings interface {
 // Accounts names the login a session runs on.
 type Accounts interface {
 	SessionAccountID(ctx context.Context, id domain.SessionID, harness domain.AgentHarness) (string, error)
+}
+
+// ReviewerAccounts names the login a reviewer runs on. A reviewer is not bound to
+// an account of its own: it runs on the provider's default login, unless a
+// switch moved it. Accounts that also implement it let reviewer stops be keyed
+// by that login.
+type ReviewerAccounts interface {
+	ReviewerAccountID(ctx context.Context, harness domain.AgentHarness) (string, error)
+}
+
+// Reviewers pauses, continues and moves the reviewer of a worker whose Chat
+// stopped on the usage limit. The worker id is the session the review is of.
+type Reviewers interface {
+	// Pause marks the reviewer's running passes paused.
+	Pause(ctx context.Context, worker domain.SessionID, reviewID string) error
+	// Resume continues the reviewer's paused passes. It returns ErrSessionGone when
+	// the reviewer cannot continue at all.
+	Resume(ctx context.Context, worker domain.SessionID, reviewID string) error
+	// Release ends the paused passes of a reviewer that will not be continued.
+	Release(ctx context.Context, worker domain.SessionID, reviewID, reason string) error
+	// Move restarts the reviewer under accountID and continues its passes.
+	Move(ctx context.Context, worker domain.SessionID, reviewID, accountID string) error
 }
 
 // Notifier stores one notification for the person.
@@ -105,31 +127,35 @@ type Deps struct {
 	Headroom Headroom
 	// Lister and Mover turn on the owner prompt: which accounts could take the
 	// stopped sessions, and how to move them. Without them AO only notifies.
-	Lister   AccountLister
-	Mover    SessionMover
-	Notifier Notifier
-	Reporter Reporter
-	Sender   Sender
-	Logger   *slog.Logger
-	Now      func() time.Time
+	Lister AccountLister
+	Mover  SessionMover
+	// Reviewers turns on the handling of reviewer stops. Without it a reviewer's
+	// stop is not looked at.
+	Reviewers Reviewers
+	Notifier  Notifier
+	Reporter  Reporter
+	Sender    Sender
+	Logger    *slog.Logger
+	Now       func() time.Time
 	// Stagger overrides the least time between two automatic resumes.
 	Stagger time.Duration
 }
 
 // Service is the usage-limit watcher.
 type Service struct {
-	store    Store
-	settings Settings
-	accounts Accounts
-	headroom Headroom
-	lister   AccountLister
-	mover    SessionMover
-	notifier Notifier
-	reporter Reporter
-	sender   Sender
-	log      *slog.Logger
-	now      func() time.Time
-	stagger  time.Duration
+	store     Store
+	settings  Settings
+	accounts  Accounts
+	headroom  Headroom
+	lister    AccountLister
+	mover     SessionMover
+	reviewers Reviewers
+	notifier  Notifier
+	reporter  Reporter
+	sender    Sender
+	log       *slog.Logger
+	now       func() time.Time
+	stagger   time.Duration
 
 	mu      sync.Mutex
 	running bool
@@ -141,7 +167,7 @@ type Service struct {
 // New builds the watcher.
 func New(d Deps) *Service {
 	s := &Service{
-		store: d.Store, settings: d.Settings, accounts: d.Accounts, headroom: d.Headroom, lister: d.Lister, mover: d.Mover, notifier: d.Notifier,
+		store: d.Store, settings: d.Settings, accounts: d.Accounts, headroom: d.Headroom, lister: d.Lister, mover: d.Mover, reviewers: d.Reviewers, notifier: d.Notifier,
 		reporter: d.Reporter, sender: d.Sender, log: d.Logger, now: d.Now, stagger: d.Stagger,
 	}
 	if s.log == nil {
@@ -215,6 +241,9 @@ func (s *Service) Sweep(ctx context.Context) error {
 		if limit == nil {
 			continue
 		}
+		if turn.ReviewID != "" && s.reviewers == nil {
+			continue
+		}
 		live[turn.TurnID] = true
 		if turn.ResumeState == "" {
 			if err := s.detect(ctx, turn, limit, enabled, now); err != nil && ctx.Err() == nil {
@@ -230,6 +259,7 @@ func (s *Service) Sweep(ctx context.Context) error {
 				if _, err := s.store.SkipUsageLimitStop(ctx, turn.TurnID, domain.UsageLimitOffExpired); err != nil {
 					return err
 				}
+				s.releaseReviewer(ctx, turn.SessionID, turn.ReviewID, domain.UsageLimitOffExpired)
 				continue
 			}
 			pending = append(pending, turn)
@@ -276,13 +306,16 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 	window, _ := domain.UsageLimitStopMessage(turn.ErrorMessage)
 	stop := domain.UsageLimitStop{
 		TurnID: turn.TurnID, SessionID: turn.SessionID, ProjectID: rec.ProjectID,
-		WindowLabel: window, ResetsAt: limit.ResetsAt, DetectedAt: now,
+		WindowLabel: window, ResetsAt: limit.ResetsAt, DetectedAt: now, ReviewID: turn.ReviewID,
 	}
-	if s.accounts != nil {
-		if key, accErr := s.accounts.SessionAccountID(ctx, rec.ID, rec.Harness); accErr == nil {
-			stop.AccountKey = key
-		}
+	// The agent that hit the limit: the session's own, or its reviewer's.
+	harness := rec.Harness
+	displayName := rec.DisplayName
+	if turn.ReviewID != "" {
+		harness = domain.AgentHarness(turn.ReviewHarness)
+		displayName += " (reviewer)"
 	}
+	s.setAccountKey(ctx, &stop, rec, harness)
 	stop.WindowKey = domain.UsageLimitWindowKey(stop.AccountKey, limit.ResetsAt, stoppedAt)
 
 	if rec.IsTerminated || rec.Activity.State == domain.ActivityExited || domain.UsageLimitStopExpired(stoppedAt, limit.ResetsAt, now) {
@@ -300,11 +333,11 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 	if s.notifier != nil {
 		intent := ports.NotificationIntent{
 			Type: domain.NotificationUsageLimit, SessionID: rec.ID, ProjectID: rec.ProjectID,
-			CreatedAt: now, SourceKey: "usage_limit:" + stop.WindowKey, SessionDisplayName: rec.DisplayName,
-			UsageLimitWindow: window, UsageLimitProvider: providerLabel(rec.Harness),
+			CreatedAt: now, SourceKey: "usage_limit:" + stop.WindowKey, SessionDisplayName: displayName,
+			UsageLimitWindow: window, UsageLimitProvider: providerLabel(harness),
 			UsageLimitAutoResume: enabled && limit.ResetsAt != nil,
 		}
-		if provider, ok := domain.AgentAccountProviderFor(rec.Harness); ok && stop.AccountKey != "" {
+		if provider, ok := domain.AgentAccountProviderFor(harness); ok && stop.AccountKey != "" {
 			intent.UsageLimitSwitchPrompt = s.hasSwitchTargets(ctx, string(provider), stop.AccountKey)
 		}
 		if limit.ResetsAt != nil {
@@ -314,12 +347,19 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 			return fmt.Errorf("notify usage limit: %w", err)
 		}
 	}
+	// A reviewer's passes stop reading as running before the stop is recorded: a
+	// failure here is retried by the next sweep, which has no stop row yet.
+	if turn.ReviewID != "" {
+		if err := s.reviewers.Pause(ctx, rec.ID, turn.ReviewID); err != nil {
+			return fmt.Errorf("pause reviewer: %w", err)
+		}
+	}
 	inserted, err := s.store.InsertUsageLimitStop(ctx, stop)
 	if err != nil || !inserted {
 		return err
 	}
 	// One owner prompt per limit window, however many sessions stop on it.
-	if err := s.ensurePrompt(ctx, stop, rec, now); err != nil {
+	if err := s.ensurePrompt(ctx, stop, harness, now); err != nil {
 		s.log.Warn("record usage-limit prompt", "session", rec.ID, "err", err)
 	}
 	reason := ""
@@ -337,7 +377,7 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 		}
 	}
 	if s.reporter != nil && rec.Kind == domain.KindWorker {
-		note := ReportNote(rec, window, limit.ResetsAt, reason, now)
+		note := stopReportNote(rec, turn.ReviewID, window, limit.ResetsAt, reason, now)
 		if err := s.reporter.ReportUsageLimit(ctx, rec.ID, note); err != nil {
 			s.log.Warn("report usage-limit stop to orchestrator", "session", rec.ID, "err", err)
 		} else if err := s.store.MarkUsageLimitStopReported(ctx, turn.TurnID, now); err != nil {
@@ -370,7 +410,7 @@ func (s *Service) retryReports(ctx context.Context, now time.Time) error {
 			}
 			continue
 		}
-		note := ReportNote(rec, stop.WindowLabel, stop.ResetsAt, stop.SkipReason, now)
+		note := stopReportNote(rec, stop.ReviewID, stop.WindowLabel, stop.ResetsAt, stop.SkipReason, now)
 		if err := s.reporter.ReportUsageLimit(ctx, rec.ID, note); err != nil {
 			s.log.Warn("report usage-limit stop to orchestrator", "session", rec.ID, "err", err)
 			continue
@@ -405,6 +445,7 @@ func (s *Service) supersede(ctx context.Context, live map[string]bool) error {
 		if _, err := s.store.SkipUsageLimitStop(ctx, stop.TurnID, domain.UsageLimitSkipSuperseded); err != nil {
 			return err
 		}
+		s.releaseReviewer(ctx, stop.SessionID, stop.ReviewID, domain.UsageLimitSkipSuperseded)
 	}
 	return nil
 }
@@ -434,6 +475,7 @@ func (s *Service) resumeOne(ctx context.Context, pending []domain.LimitStopTurn,
 			if _, err := s.store.SkipUsageLimitStop(ctx, turn.TurnID, domain.UsageLimitSkipStopped); err != nil {
 				return err
 			}
+			s.releaseReviewer(ctx, turn.SessionID, turn.ReviewID, domain.UsageLimitSkipStopped)
 			continue
 		}
 		if turn.RetryArmed {
@@ -478,7 +520,10 @@ func (s *Service) resumeOne(ctx context.Context, pending []domain.LimitStopTurn,
 // resume sends the continue message to one session. It returns true when a
 // message went out, which uses up this sweep's resume.
 func (s *Service) resume(ctx context.Context, turn domain.LimitStopTurn, rec domain.SessionRecord, now time.Time) (bool, error) {
-	if recent, err := s.store.CountRecentUsageLimitResumes(ctx, rec.ID, now.Add(-repeatWindow)); err != nil {
+	if turn.ReviewID != "" {
+		return s.resumeReviewer(ctx, turn, rec, now)
+	}
+	if recent, err := s.store.CountRecentUsageLimitResumes(ctx, rec.ID, "", now.Add(-repeatWindow)); err != nil {
 		return false, err
 	} else if recent > 0 {
 		// It stopped again right after AO continued it: the limit is not lifted
@@ -602,4 +647,97 @@ func providerLabel(harness domain.AgentHarness) string {
 	default:
 		return ""
 	}
+}
+
+// setAccountKey names the login a stop happened on. A reviewer runs on the
+// provider's default login, so it is keyed by that, not by its worker's account.
+func (s *Service) setAccountKey(ctx context.Context, stop *domain.UsageLimitStop, rec domain.SessionRecord, harness domain.AgentHarness) {
+	if s.accounts == nil {
+		return
+	}
+	if stop.ReviewID != "" {
+		if ra, ok := s.accounts.(ReviewerAccounts); ok {
+			if key, err := ra.ReviewerAccountID(ctx, harness); err == nil {
+				stop.AccountKey = key
+			}
+		}
+		return
+	}
+	if key, err := s.accounts.SessionAccountID(ctx, rec.ID, harness); err == nil {
+		stop.AccountKey = key
+	}
+}
+
+// releaseReviewer ends the paused passes of a reviewer whose stop was closed
+// without a continue, so they do not stay paused forever. It does nothing for a
+// stop of a session itself.
+func (s *Service) releaseReviewer(ctx context.Context, session domain.SessionID, reviewID, reason string) {
+	if reviewID == "" || s.reviewers == nil {
+		return
+	}
+	if err := s.reviewers.Release(ctx, session, reviewID, reason); err != nil && ctx.Err() == nil {
+		s.log.Warn("release paused reviewer", "session", session, "review", reviewID, "err", err)
+	}
+}
+
+// resumeReviewer continues a reviewer whose passes paused on the limit.
+func (s *Service) resumeReviewer(ctx context.Context, turn domain.LimitStopTurn, rec domain.SessionRecord, now time.Time) (bool, error) {
+	if recent, err := s.store.CountRecentUsageLimitResumes(ctx, rec.ID, turn.ReviewID, now.Add(-repeatWindow)); err != nil {
+		return false, err
+	} else if recent > 0 {
+		// It stopped again right after AO continued it: the limit is not lifted.
+		_, err := s.store.SkipUsageLimitStop(ctx, turn.TurnID, domain.UsageLimitOffRepeated)
+		s.releaseReviewer(ctx, rec.ID, turn.ReviewID, domain.UsageLimitOffRepeated)
+		return false, err
+	}
+	err := s.reviewers.Resume(ctx, rec.ID, turn.ReviewID)
+	switch {
+	case err == nil:
+		return true, s.store.MarkUsageLimitStopResumed(ctx, turn.TurnID, now, now)
+	case ctx.Err() != nil:
+		return false, ctx.Err()
+	case errors.Is(err, ErrSessionGone):
+		// The reviewer released its own passes.
+		_, skipErr := s.store.SkipUsageLimitStop(ctx, turn.TurnID, domain.UsageLimitSkipStopped)
+		return false, skipErr
+	case turn.Attempts+1 >= maxAttempts:
+		s.log.Warn("give up resuming usage-limited reviewer", "session", rec.ID, "review", turn.ReviewID, "err", err)
+		_, skipErr := s.store.SkipUsageLimitStop(ctx, turn.TurnID, domain.UsageLimitOffUnavailable)
+		s.releaseReviewer(ctx, rec.ID, turn.ReviewID, domain.UsageLimitOffUnavailable)
+		return false, skipErr
+	default:
+		s.log.Info("usage-limited reviewer could not continue yet", "session", rec.ID, "review", turn.ReviewID, "err", err)
+		return false, s.store.DeferUsageLimitStop(ctx, turn.TurnID, now.Add(retryDelay))
+	}
+}
+
+// stopReportNote is what the orchestrator is told about a stop: the worker's
+// own, or the worker's reviewer's.
+func stopReportNote(rec domain.SessionRecord, reviewID, window string, resetsAt *time.Time, offReason string, now time.Time) string {
+	if reviewID == "" {
+		return ReportNote(rec, window, resetsAt, offReason, now)
+	}
+	return ReviewerReportNote(window, resetsAt, offReason, now)
+}
+
+// ReviewerReportNote is what the orchestrator is told about a worker's reviewer
+// that stopped: the worker itself is not affected, only its AO review.
+func ReviewerReportNote(window string, resetsAt *time.Time, offReason string, now time.Time) string {
+	limit := "usage limit"
+	if window != "" {
+		limit = window + " usage limit"
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "The AO reviewer of this worker stopped on the %s, so its review is paused (status paused), not stuck.", limit)
+	if resetsAt != nil {
+		fmt.Fprintf(&out, " The limit resets at %s.", notify.FormatUsageLimitReset(*resetsAt, now))
+	} else {
+		out.WriteString(" The provider gave no reset time.")
+	}
+	if offReason == "" {
+		out.WriteString(" AO continues the review automatically after the reset.")
+	} else {
+		out.WriteString(" AO will not continue it by itself: run `ao review cancel` and then `ao review trigger --rerun` after the reset, or choose another agent with --agent.")
+	}
+	return out.String()
 }

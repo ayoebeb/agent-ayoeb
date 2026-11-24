@@ -12818,6 +12818,18 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
+      - description: Cancel only the review run with this id.
+        in: query
+        name: runId
+        schema:
+          description: Cancel only the review run with this id.
+          type: string
+      - description: Cancel only the running reviews of this reviewer harness.
+        in: query
+        name: agent
+        schema:
+          description: Cancel only the running reviews of this reviewer harness.
+          type: string
       responses:
         "200":
           content:
@@ -17859,6 +17871,10 @@ components:
       type: object
     CancelReviewResponse:
       properties:
+        cancelledRuns:
+          items:
+            $ref: '#/components/schemas/ReviewRun'
+          type: array
         reviewerHandleId:
           type: string
         reviews:
@@ -17868,6 +17884,7 @@ components:
       required:
       - reviewerHandleId
       - reviews
+      - cancelledRuns
       type: object
     CancelSessionInterfaceTransitionResponse:
       properties:
@@ -26525,6 +26542,8 @@ components:
           - orchestrator
           type: string
         projectId:
+          type: string
+        reviewId:
           type: string
         sessionId:
           type: string

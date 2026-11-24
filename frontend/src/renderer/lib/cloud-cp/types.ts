@@ -1196,7 +1196,7 @@ export interface CloudCpLinkedPullRequest {
 	number: number;
 }
 
-export type CloudCpAOReviewRunStatus = "running" | "complete" | "delivered" | "failed" | "cancelled";
+export type CloudCpAOReviewRunStatus = "running" | "complete" | "delivered" | "failed" | "cancelled" | "paused";
 export type CloudCpAOReviewVerdict = "" | "approved" | "changes_requested";
 export type CloudCpAOReviewState = "needs_review" | "running" | "up_to_date" | "changes_requested" | "ineligible";
 

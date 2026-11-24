@@ -8522,7 +8522,7 @@ components:
           type: integer
     AOReviewRunStatus:
       type: string
-      enum: [running, complete, delivered, failed, cancelled]
+      enum: [running, complete, delivered, failed, cancelled, paused]
     AOReviewVerdict:
       type: string
       enum: ["", approved, changes_requested]

@@ -6037,6 +6037,7 @@ export interface components {
             transport: "electron-webcontents-debugger" | "chrome-extension";
         };
         CancelReviewResponse: {
+            cancelledRuns: components["schemas"]["ReviewRun"][];
             reviewerHandleId: string;
             reviews: components["schemas"]["PRReviewState"][];
         };
@@ -9383,6 +9384,7 @@ export interface components {
             /** @enum {string} */
             kind: "worker" | "orchestrator";
             projectId?: string;
+            reviewId?: string;
             sessionId: string;
         };
         UsageLimitPromptsResponse: {
@@ -25795,7 +25797,12 @@ export interface operations {
     };
     cancelReview: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Cancel only the review run with this id. */
+                runId?: string;
+                /** @description Cancel only the running reviews of this reviewer harness. */
+                agent?: string;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */

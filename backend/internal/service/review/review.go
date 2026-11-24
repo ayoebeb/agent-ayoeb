@@ -68,7 +68,7 @@ type Manager interface {
 	RequestRereview(ctx context.Context, workerID domain.SessionID, prURL, reviewer string) error
 	ResolveReviewComment(ctx context.Context, workerID domain.SessionID, prURL, commentURL string) error
 	TriggerAuto(ctx context.Context, workerID domain.SessionID, harness domain.ReviewerHarness) (reviewcore.TriggerResult, error)
-	Cancel(ctx context.Context, workerID domain.SessionID) (reviewcore.CancelResult, error)
+	CancelWithOptions(ctx context.Context, workerID domain.SessionID, opts reviewcore.CancelOptions) (reviewcore.CancelResult, error)
 	TerminateReviewer(ctx context.Context, workerID domain.SessionID, body string) error
 	ArchiveReviewer(ctx context.Context, workerID domain.SessionID) error
 	TeardownReviewerTerminal(ctx context.Context, workerID domain.SessionID) error
@@ -708,9 +708,10 @@ func (s *Service) triggerWithOptions(
 	return result, nil
 }
 
-// Cancel stops the live reviewer pane and marks running review passes as failed.
-func (s *Service) Cancel(ctx context.Context, workerID domain.SessionID) (reviewcore.CancelResult, error) {
-	result, err := s.engine.Cancel(ctx, workerID)
+// CancelWithOptions stops the live reviewer pane and marks running review passes
+// as cancelled; opts narrows it to one run or one reviewer.
+func (s *Service) CancelWithOptions(ctx context.Context, workerID domain.SessionID, opts reviewcore.CancelOptions) (reviewcore.CancelResult, error) {
+	result, err := s.engine.CancelWithOptions(ctx, workerID, opts)
 	if err != nil {
 		return result, err
 	}
@@ -905,7 +906,7 @@ func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, revi
 	}
 
 	switch run.Status {
-	case domain.ReviewRunRunning:
+	case domain.ReviewRunRunning, domain.ReviewRunPaused:
 		session, found, err := s.store.GetSession(ctx, workerID)
 		if err != nil {
 			return domain.ReviewRun{}, err

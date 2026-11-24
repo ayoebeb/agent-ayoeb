@@ -68,9 +68,48 @@ SELECT CAST(conversations.current_session_id AS TEXT) AS session_id,
        COALESCE(stops.skip_reason, '') AS skip_reason,
        stops.resets_at AS stop_resets_at,
        stops.retry_at AS retry_at,
-       COALESCE(stops.attempts, 0) AS attempts
+       COALESCE(stops.attempts, 0) AS attempts,
+       CAST('' AS TEXT) AS review_id,
+       CAST('' AS TEXT) AS review_harness
 FROM conversation_turns AS turns
 JOIN conversations ON conversations.id = turns.conversation_id AND conversations.current_session_id IS NOT NULL
+LEFT JOIN usage_limit_stops AS stops ON stops.turn_id = turns.id
+WHERE turns.state = 'failed'
+  AND turns.rolled_back_at IS NULL
+  AND turns.promoted_to_turn_id IS NULL
+  AND (stops.turn_id IS NULL OR stops.resume_state = 'pending')
+  AND (stops.resume_state = 'pending' OR turns.completed_at >= sqlc.arg(completed_since))
+  AND NOT EXISTS (
+      SELECT 1 FROM conversation_turns AS newer
+      WHERE newer.conversation_id = turns.conversation_id
+        AND newer.promoted_to_turn_id IS NULL
+        AND newer.rolled_back_at IS NULL
+        AND newer.state NOT IN ('cancelled', 'queued')
+        AND (newer.requested_at > turns.requested_at
+             OR (newer.requested_at = turns.requested_at AND newer.rowid > turns.rowid))
+  )
+
+UNION ALL
+
+-- The same for a reviewer's own Chat: its stop is recorded under the worker the
+-- review belongs to, with the reviewer named in review_id.
+SELECT CAST(review.session_id AS TEXT) AS session_id,
+       turns.id AS turn_id,
+       turns.error_message AS error_message,
+       turns.completed_at AS completed_at,
+       turns.requested_at AS requested_at,
+       turns.usage_limit_resets_at AS usage_limit_resets_at,
+       turns.usage_limit_auto_resume AS usage_limit_auto_resume,
+       COALESCE(stops.resume_state, '') AS resume_state,
+       COALESCE(stops.skip_reason, '') AS skip_reason,
+       stops.resets_at AS stop_resets_at,
+       stops.retry_at AS retry_at,
+       COALESCE(stops.attempts, 0) AS attempts,
+       CAST(review.id AS TEXT) AS review_id,
+       CAST(review.harness AS TEXT) AS review_harness
+FROM conversation_turns AS turns
+JOIN conversations ON conversations.id = turns.conversation_id AND conversations.current_review_id IS NOT NULL
+JOIN review ON review.id = conversations.current_review_id AND review.is_archived = 0
 LEFT JOIN usage_limit_stops AS stops ON stops.turn_id = turns.id
 WHERE turns.state = 'failed'
   AND turns.rolled_back_at IS NULL
@@ -89,8 +128,8 @@ WHERE turns.state = 'failed'
 
 -- name: InsertUsageLimitStop :execrows
 INSERT INTO usage_limit_stops (
-    turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    turn_id, session_id, project_id, account_key, window_key, window_label, resets_at, detected_at, review_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (turn_id) DO NOTHING;
 
 -- name: ListPendingUsageLimitStops :many
@@ -137,7 +176,8 @@ SET resume_state = 'resumed', resumed_at = sqlc.arg(resumed_at), attempts = atte
     resume_turn_id = COALESCE((
         SELECT turns.id FROM conversation_turns AS turns
         JOIN conversations ON conversations.id = turns.conversation_id
-        WHERE conversations.current_session_id = usage_limit_stops.session_id
+        WHERE ((usage_limit_stops.review_id = '' AND conversations.current_session_id = usage_limit_stops.session_id)
+               OR (usage_limit_stops.review_id != '' AND conversations.current_review_id = usage_limit_stops.review_id))
           AND turns.requested_at >= sqlc.arg(since)
         ORDER BY turns.requested_at DESC, turns.rowid DESC
         LIMIT 1
@@ -158,7 +198,7 @@ LIMIT 1;
 -- A session that stopped on the limit again right after AO continued it.
 -- name: CountRecentUsageLimitResumes :one
 SELECT COUNT(*) FROM usage_limit_stops
-WHERE session_id = ? AND resume_state = 'resumed' AND resumed_at >= ?;
+WHERE session_id = ? AND review_id = ? AND resume_state = 'resumed' AND resumed_at >= ?;
 
 -- name: SetUsageLimitAutoResume :exec
 UPDATE app_settings SET usage_limit_auto_resume = ?, usage_limit_max_resumes = ?, updated_at = ? WHERE id = 1;

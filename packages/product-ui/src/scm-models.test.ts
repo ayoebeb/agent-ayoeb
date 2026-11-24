@@ -28,7 +28,7 @@ describe("raw SCM models", () => {
 		]);
 		expect(REVIEW_DECISIONS).toEqual(["none", "approved", "changes_requested", "review_required"]);
 		expect(MERGEABILITY_STATES).toEqual(["unknown", "mergeable", "conflicting", "blocked", "unstable"]);
-		expect(AO_REVIEW_RUN_STATUSES).toEqual(["running", "complete", "delivered", "failed", "cancelled"]);
+		expect(AO_REVIEW_RUN_STATUSES).toEqual(["running", "complete", "delivered", "failed", "cancelled", "paused"]);
 		expect(AO_REVIEW_VERDICTS).toEqual(["", "approved", "changes_requested"]);
 		expect(AO_REVIEW_STATES).toEqual([
 			"needs_review",

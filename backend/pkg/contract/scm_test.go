@@ -126,7 +126,7 @@ func TestSharedSCMVocabulariesAndCloudReadRoutesMatch(t *testing.T) {
 		{"AOReviewRunStatus", "AO_REVIEW_RUN_STATUSES", []string{
 			string(contract.AOReviewRunRunning), string(contract.AOReviewRunComplete),
 			string(contract.AOReviewRunDelivered), string(contract.AOReviewRunFailed),
-			string(contract.AOReviewRunCancelled),
+			string(contract.AOReviewRunCancelled), string(contract.AOReviewRunPaused),
 		}},
 		{"AOReviewVerdict", "AO_REVIEW_VERDICTS", []string{
 			string(contract.AOReviewVerdictNone), string(contract.AOReviewVerdictApproved),

@@ -27,6 +27,7 @@ type fakeReviewService struct {
 	triggeredRerun    bool
 	triggerErr        error
 	cancelErr         error
+	cancelOpts        reviewcore.CancelOptions
 	trigger           reviewcore.TriggerResult
 	cancel            reviewcore.CancelResult
 	list              reviewcore.SessionReviews
@@ -108,7 +109,8 @@ func (f *fakeReviewService) ApplyReviewActivitySignal(_ context.Context, reviewS
 	return f.activityErr
 }
 
-func (f *fakeReviewService) Cancel(context.Context, domain.SessionID) (reviewcore.CancelResult, error) {
+func (f *fakeReviewService) CancelWithOptions(_ context.Context, _ domain.SessionID, opts reviewcore.CancelOptions) (reviewcore.CancelResult, error) {
+	f.cancelOpts = opts
 	if f.cancelErr != nil {
 		return reviewcore.CancelResult{}, f.cancelErr
 	}
@@ -545,5 +547,27 @@ func TestReviewsListIncludesEveryActiveReviewer(t *testing.T) {
 	body, _, _ = doRequest(t, empty, "GET", "/api/v1/sessions/mer-1/reviews", "")
 	if !strings.Contains(string(body), `"activeReviewers":[]`) {
 		t.Fatalf("body = %s, want an empty activeReviewers array, never null", body)
+	}
+}
+
+func TestReviewsCancelPassesRunAndAgentSelectorsAndListsCancelledRuns(t *testing.T) {
+	svc := &fakeReviewService{cancel: reviewcore.CancelResult{
+		CancelledRuns: []domain.ReviewRun{{ID: "run-2", SessionID: "mer-1", Harness: domain.ReviewerCodex}},
+	}}
+	srv := newReviewTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-1/reviews/cancel?runId=run-2&agent=codex", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, body)
+	}
+	if svc.cancelOpts.RunID != "run-2" || svc.cancelOpts.Harness != domain.ReviewerCodex {
+		t.Fatalf("opts = %+v, want run-2 / codex", svc.cancelOpts)
+	}
+	if !strings.Contains(string(body), `"cancelledRuns":[{"id":"run-2"`) {
+		t.Fatalf("body = %s, want the cancelled run listed", body)
+	}
+
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-1/reviews/cancel?agent=bogus", ""); status != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown agent status = %d, want 422", status)
 	}
 }

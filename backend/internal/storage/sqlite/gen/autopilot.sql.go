@@ -92,7 +92,7 @@ type CreateAutopilotRunParams struct {
 	UpdatedAt     time.Time
 }
 
-// Autopilot task runs and their log. See migration 20261123231000000.
+// Autopilot task runs and their log. See migration 20261124120000000.
 func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRunParams) (AutopilotRun, error) {
 	row := q.db.QueryRowContext(ctx, createAutopilotRun,
 		arg.ID,

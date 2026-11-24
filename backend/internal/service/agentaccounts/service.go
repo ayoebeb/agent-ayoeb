@@ -1318,3 +1318,14 @@ func (s *Service) Usage(ctx context.Context, days int) ([]AccountUsage, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].AccountID < out[j].AccountID })
 	return out, nil
 }
+
+// DefaultAccountID is the account new sessions of harness's provider use, or ""
+// for a harness without accounts. An AO reviewer is not bound to an account and
+// runs on this one.
+func (s *Service) DefaultAccountID(ctx context.Context, harness domain.AgentHarness) (string, error) {
+	p, ok := domain.AgentAccountProviderFor(harness)
+	if !ok || s.providers[p] == nil {
+		return "", nil
+	}
+	return s.defaultID(ctx, p)
+}

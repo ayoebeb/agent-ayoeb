@@ -37,6 +37,9 @@ const (
 	AOReviewRunDelivered AOReviewRunStatus = "delivered"
 	AOReviewRunFailed    AOReviewRunStatus = "failed"
 	AOReviewRunCancelled AOReviewRunStatus = "cancelled"
+	// AOReviewRunPaused means the reviewer stopped on the provider usage limit;
+	// the pass continues by itself after the limit resets.
+	AOReviewRunPaused AOReviewRunStatus = "paused"
 )
 
 // AOReviewVerdict is the outcome of an AO review pass. An empty verdict means

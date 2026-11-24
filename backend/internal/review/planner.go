@@ -62,7 +62,7 @@ func Plan(prs []domain.PullRequest, runs []domain.ReviewRun) []PRReviewState {
 		if run, ok := latest[review.PRURL+"\x00"+review.TargetSHA]; ok {
 			review.LatestRun = &run
 			switch {
-			case run.Status == domain.ReviewRunRunning:
+			case runInFlight(run):
 				review.Status = ReviewStateRunning
 			case run.Verdict == domain.VerdictApproved:
 				review.Status = ReviewStateUpToDate
@@ -125,8 +125,8 @@ func latestRunsByPRAndSHA(runs []domain.ReviewRun) map[string]domain.ReviewRun {
 			latest[key] = run
 			continue
 		}
-		runRunning := run.Status == domain.ReviewRunRunning
-		existingRunning := existing.Status == domain.ReviewRunRunning
+		runRunning := runInFlight(run)
+		existingRunning := runInFlight(existing)
 		if runRunning != existingRunning {
 			if runRunning {
 				latest[key] = run
@@ -138,4 +138,10 @@ func latestRunsByPRAndSHA(runs []domain.ReviewRun) map[string]domain.ReviewRun {
 		}
 	}
 	return latest
+}
+
+// runInFlight reports whether a pass still holds its review slot: it is running,
+// or paused on the provider usage limit and waiting to continue after the reset.
+func runInFlight(run domain.ReviewRun) bool {
+	return run.Status == domain.ReviewRunRunning || run.Status == domain.ReviewRunPaused
 }

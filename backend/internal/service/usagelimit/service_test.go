@@ -204,12 +204,12 @@ func (f *fakeStore) LastUsageLimitResumeAt(context.Context) (time.Time, bool, er
 	return f.lastAt, !f.lastAt.IsZero(), nil
 }
 
-func (f *fakeStore) CountRecentUsageLimitResumes(_ context.Context, session domain.SessionID, since time.Time) (int, error) {
+func (f *fakeStore) CountRecentUsageLimitResumes(_ context.Context, session domain.SessionID, reviewID string, since time.Time) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := 0
 	for turn, at := range f.resumed {
-		if f.stops[turn].SessionID == session && !at.Before(since) {
+		if f.stops[turn].SessionID == session && f.stops[turn].ReviewID == reviewID && !at.Before(since) {
 			n++
 		}
 	}

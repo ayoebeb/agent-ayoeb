@@ -51,7 +51,10 @@ type PromptOption struct {
 
 // PromptSession is a session that stopped on the limit.
 type PromptSession struct {
-	ID          domain.SessionID
+	// ID is the session; for a reviewer it is the worker the review is of.
+	ID domain.SessionID
+	// ReviewID names the reviewer when it is the reviewer that stopped.
+	ReviewID    string
 	DisplayName string
 	Kind        domain.SessionKind
 	ProjectID   domain.ProjectID
@@ -163,32 +166,43 @@ func (s *Service) hasSwitchTargets(ctx context.Context, provider, exclude string
 }
 
 // openPromptSessions are the sessions of a prompt that are still stopped.
-func (s *Service) openPromptSessions(ctx context.Context, p domain.UsageLimitPrompt) ([]PromptSession, error) {
+func (s *Service) openPromptSessions(ctx context.Context, p domain.UsageLimitPrompt) ([]PromptSession, []domain.UsageLimitStop, error) {
 	stops, err := s.store.ListUsageLimitPromptStops(ctx, p.WindowKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var sessions []PromptSession
-	seen := map[domain.SessionID]bool{}
+	var live []domain.UsageLimitStop
+	type entry struct {
+		session domain.SessionID
+		review  string
+	}
+	seen := map[entry]bool{}
 	for _, stop := range stops {
-		if seen[stop.SessionID] {
+		key := entry{stop.SessionID, stop.ReviewID}
+		if seen[key] {
 			continue
 		}
 		rec, found, err := s.store.GetSession(ctx, stop.SessionID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !found || rec.IsTerminated || rec.Activity.State == domain.ActivityExited {
 			continue
 		}
-		seen[stop.SessionID] = true
-		sessions = append(sessions, PromptSession{ID: rec.ID, DisplayName: rec.DisplayName, Kind: rec.Kind, ProjectID: rec.ProjectID})
+		seen[key] = true
+		live = append(live, stop)
+		name := rec.DisplayName
+		if stop.ReviewID != "" {
+			name += " (reviewer)"
+		}
+		sessions = append(sessions, PromptSession{ID: rec.ID, ReviewID: stop.ReviewID, DisplayName: name, Kind: rec.Kind, ProjectID: rec.ProjectID})
 	}
 	// The orchestrator first: it is the one the owner talks to.
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return sessions[i].Kind == domain.KindOrchestrator && sessions[j].Kind != domain.KindOrchestrator
 	})
-	return sessions, nil
+	return sessions, live, nil
 }
 
 // ListPrompts returns the questions waiting for the owner. A prompt whose
@@ -203,7 +217,7 @@ func (s *Service) ListPrompts(ctx context.Context) ([]Prompt, error) {
 	}
 	var out []Prompt
 	for _, p := range open {
-		sessions, err := s.openPromptSessions(ctx, p)
+		sessions, _, err := s.openPromptSessions(ctx, p)
 		if err != nil {
 			return nil, err
 		}
@@ -259,7 +273,7 @@ func (s *Service) Switch(ctx context.Context, id, targetID string) (SwitchResult
 	if !valid {
 		return SwitchResult{}, ErrPromptTargetInvalid
 	}
-	sessions, err := s.openPromptSessions(ctx, p)
+	sessions, _, err := s.openPromptSessions(ctx, p)
 	if err != nil {
 		return SwitchResult{}, err
 	}
@@ -270,6 +284,15 @@ func (s *Service) Switch(ctx context.Context, id, targetID string) (SwitchResult
 	}
 	var result SwitchResult
 	for _, sess := range sessions {
+		if sess.ReviewID != "" {
+			// A reviewer restarts under the account; it has no session of its own to move.
+			if err := s.moveReviewer(ctx, sess, targetID); err != nil {
+				result.Failed = append(result.Failed, SwitchFailure{SessionID: sess.ID, Reason: err.Error()})
+				continue
+			}
+			result.Moved = append(result.Moved, sess.ID)
+			continue
+		}
 		err := s.mover.MoveToAccount(ctx, sess.ID, targetID)
 		switch {
 		case err == nil:
@@ -316,11 +339,11 @@ func (s *Service) Wait(ctx context.Context, id string) error {
 
 // ensurePrompt records the owner prompt of a limit window the first time one of
 // its sessions stops.
-func (s *Service) ensurePrompt(ctx context.Context, stop domain.UsageLimitStop, rec domain.SessionRecord, now time.Time) error {
+func (s *Service) ensurePrompt(ctx context.Context, stop domain.UsageLimitStop, harness domain.AgentHarness, now time.Time) error {
 	if s.lister == nil || stop.AccountKey == "" {
 		return nil
 	}
-	provider, ok := domain.AgentAccountProviderFor(rec.Harness)
+	provider, ok := domain.AgentAccountProviderFor(harness)
 	if !ok {
 		return nil
 	}
@@ -329,4 +352,38 @@ func (s *Service) ensurePrompt(ctx context.Context, stop domain.UsageLimitStop, 
 		Provider: string(provider), WindowLabel: stop.WindowLabel, ResetsAt: stop.ResetsAt, CreatedAt: now,
 	})
 	return err
+}
+
+// moveReviewer restarts a stopped reviewer under the chosen account and lets it
+// continue there. The stop it came from is settled as resumed so the watcher does
+// not continue it a second time after the reset.
+func (s *Service) moveReviewer(ctx context.Context, sess PromptSession, accountID string) error {
+	if s.reviewers == nil {
+		return ports.ErrAgentAccountUnknown
+	}
+	if err := s.reviewers.Move(ctx, sess.ID, sess.ReviewID, accountID); err != nil {
+		return err
+	}
+	// The move itself worked; settling its stop only keeps the reset from
+	// continuing the reviewer a second time, so a failure here is just logged.
+	if err := s.settleReviewerStop(ctx, sess); err != nil {
+		s.log.Warn("settle usage-limit stop after reviewer move", "session", sess.ID, "review", sess.ReviewID, "err", err)
+	}
+	return nil
+}
+
+func (s *Service) settleReviewerStop(ctx context.Context, sess PromptSession) error {
+	stops, err := s.store.ListPendingUsageLimitStops(ctx)
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	for _, stop := range stops {
+		if stop.SessionID == sess.ID && stop.ReviewID == sess.ReviewID {
+			if err := s.store.MarkUsageLimitStopResumed(ctx, stop.TurnID, now, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
