@@ -46,6 +46,8 @@ func TestSeedRecordPreservesAutomationRunIdentity(t *testing.T) {
 }
 
 type fakeStore struct {
+	// agentStopMarks are the sessions whose agent AO stopped on purpose.
+	agentStopMarks                     []domain.SessionID
 	cleanupMu                          sync.Mutex
 	cleanupFacts                       map[domain.SessionID]domain.SessionCleanupRecord
 	sessions                           map[domain.SessionID]domain.SessionRecord
@@ -203,6 +205,10 @@ func (f *fakeStore) UpdateSessionArtifactOutput(_ context.Context, id domain.Ses
 	rec.OutputType = outputType
 	f.sessions[id] = rec
 	return true, nil
+}
+func (f *fakeStore) MarkAgentStop(_ context.Context, id domain.SessionID, _ time.Time, _ string) error {
+	f.agentStopMarks = append(f.agentStopMarks, id)
+	return nil
 }
 func (f *fakeStore) SetSessionRuntimeReleased(_ context.Context, id domain.SessionID, launchID string) (bool, error) {
 	rec, ok := f.sessions[id]
@@ -2375,6 +2381,10 @@ func TestExitAgentStopsOnlyControllerAndPreservesSessionIdentity(t *testing.T) {
 	}
 	if releasedAtDestroy != "launch-current" {
 		t.Fatalf("released launch when the runtime was destroyed = %q, want it recorded first", releasedAtDestroy)
+	}
+	// The worker keeper must read this exit as deliberate, not as a crash.
+	if !reflect.DeepEqual(st.agentStopMarks, []domain.SessionID{"mer-1"}) {
+		t.Fatalf("deliberate stop marks = %v, want mer-1", st.agentStopMarks)
 	}
 }
 
