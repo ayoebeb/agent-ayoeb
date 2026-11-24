@@ -140,14 +140,22 @@ func isLANControlBlockedPath(path string) bool {
 // isLANAccountRouteAllowed reports the only /api/v1/agents/accounts routes a
 // paired desktop on another computer may reach, so its owner can see and switch
 // the account a session of this computer runs under: the account list, and one
-// session's account (read, and the switch). Sign-in, sign-in verification,
-// default-change, removal, reset credits, usage and the limit prompts stay
-// blocked. The controller additionally admits only a person's client on these
+// session's account (read, and the switch), and the open usage-limit prompts
+// (list, answer Switch or Wait). Sign-in, sign-in verification,
+// default-change, removal, reset credits and usage stay blocked. The controller additionally admits only a person's client on these
 // routes and sanitizes the list when it is served on the LAN listener.
 func isLANAccountRouteAllowed(method, path string) bool {
 	trimmed := strings.TrimSuffix(path, "/")
 	if trimmed == "/api/v1/agents/accounts" {
 		return method == http.MethodGet
+	}
+	if trimmed == "/api/v1/agents/accounts/limit-prompts" {
+		return method == http.MethodGet
+	}
+	if rest, ok := strings.CutPrefix(trimmed, "/api/v1/agents/accounts/limit-prompts/"); ok {
+		id, action, found := strings.Cut(rest, "/")
+		return found && method == http.MethodPost && id != "" && id != "." && id != ".." &&
+			(action == "switch" || action == "wait")
 	}
 	id, ok := strings.CutPrefix(trimmed, "/api/v1/agents/accounts/sessions/")
 	if !ok || id == "" || id == "." || id == ".." || strings.Contains(id, "/") {
