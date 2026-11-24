@@ -19,20 +19,21 @@ type Verdict struct {
 	Limit domain.HardLimit
 	// Reason is one plain sentence for the log.
 	Reason string
-	// MergeTargets lists every `gh pr merge` target the request holds: the
-	// service decides each one against the stored PR facts, because a merge is
-	// allowed once AO review approved the exact head and checks are green. A
-	// compound request is allowed only if every one of them is.
+	// MergeTargets is the one pull request an `ao pr merge` names. The service
+	// checks it is a pull request the run tracks; the daemon behind the command
+	// checks the review and the checks.
 	MergeTargets []MergeTarget
-	// Merge reports that the request holds at least one merge.
+	// Merge reports that the request is an `ao pr merge`, whatever the rest says.
 	Merge bool
 }
 
-// MergeTarget is the one pull request a canonical `gh pr merge` names: its
-// number or its full URL. Only that exact shape is ever allowed to merge (see
-// canonicalMerge), so there is no repository option to carry.
+// MergeTarget is the pull request a canonical `ao pr merge` names: its full URL
+// (which fixes host and repository), its number, and the head commit the caller
+// says it reviewed. Only that exact command ever merges (see canonicalMerge).
 type MergeTarget struct {
-	Ref string
+	Ref     string
+	Number  string
+	HeadSHA string
 }
 
 // Action is one permission request reduced to what the policy reads.
@@ -378,9 +379,6 @@ func evaluateCommandDepth(command string, env cmdEnv, depth int) Verdict {
 		return deny(limit, "The command sends a message through an outside service.")
 	}
 	var nested []innerRun
-	// merges collects every `gh pr merge` target of the request, so the service
-	// can judge each one: a later approved merge must not authorize an earlier one.
-	var merges []MergeTarget
 	for _, segment := range splitSegments(command) {
 		// A ( ) group is a subshell: it starts where the parent is, and nothing
 		// it does to the directory reaches the parent. It is read on its own.
@@ -407,10 +405,6 @@ func evaluateCommandDepth(command string, env cmdEnv, depth int) Verdict {
 			nested = append(nested, innerRun{inner, env.dir})
 		}
 		v := classifySegment(tokens, env)
-		if v.Merge {
-			merges = append(merges, v.MergeTargets...)
-			continue
-		}
 		if !v.Allow {
 			return v
 		}
@@ -420,15 +414,9 @@ func evaluateCommandDepth(command string, env cmdEnv, depth int) Verdict {
 	}
 	for _, inner := range nested {
 		v := evaluateCommandDepth(inner.command, cmdEnv{workspace: env.workspace, dir: inner.dir}, depth+1)
-		switch {
-		case v.Merge:
-			merges = append(merges, v.MergeTargets...)
-		case !v.Allow:
+		if !v.Allow {
 			return v
 		}
-	}
-	if len(merges) > 0 {
-		return Verdict{Merge: true, MergeTargets: merges, Reason: "A merge is decided against the PR's review and checks."}
 	}
 	return allow("A command with no hard-limit effect.")
 }
@@ -1018,31 +1006,6 @@ found:
 	return allow("A git command with no hard-limit effect.")
 }
 
-// mergeFlagsWithValue are the `gh pr merge` options whose next word is their
-// value, not the pull request.
-var mergeFlagsWithValue = map[string]bool{
-	"-b": true, "--body": true, "-t": true, "--subject": true, "-F": true, "--body-file": true,
-	"-A": true, "--author-email": true, "--match-head-commit": true, "-R": true, "--repo": true,
-}
-
-// mergeTarget reads the pull request out of the arguments of `gh pr merge`. It
-// only feeds the parser's own view; whether a merge may go ahead is decided by
-// canonicalMerge.
-func mergeTarget(args []string) MergeTarget {
-	var t MergeTarget
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case mergeFlagsWithValue[a]:
-			i++
-		case strings.HasPrefix(a, "-"):
-		case t.Ref == "":
-			t.Ref = a
-		}
-	}
-	return t
-}
-
 var ghWriteMethod = regexp.MustCompile(`(?i)(-X|--method)[ =]?(POST|PUT|PATCH|DELETE)`)
 
 func classifyGH(args, lower []string) Verdict {
@@ -1054,7 +1017,6 @@ func classifyGH(args, lower []string) Verdict {
 	if len(lower) > 1 {
 		sub = lower[1]
 	}
-	rest := args[min(2, len(args)):]
 	switch group {
 	case "auth":
 		if sub != "status" {
@@ -1066,7 +1028,9 @@ func classifyGH(args, lower []string) Verdict {
 			if hasFlag(lower, "--admin") {
 				return deny(domain.HardLimitCI, "The merge bypasses the branch's required checks and reviews.")
 			}
-			return Verdict{Merge: true, MergeTargets: []MergeTarget{mergeTarget(rest)}, Reason: "A merge is decided against the PR's review and checks."}
+			// Autopilot never merges through gh: its global flags, GH_REPO and host
+			// choices cannot be read reliably. It merges with `ao pr merge`.
+			return deny(domain.HardLimitMainPush, "Autopilot merges only with `ao pr merge <number> --url <pull request URL> --expected-head-sha <sha>`; `gh pr merge` is parked for you.")
 		case "comment", "review":
 			return deny(domain.HardLimitMessaging, "The command posts on a pull request other people read.")
 		}

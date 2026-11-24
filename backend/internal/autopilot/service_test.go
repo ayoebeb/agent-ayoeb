@@ -1328,9 +1328,9 @@ func TestMergeIsAllowedOnlyWithAnApprovedReviewOfTheExactHeadAndGreenChecks(t *t
 	orch := e.orchestrator()
 	e.start(orch.ID, "task")
 	worker := e.session(domain.KindWorker, e.now.Add(time.Minute), domain.SessionModeChat)
-	pr := prFact(12, domain.CIPassing)
+	pr := mergeFact(12, domain.CIPassing)
 	e.gates.facts[worker.ID] = []domain.PRFacts{pr}
-	merge := approval("m1", "Bash", "execute", `{"command":"gh pr merge 12 --squash"}`)
+	merge := approval("m1", "Bash", "execute", jsonCommand(mergeCmd(pr)))
 
 	// No review yet: refused and parked, never merged.
 	e.svc.HandleApproval(e.ctx, orch.ID, merge)
@@ -1350,7 +1350,7 @@ func TestMergeIsAllowedOnlyWithAnApprovedReviewOfTheExactHeadAndGreenChecks(t *t
 	}
 
 	// Approved but CI failing: refused again.
-	e.gates.facts[worker.ID] = []domain.PRFacts{prFact(12, domain.CIFailing)}
+	e.gates.facts[worker.ID] = []domain.PRFacts{mergeFact(12, domain.CIFailing)}
 	merge.RequestID = "m3"
 	e.svc.HandleApproval(e.ctx, orch.ID, merge)
 	if got := strings.Join(e.approvals.decisions, ","); got != "reject,allow,reject" {
@@ -1358,7 +1358,7 @@ func TestMergeIsAllowedOnlyWithAnApprovedReviewOfTheExactHeadAndGreenChecks(t *t
 	}
 
 	// A merge AO cannot match to a tracked PR is refused too.
-	unknown := approval("m4", "Bash", "execute", `{"command":"gh pr merge 999"}`)
+	unknown := approval("m4", "Bash", "execute", jsonCommand(aoMerge(999, "https://github.com/owner/repo-a/pull/999", mergeSHA)))
 	e.svc.HandleApproval(e.ctx, orch.ID, unknown)
 	if got := e.approvals.decisions[len(e.approvals.decisions)-1]; got != "reject" {
 		t.Fatalf("unmatched merge decision = %s, want reject", got)

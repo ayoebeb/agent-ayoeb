@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -132,20 +133,34 @@ func TestEvaluateReadsEveryStepOfAChain(t *testing.T) {
 	}
 }
 
-func TestEvaluateLeavesAMergeToThePRFacts(t *testing.T) {
-	v := Evaluate(bash("gh pr merge 42 --squash"))
-	if v.Allow || !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "42" {
+func TestEvaluateLeavesAnAOMergeToTheServiceAndParksEveryOtherMerge(t *testing.T) {
+	v := Evaluate(bash(aoMerge(42, "https://github.com/o/r/pull/42", testSHA)))
+	if v.Allow || !v.Merge || len(v.MergeTargets) != 1 {
 		t.Fatalf("merge verdict = %+v, want a merge request for PR 42", v)
 	}
-	v = Evaluate(bash("gh pr merge https://github.com/o/r/pull/9 --squash"))
-	if !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "https://github.com/o/r/pull/9" {
-		t.Fatalf("merge by URL = %+v", v)
+	if got := v.MergeTargets[0]; got.Ref != "https://github.com/o/r/pull/42" || got.Number != "42" || got.HeadSHA != testSHA {
+		t.Fatalf("merge target = %+v", got)
+	}
+	// gh is never parsed: whatever its shape, a gh merge is parked.
+	for _, cmd := range []string{"gh pr merge 42 --squash", "gh pr merge https://github.com/o/r/pull/9 --squash"} {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Merge || v.Limit != domain.HardLimitMainPush {
+			t.Fatalf("Evaluate(%q) = %+v, want a gh merge parked as main_push", cmd, v)
+		}
 	}
 	// A refusal in another step still wins over the merge.
-	if v := Evaluate(bash("gh pr merge 42 && git push origin main")); v.Merge || v.Limit != domain.HardLimitMainPush {
+	chained := aoMerge(42, "https://github.com/o/r/pull/42", testSHA) + " && git push origin main"
+	if v := Evaluate(bash(chained)); v.Allow || v.Merge || v.Limit != domain.HardLimitMainPush {
 		t.Fatalf("merge chained with a push to main = %+v", v)
 	}
 }
+
+// aoMerge is AO's own guarded merge command.
+func aoMerge(number int, url, sha string) string {
+	return fmt.Sprintf("ao pr merge %d --url %s --expected-head-sha %s", number, url, sha)
+}
+
+// testSHA is a full commit id.
+const testSHA = "0123456789abcdef0123456789abcdef01234567"
 
 func TestEvaluateFileTools(t *testing.T) {
 	edit := func(p string) Action {

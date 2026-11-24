@@ -3,8 +3,6 @@ package autopilot
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -137,10 +135,12 @@ func (s *Service) runCovering(ctx context.Context, rec domain.SessionRecord) (do
 	return domain.AutopilotRun{}, false
 }
 
-// mergeVerdict decides `gh pr merge` against the stored pull-request facts: a
-// merge is allowed once the AO review approved the exact head and checks are
-// green, which is the rule orchestrators already follow. Autopilot never loosens
-// it, and a merge AO cannot match to a tracked pull request is refused.
+// mergeVerdict decides an `ao pr merge` for a pull request of this run. The
+// daemon behind that command re-reads the pull request and refuses unless the AO
+// review and the checks are green on exactly the head it is given; this adds that
+// the pull request is one the run tracks (the requester's, or an orchestrator's
+// workers'), that the head given is the one AO tracks, and that AO's own view of
+// the review and the checks agrees. It never loosens the merge rule.
 func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, requester domain.SessionRecord, target MergeTarget) Verdict {
 	owners := []domain.SessionRecord{requester}
 	if requester.Kind == domain.KindOrchestrator {
@@ -152,10 +152,6 @@ func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, req
 	var (
 		match *domain.PRFacts
 		owner domain.SessionRecord
-		open  []domain.PRFacts
-		ref   = target.Ref
-		// repos holds every repository the run tracks a pull request in.
-		repos = map[string]bool{}
 	)
 	for _, o := range owners {
 		facts, err := s.store.ListPRFactsForSession(ctx, o.ID)
@@ -163,30 +159,20 @@ func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, req
 			return refusal("AO could not read the pull requests to check the merge.")
 		}
 		for i := range facts {
-			f := facts[i]
-			repos[factRepo(f)] = true
-			if ref != "" && prMatches(f, target) {
+			// The full URL carries the host and the repository; nothing else matches.
+			if strings.EqualFold(strings.TrimRight(facts[i].URL, "/"), strings.TrimRight(target.Ref, "/")) {
 				match, owner = &facts[i], o
-			}
-			if ref == "" && o.ID == requester.ID && !f.Merged && !f.Closed {
-				open = append(open, f)
 			}
 		}
 	}
-	if ref == "" && len(open) == 1 {
-		match, owner = &open[0], requester
-	}
-	// A bare number means "in the repository this directory belongs to", which AO
-	// cannot see. It is only safe when the run tracks pull requests in one
-	// repository; otherwise the merge must name the pull request's full URL.
-	if ref != "" && !isPRURL(ref) && len(repos) > 1 {
-		return refusal("The merge names a pull request by number, but this run tracks pull requests in more than one repository; merge it by its full URL.")
-	}
 	if match == nil {
-		return refusal("The merge does not match a pull request AO tracks for this run, so AO cannot check its review and checks.")
+		return refusal("The merge does not name a pull request AO tracks for this run, so AO cannot check its review and checks.")
 	}
 	if match.Merged || match.Closed {
 		return Verdict{Allow: true, Reason: "The pull request is already finished."}
+	}
+	if target.HeadSHA == "" || !strings.EqualFold(match.HeadSHA, target.HeadSHA) {
+		return refusal("The merge names a head commit other than the one AO tracks for " + prLabel(*match) + "; refresh and review the new head first.")
 	}
 	runs, err := s.store.ListCurrentHeadReviewRunsForSession(ctx, owner.ID)
 	if err != nil {
@@ -199,43 +185,6 @@ func (s *Service) mergeVerdict(ctx context.Context, run domain.AutopilotRun, req
 		return refusal(fmt.Sprintf("Merging %s is not allowed yet: CI is %s.", prLabel(*match), ciWord(match.CI)))
 	}
 	return Verdict{Allow: true, Reason: "The AO review approved the exact head and checks are green."}
-}
-
-// factRepo is the host and repository ("github.com/owner/name", lower case) a
-// pull request is in, read from its URL; empty when the URL does not say. The
-// host is part of the identity: github.com/o/r and ghe.example.com/o/r are two
-// repositories.
-func factRepo(f domain.PRFacts) string {
-	u, err := url.Parse(strings.TrimSpace(f.URL))
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 4 || parts[2] != "pull" || parts[0] == "" || parts[1] == "" {
-		return ""
-	}
-	return strings.ToLower(u.Host + "/" + parts[0] + "/" + parts[1])
-}
-
-// isPRURL reports whether a merge reference is a pull request URL.
-func isPRURL(ref string) bool {
-	u, err := url.Parse(strings.TrimSpace(ref))
-	return err == nil && u.Host != ""
-}
-
-// prMatches reports whether a merge reference names the PR. A URL must be the
-// tracked pull request's own URL, host and repository included; a bare number
-// only matches by number (mergeVerdict first checks that the number cannot mean
-// another repository).
-func prMatches(f domain.PRFacts, t MergeTarget) bool {
-	ref := strings.TrimSpace(t.Ref)
-	if isPRURL(ref) {
-		return strings.EqualFold(strings.TrimRight(f.URL, "/"), strings.TrimRight(ref, "/"))
-	}
-	if n, err := strconv.Atoi(strings.TrimPrefix(ref, "#")); err == nil {
-		return f.Number == n
-	}
-	return f.SourceBranch != "" && f.SourceBranch == ref
 }
 
 // pickDecision chooses the provider's allow-once or reject-once answer, falling

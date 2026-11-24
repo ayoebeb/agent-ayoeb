@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -105,27 +106,59 @@ func TestEveryOtherDeleteIsParked(t *testing.T) {
 	}
 }
 
-func TestCanonicalMergesAreDecidedAgainstTheTrackedPR(t *testing.T) {
-	for cmd, ref := range map[string]string{
-		"gh pr merge 12":                                             "12",
-		"gh pr merge 12 --squash":                                    "12",
-		"gh pr merge 12 --merge":                                     "12",
-		"gh pr merge 12 --rebase":                                    "12",
-		"gh pr merge 12 --squash --match-head-commit abc1234":        "12",
-		"gh pr merge 12 --rebase --match-head-commit=abc1234def":     "12",
-		"gh pr merge https://github.com/owner/repo/pull/12":          "https://github.com/owner/repo/pull/12",
-		"gh pr merge https://github.com/owner/repo/pull/12 --squash": "https://github.com/owner/repo/pull/12",
-		"gh pr merge https://ghe.example.com/owner/repo/pull/12/":    "https://ghe.example.com/owner/repo/pull/12/",
+func TestCanonicalAOMergeIsLeftToTheService(t *testing.T) {
+	const url = "https://github.com/owner/repo/pull/12"
+	for _, cmd := range []string{
+		aoMerge(12, url, testSHA),
+		"ao pr merge 12 --expected-head-sha " + testSHA + " --url " + url,
+		aoMerge(12, "https://ghe.example.com/owner/repo/pull/12", testSHA),
+		aoMerge(12, url, "0123456789ABCDEF0123456789ABCDEF01234567"),
 	} {
 		v := Evaluate(bash(cmd))
-		if !v.Merge || v.Allow || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != ref {
-			t.Errorf("Evaluate(%q) = %+v, want one merge of %q left to the PR facts", cmd, v, ref)
+		if !v.Merge || v.Allow || len(v.MergeTargets) != 1 || v.MergeTargets[0].Number != "12" || v.MergeTargets[0].HeadSHA != strings.ToLower(v.MergeTargets[0].HeadSHA) {
+			t.Errorf("Evaluate(%q) = %+v, want one merge of PR 12 left to the service", cmd, v)
 		}
 	}
 }
 
-// The four bypasses the review found, and the rest of their family: every one is
-// parked, none is left to the PR facts.
+// A bare number can name the wrong repository, and so can any flag or variable
+// that picks one. AO's merge names the pull request by its full URL and checks the
+// number against it, so none of these is accepted.
+func TestEveryOtherAOMergeIsParked(t *testing.T) {
+	const url = "https://github.com/owner/repo/pull/12"
+	for _, cmd := range []string{
+		"ao pr merge 12",
+		"ao pr merge 12 --url " + url,
+		"ao pr merge 12 --expected-head-sha " + testSHA,
+		"ao pr merge 13 --url " + url + " --expected-head-sha " + testSHA,
+		"ao pr merge 12 --url https://github.com/owner/repo/pull/12/files --expected-head-sha " + testSHA,
+		"ao pr merge 12 --url http://github.com/owner/repo/pull/12 --expected-head-sha " + testSHA,
+		"ao pr merge 12 --url https://github.com/owner/repo/issues/12 --expected-head-sha " + testSHA,
+		"ao pr merge 12 --url " + url + " --expected-head-sha abc123",
+		"ao pr merge 12 --url " + url + " --expected-head-sha nothexnothexnothexnothexnothexnothexno",
+		"ao pr merge 12 --url " + url + " --url " + url + " --expected-head-sha " + testSHA,
+		aoMerge(12, url, testSHA) + " --squash",
+		aoMerge(12, url, testSHA) + " --repo owner/other",
+		"ao --repo owner/other pr merge 12 --url " + url + " --expected-head-sha " + testSHA,
+		"AO_REPO=other ao pr merge 12 --url " + url + " --expected-head-sha " + testSHA,
+		"env " + aoMerge(12, url, testSHA),
+		"/usr/local/bin/" + aoMerge(12, url, testSHA),
+		"./" + aoMerge(12, url, testSHA),
+		"AO pr merge 12 --url " + url + " --expected-head-sha " + testSHA,
+		aoMerge(12, url, testSHA) + " && " + aoMerge(13, "https://github.com/owner/repo/pull/13", testSHA),
+		aoMerge(12, url, testSHA) + "; rm -rf dist",
+		"cd /tmp/x && " + aoMerge(12, url, testSHA),
+		`bash -c "` + aoMerge(12, url, testSHA) + `"`,
+		"ao pr merge $PR --url " + url + " --expected-head-sha " + testSHA,
+		"ao pr merge 12 --url $URL --expected-head-sha " + testSHA,
+		`a""o pr merge 12 --url ` + url + ` --expected-head-sha ` + testSHA,
+	} {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Merge || v.Limit == "" {
+			t.Errorf("Evaluate(%q) = %+v, want it parked with a hard limit and never left to the service", cmd, v)
+		}
+	}
+}
+
 func TestEveryOtherMergeIsParked(t *testing.T) {
 	for _, cmd := range []string{
 		// gh global flags before the subcommand
@@ -178,10 +211,124 @@ func TestEveryOtherMergeIsParked(t *testing.T) {
 			t.Errorf("Evaluate(%q) = %+v, want it parked with a hard limit and never left to the PR facts", cmd, v)
 		}
 	}
+	// A merge into the default branch by push is parked too.
+	for _, cmd := range []string{"git push origin main", "git push origin HEAD:main", "git push origin HEAD:refs/heads/main", "git push --force origin main"} {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Limit != domain.HardLimitMainPush {
+			t.Errorf("Evaluate(%q) = %+v, want it parked as main_push", cmd, v)
+		}
+	}
 	// A local git merge and a pull request that is only read are ordinary work.
 	for _, cmd := range []string{"git merge origin/main", "gh pr view 12 --json state", "gh pr checks 12", "gh pr create --fill", "go test ./..."} {
 		if v := Evaluate(bash(cmd)); !v.Allow {
 			t.Errorf("Evaluate(%q) = %+v, want allow", cmd, v)
+		}
+	}
+}
+
+// The program a delete runs under can be written many ways. Every spelling is
+// recognised as a delete; only the bare name is ever auto-approved, and only in
+// its plain form.
+func TestDeleteExecutableVariantsAreGatedAndOnlyTheBareNameIsAllowed(t *testing.T) {
+	parked := []string{
+		"rm.exe -rf dist",
+		"RM.EXE -rf dist",
+		"Rm -rf dist/*",
+		"/bin/rm -rf dist",
+		"/usr/bin/rm -rf dist",
+		"./rm -rf dist",
+		"../tools/rm -rf dist",
+		`C:\Windows\System32\rm.exe -rf dist`,
+		`C:\Tools\rm.cmd -rf dist`,
+		"del.exe /s /q build",
+		"DEL.EXE build/x",
+		"erase.exe build/x",
+		"rmdir.exe build/x",
+		"rd.exe /s /q build",
+		"ri.exe -Recurse dist",
+		"ri.ps1 -Recurse dist",
+		"remove-item.exe dist",
+		"Remove-Item.cmd -Recurse dist",
+		"pwsh -c 'ri -Recurse dist'",
+		"powershell.exe -Command ri -Recurse dist",
+		"cmd.exe /c del build\\x",
+		"cmd /c rd /s /q build",
+		"env rm.exe -rf dist",
+		"busybox rm -rf dist",
+		"unlink.exe notes.txt",
+		"shred.exe notes.txt",
+		"find . -name x -delete",
+	}
+	for _, cmd := range parked {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Limit == "" {
+			t.Errorf("Evaluate(%q) = %+v, want it parked with a hard limit", cmd, v)
+		}
+	}
+	// The aliases are all deletes too, and allowed only as the bare plain form.
+	for _, cmd := range []string{"rm -rf dist", "ri -Recurse dist", "rd /s /q build", "rmdir build/empty", "del /q build/x", "erase build/x", "unlink notes.txt", "Remove-Item -Recurse -Force dist", "RM -rf dist", "REMOVE-ITEM dist"} {
+		if v := Evaluate(bash(cmd)); !v.Allow {
+			t.Errorf("Evaluate(%q) = %+v, want the plain delete allowed", cmd, v)
+		}
+	}
+}
+
+// PowerShell reads $ @ ` : ( ) { } ; | and commas as syntax inside an argument:
+// subexpressions, splatting, drive and parameter-value colons, groups, lists of
+// several paths. None of it can be checked as a literal path, so it is parked, and
+// only -Recurse -Force -LiteralPath -Path are accepted as parameters.
+func TestPowerShellSyntaxAndParametersAreParked(t *testing.T) {
+	parked := []string{
+		"Remove-Item -Recurse $env:TEMP",
+		"Remove-Item -Recurse $HOME\\x",
+		"Remove-Item @args",
+		"Remove-Item @{Path='dist'}",
+		"Remove-Item -Path:C:/Users/x/data",
+		"Remove-Item -LiteralPath:dist",
+		"Remove-Item -Recurse:$true dist",
+		"Remove-Item -Force:$false dist",
+		"Remove-Item -Path (Get-Content list.txt)",
+		"Remove-Item (Join-Path dist x)",
+		"Remove-Item -Path { dist }",
+		"Remove-Item -Path dist; Remove-Item -Path out",
+		"Remove-Item -Path dist | Out-Null",
+		"Remove-Item dist, out",
+		"Remove-Item dist,/etc/x",
+		"Remove-Item -Path dist,out",
+		"Remove-Item C:/Users/x/Documents",
+		"Remove-Item -Path C:/work/dist",
+		"Remove-Item -Path ..\\x",
+		"Remove-Item -Path ../x",
+		"Remove-Item -LiteralPath /etc/x",
+		"Remove-Item -Path",
+		"Remove-Item -Path -Recurse",
+		"Remove-Item dist -Include *.log",
+		"Remove-Item dist -Exclude keep",
+		"Remove-Item dist -WhatIf",
+		"Remove-Item dist -Confirm:$false",
+		"Remove-Item dist -ErrorAction SilentlyContinue",
+		"Remove-Item dist -Filter x",
+		"Remove-Item dist -Credential x",
+		"Remove-Item dist -Stream x",
+		"Remove-Item dist -UseTransaction",
+		"Remove-Item -Recurse -Force",
+		"Remove-Item dist\\*",
+		"Remove-Item 'dist'`n-Path ../x",
+	}
+	for _, cmd := range parked {
+		if v := Evaluate(bash(cmd)); v.Allow || v.Limit != domain.HardLimitDataDelete {
+			t.Errorf("Evaluate(%q) = %+v, want it parked as data_delete", cmd, v)
+		}
+	}
+	for _, cmd := range []string{
+		"Remove-Item -Recurse -Force dist",
+		"Remove-Item -Path dist",
+		"Remove-Item -LiteralPath dist -Recurse -Force",
+		"Remove-Item -Path dist -Recurse",
+		"remove-item -literalpath build/cache",
+		"ri -Path dist -Force -Recurse",
+		"Remove-Item dist out",
+	} {
+		if v := Evaluate(bash(cmd)); !v.Allow {
+			t.Errorf("Evaluate(%q) = %+v, want it allowed: literal paths inside the workspace", cmd, v)
 		}
 	}
 }

@@ -53,10 +53,15 @@ func TestEvaluateReadsCodexApprovalPayloads(t *testing.T) {
 		}
 	}
 
-	// A merge is left to the PR facts, like any other agent's merge.
-	merge := ParseApproval("Run gh pr merge 7", codexApproval(exec, "gh pr merge 7 --squash", testWorkspace), testWorkspace)
-	if v := Evaluate(merge); !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Ref != "7" {
+	// AO's own merge is left to the service; a gh merge is parked.
+	cmd := aoMerge(7, "https://github.com/o/r/pull/7", testSHA)
+	merge := ParseApproval("Run "+cmd, codexApproval(exec, cmd, testWorkspace), testWorkspace)
+	if v := Evaluate(merge); !v.Merge || len(v.MergeTargets) != 1 || v.MergeTargets[0].Number != "7" {
 		t.Fatalf("codex merge = %+v", v)
+	}
+	gh := ParseApproval("Run gh pr merge 7", codexApproval(exec, "gh pr merge 7 --squash", testWorkspace), testWorkspace)
+	if v := Evaluate(gh); v.Allow || v.Merge || v.Limit != domain.HardLimitMainPush {
+		t.Fatalf("codex gh merge = %+v", v)
 	}
 
 	// File changes name no files in the adapter's payload, so AO cannot tell they

@@ -1,6 +1,8 @@
 package autopilot
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -8,48 +10,64 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
-// One command that merges two pull requests is never allowed, even when both are
-// approved and green: the approved one cannot vouch for the other, whichever
-// order they come in. A single canonical merge of an approved, green PR is.
+// A compound request that holds a merge is parked, even when every pull request
+// in it is approved and green; each merge must be its own command.
 func TestACompoundMergeIsAlwaysParked(t *testing.T) {
 	e := newEnv(t)
 	orch := e.orchestrator()
 	e.start(orch.ID, "task")
 	worker := e.session(domain.KindWorker, e.now.Add(time.Minute), domain.SessionModeChat)
-	first, second := prFact(12, domain.CIPassing), prFact(13, domain.CIPassing)
+	first, second := mergeFact(12, domain.CIPassing), mergeFact(13, domain.CIPassing)
 	e.gates.facts[worker.ID] = []domain.PRFacts{first, second}
 	e.gates.reviews[worker.ID] = []domain.CurrentHeadReviewRun{
 		review(first.URL, domain.VerdictApproved, e.now),
 		review(second.URL, domain.VerdictApproved, e.now),
 	}
+	one, two := mergeCmd(first), mergeCmd(second)
 
 	for i, cmd := range []string{
-		"gh pr merge 12 --squash && gh pr merge 13 --squash",
-		"gh pr merge 13 --squash && gh pr merge 12 --squash",
-		`bash -c "gh pr merge 12 && gh pr merge 13"`,
-		"gh pr merge 12 && gh pr merge 13",
+		one + " && " + two,
+		two + " && " + one,
+		one + "; " + two,
+		`bash -c "` + one + " && " + two + `"`,
 	} {
 		before := len(e.approvals.decisions)
-		e.svc.HandleApproval(e.ctx, orch.ID, approval("c"+string(rune('0'+i)), "Bash", "execute", `{"command":"`+strings.ReplaceAll(cmd, `"`, `\"`)+`"}`))
+		e.svc.HandleApproval(e.ctx, orch.ID, approval("c"+string(rune('0'+i)), "Bash", "execute", jsonCommand(cmd)))
 		if got := e.approvals.decisions[before:]; len(got) != 1 || got[0] != "reject" {
 			t.Fatalf("%q decisions = %v, want reject: a compound merge is parked", cmd, got)
 		}
 	}
-
-	// Each one on its own is judged on its own review and checks.
-	for ref, want := range map[string]string{"12": "allow", "13": "allow"} {
+	// Each one on its own is judged on its own review, checks and head.
+	for _, cmd := range []string{one, two} {
 		before := len(e.approvals.decisions)
-		e.svc.HandleApproval(e.ctx, orch.ID, approval("s"+ref, "Bash", "execute", `{"command":"gh pr merge `+ref+` --squash"}`))
-		if got := e.approvals.decisions[before:]; len(got) != 1 || got[0] != want {
-			t.Fatalf("a single merge of %s decisions = %v, want %s", ref, got, want)
+		e.svc.HandleApproval(e.ctx, orch.ID, approval("s", "Bash", "execute", jsonCommand(cmd)))
+		if got := e.approvals.decisions[before:]; len(got) != 1 || got[0] != "allow" {
+			t.Fatalf("%q decisions = %v, want allow", cmd, got)
 		}
 	}
-	e.gates.facts[worker.ID] = []domain.PRFacts{first, prFact(13, domain.CIFailing)}
+	e.gates.facts[worker.ID] = []domain.PRFacts{first, mergeFact(13, domain.CIFailing)}
 	before := len(e.approvals.decisions)
-	e.svc.HandleApproval(e.ctx, orch.ID, approval("f13", "Bash", "execute", `{"command":"gh pr merge 13"}`))
+	e.svc.HandleApproval(e.ctx, orch.ID, approval("f13", "Bash", "execute", jsonCommand(two)))
 	if got := e.approvals.decisions[before:]; len(got) != 1 || got[0] != "reject" {
 		t.Fatalf("a merge on failing CI decisions = %v, want reject", got)
 	}
+}
+
+// mergeSHA is the head AO tracks for the pull requests the tests merge.
+const mergeSHA = "0123456789abcdef0123456789abcdef01234567"
+
+func mergeFact(n int, ci domain.CIState) domain.PRFacts {
+	return domain.PRFacts{
+		URL: fmt.Sprintf("https://github.com/owner/repo-a/pull/%d", n), Number: n, CI: ci,
+		HeadSHA: mergeSHA, SourceBranch: fmt.Sprintf("ao/x-%d", n),
+	}
+}
+
+func mergeCmd(f domain.PRFacts) string { return aoMerge(f.Number, f.URL, f.HeadSHA) }
+
+func jsonCommand(cmd string) string {
+	out, _ := json.Marshal(map[string]string{"command": cmd})
+	return string(out)
 }
 
 // A Codex request, shaped like the adapter's stored detail, goes through the same
@@ -74,14 +92,15 @@ func rawApproval(id, detail string) ApprovalNotice {
 	return n
 }
 
-// Repository and host identity of a merge: the number or URL the command names
-// must be the tracked pull request's own.
-func TestMergeIsDecidedOnRepositoryHostAndNumber(t *testing.T) {
+// The merge command names its pull request by full URL, which fixes the host and
+// the repository, and the head commit the caller reviewed. Anything else is
+// parked, and a number alone never decides which repository is meant.
+func TestAOMergeIsDecidedOnURLHeadReviewAndChecks(t *testing.T) {
 	e := newEnv(t)
 	orch := e.orchestrator()
 	e.start(orch.ID, "task")
 	worker := e.session(domain.KindWorker, e.now.Add(time.Minute), domain.SessionModeChat)
-	inA := domain.PRFacts{URL: "https://github.com/owner/repo-a/pull/12", Number: 12, CI: domain.CIPassing, HeadSHA: "abc123", SourceBranch: "ao/a"}
+	inA := mergeFact(12, domain.CIPassing)
 	e.gates.facts[worker.ID] = []domain.PRFacts{inA}
 	e.gates.reviews[worker.ID] = []domain.CurrentHeadReviewRun{review(inA.URL, domain.VerdictApproved, e.now)}
 
@@ -89,48 +108,49 @@ func TestMergeIsDecidedOnRepositoryHostAndNumber(t *testing.T) {
 	decide := func(cmd string) string {
 		n++
 		before := len(e.approvals.decisions)
-		e.svc.HandleApproval(e.ctx, orch.ID, approval("r"+string(rune('a'+n)), "Bash", "execute", `{"command":"`+cmd+`"}`))
+		e.svc.HandleApproval(e.ctx, orch.ID, approval("r"+string(rune('a'+n)), "Bash", "execute", jsonCommand(cmd)))
 		got := e.approvals.decisions[before:]
 		if len(got) != 1 {
 			t.Fatalf("%s: decisions = %v", cmd, got)
 		}
 		return got[0]
 	}
+	otherSHA := "fedcba9876543210fedcba9876543210fedcba98"
 	for cmd, want := range map[string]string{
-		// canonical forms of the tracked pull request
-		"gh pr merge 12":          "allow",
-		"gh pr merge 12 --squash": "allow",
-		"gh pr merge 12 --match-head-commit abc1234 --rebase": "allow",
-		"gh pr merge https://github.com/owner/repo-a/pull/12": "allow",
-		// another repository, another host, a global flag or a repository override
-		"gh pr merge https://github.com/owner/repo-b/pull/12":      "reject",
-		"gh pr merge https://ghe.example.com/owner/repo-a/pull/12": "reject",
-		"gh pr merge 12 --repo owner/repo-a":                       "reject",
-		"gh pr merge 12 -R owner/repo-b":                           "reject",
-		"gh -R owner/repo-b pr merge 12":                           "reject",
-		"gh --repo owner/repo-b pr merge 12":                       "reject",
-		"GH_REPO=owner/repo-b gh pr merge 12":                      "reject",
-		"env GH_REPO=owner/repo-b gh pr merge 12":                  "reject",
-		"GH_HOST=ghe.example.com gh pr merge 12":                   "reject",
-		"gh pr merge 12 --admin":                                   "reject",
-		"gh pr merge 12 --auto":                                    "reject",
-		"gh pr merge 12 --delete-branch":                           "reject",
-		"gh pr merge":                                              "reject",
-		"gh pr merge my-branch":                                    "reject",
+		// the tracked pull request, at its tracked head
+		aoMerge(12, inA.URL, mergeSHA):                  "allow",
+		aoMerge(12, inA.URL, strings.ToUpper(mergeSHA)): "allow",
+		// the same number in another repository or on another host
+		aoMerge(12, "https://github.com/owner/repo-b/pull/12", mergeSHA):      "reject",
+		aoMerge(12, "https://ghe.example.com/owner/repo-a/pull/12", mergeSHA): "reject",
+		aoMerge(12, "https://github.com/OTHER/repo-a/pull/12", mergeSHA):      "reject",
+		// a head that is not the one AO tracks
+		aoMerge(12, inA.URL, otherSHA): "reject",
+		// a pull request this run does not track
+		aoMerge(99, "https://github.com/owner/repo-a/pull/99", mergeSHA): "reject",
+		// a bare number, gh in every shape, other flags
+		"ao pr merge 12":                                        "reject",
+		"gh pr merge 12":                                        "reject",
+		"gh pr merge " + inA.URL:                                "reject",
+		"gh pr merge 12 --repo owner/repo-a":                    "reject",
+		"gh -R owner/repo-b pr merge 12":                        "reject",
+		"GH_REPO=owner/repo-b gh pr merge 12":                   "reject",
+		aoMerge(12, inA.URL, mergeSHA) + " --repo owner/repo-b": "reject",
 	} {
 		if got := decide(cmd); got != want {
 			t.Errorf("%q decided %s, want %s", cmd, got, want)
 		}
 	}
 
-	// Two repositories tracked: a bare number could mean either, so only the full
-	// URL of an approved pull request goes through.
-	inB := domain.PRFacts{URL: "https://github.com/owner/repo-b/pull/12", Number: 12, CI: domain.CIPassing, HeadSHA: "def456", SourceBranch: "ao/b"}
+	// Two repositories tracked with the same number: only the URL says which, and
+	// each is judged on its own review.
+	inB := domain.PRFacts{URL: "https://github.com/owner/repo-b/pull/12", Number: 12, CI: domain.CIPassing, HeadSHA: otherSHA, SourceBranch: "ao/b"}
 	e.gates.facts[worker.ID] = []domain.PRFacts{inA, inB}
 	for cmd, want := range map[string]string{
-		"gh pr merge 12": "reject",
-		"gh pr merge https://github.com/owner/repo-a/pull/12": "allow",
-		"gh pr merge https://github.com/owner/repo-b/pull/12": "reject",
+		"ao pr merge 12":               "reject",
+		aoMerge(12, inA.URL, mergeSHA): "allow",
+		aoMerge(12, inB.URL, otherSHA): "reject",
+		aoMerge(12, inB.URL, mergeSHA): "reject",
 	} {
 		if got := decide(cmd); got != want {
 			t.Errorf("two repositories: %q decided %s, want %s", cmd, got, want)

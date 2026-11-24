@@ -53,7 +53,7 @@ func startMessage(run domain.AutopilotRun, kind domain.SessionKind) string {
 	b.WriteString("5. When every criterion is met and you have verified it (run the tests and builds that prove it), declare it with `ao autopilot done --evidence \"<the commands you ran and their results>\"`. ")
 	b.WriteString("AO then checks the gates: for pull-request work an AO review of the exact head must be approved and CI must be green. If CI cannot start (for example a billing limit), say so with `--ci-cannot-run \"<why>\"`: that is recorded as a gap, not a pass. A gate that fails sends you back to work with the reason.\n")
 	if kind == domain.KindOrchestrator {
-		b.WriteString("6. You are the orchestrator: delegate to workers as usual. Merge only under the existing rule: an approved AO review of the exact head and green checks. Autopilot does not loosen it.\n")
+		b.WriteString("6. You are the orchestrator: delegate to workers as usual. Merge only with `ao pr merge <number> --url <full pull request URL> --expected-head-sha <sha>`: the daemon then checks the AO review and the checks on that exact head. Every other way to merge, `gh pr merge` included, is parked for the user.\n")
 	}
 	b.WriteString("\nHARD LIMITS (Autopilot never does these, even if the task seems to ask for one)\n")
 	b.WriteString(hardLimitLines())

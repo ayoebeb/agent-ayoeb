@@ -73,7 +73,7 @@ Autopilot never does these, even if the task seems to ask for one:
 |---|---|
 | `money` | spend money or change billing or payment settings |
 | `ci` | disable, skip or weaken CI |
-| `main_push` | push to the default branch, or merge without an approved AO review of the exact head and green checks |
+| `main_push` | push to the default branch, or merge any way other than `ao pr merge` on a pull request with an approved AO review of the exact head and green checks |
 | `data_delete` | delete data outside the session's own workspace |
 | `admin` | use administrator or elevated rights |
 | `messaging` | message people outside AO (email, chat, issue or PR comments to others) |
@@ -103,20 +103,26 @@ request whose effect it cannot determine.
 A delete or a merge is **denied by default**: Autopilot allows one only in a form
 it can prove, and parks every other one for the human.
 
-- **Delete:** one plain `rm`, `rmdir`, `del`, `erase`, `rd` or `Remove-Item`, with
-  only ordinary flags such as `-rf`, and literal targets strictly inside your
-  workspace. No `cd`, `pushd`, `Set-Location`, `&&`, `||`, `;`, pipe, subshell,
-  substitution, variable, glob, environment assignment, `sudo` or wrapper. `find
-  -delete`, `git clean`, `xargs rm` and a delete inside `bash -c` are parked. Run
-  the delete as its own command.
-- **Merge:** exactly `gh pr merge <number or pull request URL>` with only
-  `--squash`, `--merge`, `--rebase` or `--match-head-commit <sha>`. No global flag
-  before `pr`, no `-R`/`--repo`, no environment assignment such as `GH_REPO`, no
-  chaining. AO then merges only if an AO review approved the exact head and
-  checks are green. When more than one repository is tracked, use the full pull
-  request URL: a bare number is refused.
+- **Delete:** one plain `rm`, `rmdir`, `del`, `erase`, `rd`, `ri` or `Remove-Item`
+  written as exactly that bare word (not `rm.exe`, `/bin/rm`, `./rm` or a wrapper),
+  with only ordinary flags such as `-rf`, `-Recurse`, `-Force`, `-Path` or
+  `-LiteralPath`, and literal targets strictly inside your workspace. No `cd`,
+  `pushd`, `Set-Location`, `&&`, `||`, `;`, pipe, subshell, substitution, variable,
+  glob, environment assignment, comma list, or PowerShell syntax (`$ @ ` : ( ) { }`).
+  `find -delete`, `git clean`, `xargs rm` and a delete inside `bash -c` or `pwsh -c`
+  are parked. Run the delete as its own command, from the workspace.
+- **Merge:** only through AO's own guarded command, with nothing else on the line:
 
-Autopilot does not loosen the merge rule you already follow.
+  ```bash
+  ao pr merge <number> --url <full pull request URL> --expected-head-sha <full sha>
+  ```
+
+  The daemon re-reads the pull request and refuses unless the AO review and the
+  checks are green on exactly that head; Autopilot also checks the pull request is
+  one of your run's. **`gh pr merge` is never used**: every `gh` merge, a `git push`
+  to the default branch and any other way to merge is parked for the human.
+
+Autopilot does not loosen the merge rule you already follow: an approved AO review of the exact head and green checks.
 
 ## What stops a run
 
