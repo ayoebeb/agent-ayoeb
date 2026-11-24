@@ -1,7 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { clientForHost } from "../lib/host-clients";
+import { usesPreviewWorkspaceData } from "../lib/preview-mode";
 import { LOCAL_HOST, type HostId } from "../lib/hosts";
 import {
 	autopilotRunsQueryKey,
@@ -11,6 +12,7 @@ import {
 	isOpenAutopilotRun,
 	refreshAutopilot,
 	runForProject,
+	runForSession,
 	type AutopilotRunOnHost,
 	type AutopilotView,
 } from "../lib/autopilot";
@@ -29,6 +31,9 @@ export function useAutopilotRuns(): { runs: AutopilotRunOnHost[] } {
 		queries: hosts.map((hostId) => ({
 			queryKey: autopilotRunsQueryKey(hostId),
 			queryFn: () => fetchAutopilotRuns(hostId),
+			// The browser preview has no daemon behind it: a read would hang on the
+			// dev proxy and hold one of the page's few connections until it is full.
+			enabled: !usesPreviewWorkspaceData,
 			retry: 1,
 			refetchInterval: 10_000,
 		})),
@@ -43,21 +48,73 @@ export function useProjectAutopilot(hostId: HostId, projectId: string): Autopilo
 	return runForProject(runs, hostId, projectId);
 }
 
-/** One session's run, log and return report. */
+/**
+ * One session's run, log and return report.
+ *
+ * Every session switch mounts a fresh read, so it is cheap by construction: a view
+ * is kept for 30 seconds, and a session with no open run is only re-read when the
+ * window regains focus, when the shared list of open runs (which the sidebar
+ * already polls) names a run this view does not know yet, and on a slow 60 second
+ * poll while the page is visible. That is how a run started somewhere else (the
+ * CLI, the phone, another computer) shows up without the heavy polling that slowed
+ * session switches. A session with an open run parks, pauses and finishes by
+ * itself, so it is polled every 8 seconds.
+ */
 export function useAutopilotView(hostId: HostId, sessionId: string | undefined, enabled = true) {
-	return useQuery({
-		queryKey: autopilotViewQueryKey(hostId, sessionId ?? ""),
+	const queryClient = useQueryClient();
+	const active = enabled && Boolean(sessionId) && !usesPreviewWorkspaceData;
+	const viewKey = autopilotViewQueryKey(hostId, sessionId ?? "");
+	const query = useQuery({
+		queryKey: viewKey,
 		queryFn: () => fetchAutopilotView(hostId, sessionId as string),
-		enabled: enabled && Boolean(sessionId),
+		enabled: active,
 		retry: 1,
-		// A session that has no open run cannot change on its own, and every session
-		// switch mounts a fresh read: it is fetched once and kept for a while, and
-		// only a session with an open run (which parks, pauses and finishes by
-		// itself) is polled.
 		staleTime: 30_000,
-		refetchInterval: (query: { state: { data?: AutopilotView } }) => (isOpenAutopilotRun(query.state.data?.run) ? 8_000 : false),
+		refetchOnWindowFocus: true,
+		refetchInterval: (q: { state: { data?: AutopilotView } }) =>
+			isOpenAutopilotRun(q.state.data?.run) ? VIEW_POLL_OPEN_MS : VIEW_POLL_IDLE_MS,
 	});
+	// The shared list of open runs is read from the cache, with no observer of its
+	// own: a subscription that re-rendered the top bar on every poll made session
+	// switches slower. The check runs in a cache listener instead, and only when
+	// that list changes.
+	// The run the list named when the view was last forced to re-read: a list that
+	// says "open" while the daemon's own view says otherwise is read once, not forever.
+	const forcedFor = useRef("");
+	const viewUpdatedAt = query.dataUpdatedAt;
+	useEffect(() => {
+		if (!active || !sessionId) return undefined;
+		const check = () => {
+			const runs = queryClient.getQueryData<AutopilotRunOnHost[]>(autopilotRunsQueryKey(hostId)) ?? [];
+			const listed = runForSession(runs, hostId, sessionId);
+			if (!listed || !isOpenAutopilotRun(listed)) {
+				forcedFor.current = "";
+				return;
+			}
+			const state = queryClient.getQueryState<AutopilotView>(viewKey);
+			// A view that is being read, or has never been read, will see the run itself.
+			if (!state || state.data === undefined || state.fetchStatus === "fetching") return;
+			if (isOpenAutopilotRun(state.data.run)) return;
+			const token = `${listed.id}:${listed.state}`;
+			if (forcedFor.current === token) return;
+			forcedFor.current = token;
+			void queryClient.invalidateQueries({ queryKey: viewKey, exact: true });
+		};
+		check();
+		return queryClient.getQueryCache().subscribe((event) => {
+			const key = event.query.queryKey;
+			if (event.type === "updated" && key[0] === "autopilot" && key[1] === "runs") check();
+		});
+		// viewKey is rebuilt on every render from hostId and sessionId; the view
+		// finishing a read (viewUpdatedAt) is a moment to compare it with the list.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [active, hostId, sessionId, queryClient, viewUpdatedAt]);
+	return query;
 }
+
+/** How often a session's view is re-read while it has an open run, and while it has none. */
+export const VIEW_POLL_OPEN_MS = 8_000;
+export const VIEW_POLL_IDLE_MS = 60_000;
 
 function clientFor(hostId: HostId) {
 	return hostId === LOCAL_HOST ? apiClient : clientForHost(hostId);
