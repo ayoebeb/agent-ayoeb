@@ -139,6 +139,11 @@ type Deps struct {
 	Approvals    ApprovalResolver
 	UsageLimited UsageLimitCheck
 	VerifyTests  TestsVerifier
+	// Advisor tells the agent how the owner would decide. Optional.
+	Advisor Advisor
+	// ParkDigestEvery batches parked items into one notification per run, sent
+	// once the oldest has waited this long. Zero keeps one notification per item.
+	ParkDigestEvery time.Duration
 	Clock        func() time.Time
 	NewID        func() string
 	Logger       *slog.Logger
@@ -159,6 +164,8 @@ type Service struct {
 	approvals    ApprovalResolver
 	usageLimited UsageLimitCheck
 	verifyTests  TestsVerifier
+	advisor      Advisor
+	digestEvery  time.Duration
 	clock        func() time.Time
 	newID        func() string
 	log          *slog.Logger
@@ -182,6 +189,8 @@ type Service struct {
 	// one lock per session, held while a message goes out and while Stop ends the
 	// run, so no continuation can land after Stop.
 	delivery map[domain.SessionID]*sync.Mutex
+	// digestSent is the parked-digest key last sent per run.
+	digestSent map[string]string
 }
 
 // lockDelivery takes the session's delivery fence and returns its release.
@@ -225,6 +234,7 @@ func New(d Deps) *Service {
 	s := &Service{
 		store: d.Store, messenger: d.Messenger, interrupter: d.Interrupter, notifier: d.Notifier,
 		progress: d.Progress, approvals: d.Approvals, usageLimited: d.UsageLimited, verifyTests: d.VerifyTests,
+		advisor: d.Advisor, digestEvery: d.ParkDigestEvery, digestSent: map[string]string{},
 		clock: d.Clock, newID: d.NewID, log: d.Logger, idleGrace: d.IdleGrace, minNudgeGap: d.MinNudgeGap,
 		background: d.Background, checkDelete: checkDeleteTargets, judging: map[domain.SessionID]bool{}, delivery: map[domain.SessionID]*sync.Mutex{},
 	}

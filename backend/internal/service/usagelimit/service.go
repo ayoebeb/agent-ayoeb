@@ -141,8 +141,37 @@ type Deps struct {
 	Stagger time.Duration
 }
 
+// AutopilotPolicy says how a usage limit is handled for a session that runs on
+// Autopilot, so the owner is not asked while they are away.
+type AutopilotPolicy interface {
+	// UsageLimit reports whether the session is under Autopilot and, if so,
+	// whether the owner's profile clearly allows moving work to another account.
+	// The default and every doubt is to wait for the reset.
+	UsageLimit(ctx context.Context, id domain.SessionID) (covered, switchAccount bool)
+}
+
+// SetAutopilotPolicy binds the Autopilot policy after construction.
+func (s *Service) SetAutopilotPolicy(p AutopilotPolicy) {
+	s.policyMu.Lock()
+	s.policy = p
+	s.policyMu.Unlock()
+}
+
+func (s *Service) autopilotPolicy(ctx context.Context, id domain.SessionID) (covered, switchAccount bool) {
+	s.policyMu.RLock()
+	p := s.policy
+	s.policyMu.RUnlock()
+	if p == nil {
+		return false, false
+	}
+	return p.UsageLimit(ctx, id)
+}
+
 // Service is the usage-limit watcher.
 type Service struct {
+	policyMu sync.RWMutex
+	policy   AutopilotPolicy
+
 	store     Store
 	settings  Settings
 	accounts  Accounts
@@ -328,6 +357,11 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 		return s.recordSkipped(ctx, stop, reason)
 	}
 
+	// Under Autopilot the owner is away: the profile decides. By default the
+	// sessions wait for the reset (nothing is asked, nothing moves); only a profile
+	// that clearly allows it moves them to another account.
+	covered, switchByProfile := s.autopilotPolicy(ctx, rec.ID)
+	askOwner := !covered
 	// The notification is idempotent by its key, so it goes first: a failure
 	// before the stop row exists is retried by the next sweep.
 	if s.notifier != nil {
@@ -337,7 +371,7 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 			UsageLimitWindow: window, UsageLimitProvider: providerLabel(harness),
 			UsageLimitAutoResume: enabled && limit.ResetsAt != nil,
 		}
-		if provider, ok := domain.AgentAccountProviderFor(harness); ok && stop.AccountKey != "" {
+		if provider, ok := domain.AgentAccountProviderFor(harness); ok && stop.AccountKey != "" && askOwner {
 			intent.UsageLimitSwitchPrompt = s.hasSwitchTargets(ctx, string(provider), stop.AccountKey)
 		}
 		if limit.ResetsAt != nil {
@@ -359,8 +393,13 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 		return err
 	}
 	// One owner prompt per limit window, however many sessions stop on it.
-	if err := s.ensurePrompt(ctx, stop, harness, now); err != nil {
-		s.log.Warn("record usage-limit prompt", "session", rec.ID, "err", err)
+	if askOwner || switchByProfile {
+		if err := s.ensurePrompt(ctx, stop, harness, now); err != nil {
+			s.log.Warn("record usage-limit prompt", "session", rec.ID, "err", err)
+		}
+	}
+	if covered && switchByProfile {
+		s.switchByProfile(ctx, stop, harness)
 	}
 	reason := ""
 	switch {

@@ -335,6 +335,26 @@ func (s *Service) Wait(ctx context.Context, id string) error {
 	return nil
 }
 
+// switchByProfile answers the prompt of a window for the owner, as their profile
+// says: it moves the stopped sessions to the signed-in account with the most
+// room. With no such account the prompt stays open for the owner.
+func (s *Service) switchByProfile(ctx context.Context, stop domain.UsageLimitStop, harness domain.AgentHarness) {
+	if s.lister == nil || s.mover == nil || stop.AccountKey == "" {
+		return
+	}
+	provider, ok := domain.AgentAccountProviderFor(harness)
+	if !ok {
+		return
+	}
+	targets, _, err := s.switchTargets(ctx, string(provider), stop.AccountKey)
+	if err != nil || len(targets) == 0 || targets[0].Full {
+		return
+	}
+	if _, err := s.Switch(ctx, domain.UsageLimitPromptID(stop.WindowKey), targets[0].AccountID); err != nil && !errors.Is(err, ErrPromptAnswered) {
+		s.log.Warn("usage limit: switch by the owner's profile", "err", err)
+	}
+}
+
 // ensurePrompt records the owner prompt of a limit window the first time one of
 // its sessions stops.
 func (s *Service) ensurePrompt(ctx context.Context, stop domain.UsageLimitStop, harness domain.AgentHarness, now time.Time) error {

@@ -48,6 +48,8 @@ type AutopilotEventResponse struct {
 	Detail     string     `json:"detail"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	ResolvedAt *time.Time `json:"resolvedAt,omitempty" description:"When the user marked a parked item handled."`
+	BasedOn    []string   `json:"basedOn" description:"For a decision: the past choices of the owner it followed, as short lines."`
+	Confidence string     `json:"confidence,omitempty" enum:"high,medium,low" description:"For a decision: how sure the agent was that the owner would choose this."`
 }
 
 // AutopilotMergedPRResponse is a pull request that merged while the run was going.
@@ -120,9 +122,11 @@ type AutopilotDoneResponse struct {
 
 // AutopilotDecideRequest is the body of POST /api/v1/sessions/{sessionId}/autopilot/decisions.
 type AutopilotDecideRequest struct {
-	Question string `json:"question"`
-	Choice   string `json:"choice"`
-	Why      string `json:"why"`
+	Question   string   `json:"question"`
+	Choice     string   `json:"choice"`
+	Why        string   `json:"why"`
+	BasedOn    []string `json:"basedOn,omitempty" description:"Ids of the owner's past decisions this choice followed (from the advice), at most 5."`
+	Confidence string   `json:"confidence,omitempty" enum:"high,medium,low" description:"How sure the agent is that the owner would choose this. Low means it took the safest option that can be undone."`
 }
 
 // AutopilotDecideResponse is the recorded decision.

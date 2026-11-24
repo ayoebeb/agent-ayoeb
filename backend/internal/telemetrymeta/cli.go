@@ -190,9 +190,11 @@ var legacyActorlessUserCLICommands = map[string]struct{}{
 	"ao session approvals resolve": {},
 
 	"ao autopilot":          {},
+	"ao autopilot advise":   {},
 	"ao autopilot criteria": {},
 	"ao autopilot decide":   {},
 	"ao autopilot done":     {},
+	"ao autopilot learn":    {},
 	"ao autopilot log":      {},
 	"ao autopilot park":     {},
 	"ao autopilot resume":   {},

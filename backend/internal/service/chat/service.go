@@ -149,6 +149,12 @@ type HumanReplyObserver interface {
 	UserReplied(ctx context.Context, id domain.SessionID)
 }
 
+// HumanReplyTextObserver is a HumanReplyObserver that also wants the text.
+type HumanReplyTextObserver interface {
+	HumanReplyObserver
+	UserRepliedText(ctx context.Context, id domain.SessionID, text string)
+}
+
 // SetHumanReplyObserver registers who hears of every message the human sends.
 func (s *Service) SetHumanReplyObserver(observer HumanReplyObserver) {
 	s.replyObserver = observer
@@ -163,6 +169,10 @@ func (s *Service) notifyHumanReply(ctx context.Context, id domain.SessionID, msg
 		return
 	}
 	if (msg.Origin != "" && msg.Origin != domain.MessageOriginHuman) || strings.TrimSpace(msg.SenderSessionID) != "" {
+		return
+	}
+	if withText, ok := s.replyObserver.(HumanReplyTextObserver); ok {
+		withText.UserRepliedText(ctx, id, msg.Text)
 		return
 	}
 	s.replyObserver.UserReplied(ctx, id)

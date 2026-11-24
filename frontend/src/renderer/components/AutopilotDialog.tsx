@@ -355,6 +355,16 @@ function RunDetails({
 										<div className="min-w-0">
 											<span>{decision.summary}</span>
 											{decision.detail ? <span className="block text-xs text-settings-muted">{decision.detail}</span> : null}
+											{decision.basedOn?.length ? (
+												<span className="block text-xs text-settings-muted" data-testid="autopilot-decision-basis">
+													{t("autopilot.panel.basedOn")} {decision.basedOn.join(" · ")}
+												</span>
+											) : null}
+											{decision.confidence === "low" ? (
+												<span className="block text-xs text-status-in-review" data-testid="autopilot-decision-low-confidence">
+													{t("autopilot.panel.lowConfidence")}
+												</span>
+											) : null}
 										</div>
 										{decision.resolvedAt ? (
 											<span className="shrink-0 text-xs leading-5 text-settings-muted">{t("autopilot.panel.undone")}</span>

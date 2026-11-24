@@ -74,12 +74,19 @@ type Autopilot interface {
 	OnWaitDeclared(ctx context.Context, id domain.SessionID, question string) (bool, error)
 }
 
+// AnswerRecorder hears the owner's answer to a question an orchestrator was
+// waiting on, so Autopilot can learn how they decide. It must not block.
+type AnswerRecorder interface {
+	RecordAnswer(ctx context.Context, project, session, question, answer string)
+}
+
 // Service declares, clears and reminds about orchestrator waits.
 type Service struct {
 	store     Store
 	notifier  Notifier
 	settings  Settings
 	autopilot Autopilot
+	recorder  AnswerRecorder
 	clock     func() time.Time
 	newKey    func() string
 }
@@ -203,6 +210,23 @@ func (s *Service) Clear(ctx context.Context, id domain.SessionID) (bool, error) 
 		return false, fmt.Errorf("orchestrator waiting: clear: %w", err)
 	}
 	return true, nil
+}
+
+// SetAnswerRecorder binds who learns from the owner's answers. Optional.
+func (s *Service) SetAnswerRecorder(r AnswerRecorder) { s.recorder = r }
+
+// UserRepliedText is UserReplied with what the owner wrote: when a question was
+// open, the question and the answer are handed to the recorder first.
+func (s *Service) UserRepliedText(ctx context.Context, id domain.SessionID, text string) {
+	if s == nil {
+		return
+	}
+	if s.recorder != nil {
+		if open, err := s.open(ctx, id); err == nil && len(open) > 0 && strings.TrimSpace(open[0].Body) != "" {
+			s.recorder.RecordAnswer(ctx, string(open[0].ProjectID), string(id), open[0].Body, text)
+		}
+	}
+	s.UserReplied(ctx, id)
 }
 
 // UserReplied closes the wait because the human answered the orchestrator. It is

@@ -94,9 +94,11 @@ type autopilotDoneResponse struct {
 }
 
 type autopilotDecideRequest struct {
-	Question string `json:"question"`
-	Choice   string `json:"choice"`
-	Why      string `json:"why"`
+	Question   string   `json:"question"`
+	Choice     string   `json:"choice"`
+	Why        string   `json:"why"`
+	BasedOn    []string `json:"basedOn,omitempty"`
+	Confidence string   `json:"confidence,omitempty"`
 }
 
 type autopilotParkRequest struct {
@@ -123,6 +125,8 @@ type autopilotOptions struct {
 	why           string
 	parkLimit     string
 	item          string
+	basedOn       []string
+	confidence    string
 }
 
 func newAutopilotCommand(ctx *commandContext) *cobra.Command {
@@ -144,7 +148,8 @@ For the user:
 
 For the agent doing the task (the session is taken from AO_SESSION_ID):
   ao autopilot criteria "<done when ...>"      record the acceptance criteria
-  ao autopilot decide --question ... --choice ... --why ...
+  ao autopilot advise --question ...           how the owner would decide it
+  ao autopilot decide --question ... --choice ... --why ... [--based-on <ids> --confidence high|medium|low]
   ao autopilot park --limit <name> --item ... --why ...
   ao autopilot done --evidence "<tests you ran and their results>"`,
 	}
@@ -156,6 +161,8 @@ For the agent doing the task (the session is taken from AO_SESSION_ID):
 		newAutopilotResumeCommand(ctx),
 		newAutopilotCriteriaCommand(ctx),
 		newAutopilotDecideCommand(ctx),
+		newAutopilotAdviseCommand(ctx),
+		newAutopilotLearnCommand(ctx),
 		newAutopilotParkCommand(ctx),
 		newAutopilotDoneCommand(ctx),
 	)
@@ -546,7 +553,12 @@ limit is refused: park that item instead.
 			var out struct {
 				Event autopilotEvent `json:"event"`
 			}
-			req := autopilotDecideRequest{Question: opts.question, Choice: opts.choice, Why: opts.why}
+			switch opts.confidence {
+			case "", "high", "medium", "low":
+			default:
+				return usageError{errors.New("usage: --confidence must be high, medium or low")}
+			}
+			req := autopilotDecideRequest{Question: opts.question, Choice: opts.choice, Why: opts.why, BasedOn: opts.basedOn, Confidence: opts.confidence}
 			if err := ctx.postJSON(cmd.Context(), autopilotPath(id, "/decisions"), req, &out); err != nil {
 				return err
 			}
@@ -557,6 +569,8 @@ limit is refused: park that item instead.
 	cmd.Flags().StringVar(&opts.question, "question", "", "What you would have asked the user")
 	cmd.Flags().StringVar(&opts.choice, "choice", "", "The option you chose")
 	cmd.Flags().StringVar(&opts.why, "why", "", "Why that option")
+	cmd.Flags().StringSliceVar(&opts.basedOn, "based-on", nil, "Ids of the owner's past decisions this followed (from `ao autopilot advise`)")
+	cmd.Flags().StringVar(&opts.confidence, "confidence", "", "How sure you are the owner would choose this: high, medium or low (low: safest option that can be undone)")
 	return cmd
 }
 

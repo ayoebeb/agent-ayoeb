@@ -14,7 +14,8 @@ Only the human can switch Autopilot on, off or back on (`start`, `stop`,
 
 ```text
 ao autopilot criteria "<done when ...>"
-ao autopilot decide --question <text> --choice <text> --why <text>
+ao autopilot advise --question <text> [--option <text> ...]
+ao autopilot decide --question <text> --choice <text> --why <text> [--based-on <ids>] [--confidence high|medium|low]
 ao autopilot park --limit <name> --item <text> --why <text>
 ao autopilot done --evidence <text> [--ci-cannot-run <why>]
 
@@ -37,8 +38,14 @@ ao autopilot resume [--session <id>]
 3. **Work.** After every turn that did not finish the task, AO sends the task
    again as "Autopilot iteration N of M" with the criteria and what is still
    open. Iterations are capped (30 by default, set in Settings).
-4. **Never wait for the human.** When you would ask something, choose your
-   recommended option and record it with `ao autopilot decide`, then continue.
+4. **Never wait for the human.** When you would ask something, first run
+   `ao autopilot advise --question "..."`: it returns how the owner decided
+   similar things before (their profile and the closest past decisions). Choose
+   what they would choose and record it with `ao autopilot decide ... --based-on
+   <ids from the advice> --confidence high|medium|low`. If you are unsure (nothing
+   similar, or past choices disagree) say `low` and take the safest option that can
+   be undone. Advice is about preference only: it never permits crossing a hard
+   limit. With nothing learned yet, use your recommended option.
    `ao notify-user --waiting` does nothing to the human while Autopilot runs; it
    reminds you to decide. Do not use a question tool: a form nobody answers
    parks the run.

@@ -49,7 +49,17 @@ func (s *Service) SetCriteria(ctx context.Context, id domain.SessionID, criteria
 // Decide records a choice the agent made instead of asking the user. A choice
 // that would cross a hard limit is refused: that item is parked, not decided.
 func (s *Service) Decide(ctx context.Context, id domain.SessionID, question, choice, why string) (domain.AutopilotEvent, error) {
+	return s.DecideWithBasis(ctx, id, question, choice, why, Basis{})
+}
+
+// DecideWithBasis is Decide with what the choice was based on: which of the
+// owner's past decisions it followed and how confident the agent is. Both are
+// written into the log line. The hard-limit check is the same and comes first.
+func (s *Service) DecideWithBasis(ctx context.Context, id domain.SessionID, question, choice, why string, basis Basis) (domain.AutopilotEvent, error) {
 	if err := requireAgent(ctx, id); err != nil {
+		return domain.AutopilotEvent{}, err
+	}
+	if err := basis.valid(); err != nil {
 		return domain.AutopilotEvent{}, err
 	}
 	question = domain.CleanAutopilotText(question, 400)
@@ -70,7 +80,11 @@ func (s *Service) Decide(ctx context.Context, id domain.SessionID, question, cho
 	if err != nil {
 		return domain.AutopilotEvent{}, err
 	}
-	ev := s.logEventLocked(ctx, run, domain.AutopilotEventDecision, question+" → "+choice, why)
+	detail := why
+	if extra := s.basisDetail(basis); extra != "" {
+		detail += "\n" + extra
+	}
+	ev := s.logEventLocked(ctx, run, domain.AutopilotEventDecision, question+" → "+choice, detail)
 	if strings.HasPrefix(run.LastGap, openQuestionPrefix) {
 		run.LastGap, run.UpdatedAt = "", s.clock()
 		if _, err := s.store.UpdateAutopilotRun(ctx, run); err != nil {
@@ -120,6 +134,9 @@ func (s *Service) parkItem(ctx context.Context, run domain.AutopilotRun, limit d
 	for _, existing := range open {
 		if strings.EqualFold(existing.Summary, item) {
 			s.mu.Unlock()
+			if s.digestEvery > 0 {
+				return existing, true, nil
+			}
 			// The notification is idempotent on the item's id, so a retry after a
 			// failed notify still reaches the user, and a repeat sends nothing new.
 			if err := s.notifyParked(ctx, run, existing); err != nil {
@@ -132,6 +149,10 @@ func (s *Service) parkItem(ctx context.Context, run domain.AutopilotRun, limit d
 	s.mu.Unlock()
 	if ev.ID == "" {
 		return domain.AutopilotEvent{}, false, fmt.Errorf("autopilot: record parked item")
+	}
+	if s.digestEvery > 0 {
+		// Batched: the maintenance pass sends one notification for the whole set.
+		return ev, false, nil
 	}
 	if err := s.notifyParked(ctx, run, ev); err != nil {
 		return ev, false, fmt.Errorf("autopilot: tell the user: %w", err)
@@ -209,6 +230,7 @@ func (s *Service) UndoDecision(ctx context.Context, eventID string) (domain.Auto
 	if !changed {
 		return ev, nil
 	}
+	s.correct(ctx, run, resolved)
 	return resolved, nil
 }
 
@@ -229,6 +251,9 @@ func (s *Service) OnWaitDeclared(ctx context.Context, id domain.SessionID, quest
 	question = domain.CleanAutopilotText(question, 300)
 	s.logEventLocked(ctx, run, domain.AutopilotEventWaitDiverted, "Would have waited for you: "+question, "Autopilot told the agent to decide it itself.")
 	run.LastGap = openQuestionPrefix + question + " Autopilot is on, so decide it yourself with your recommended option and record it with `ao autopilot decide`."
+	if advice := s.adviceFor(ctx, run.ProjectID, question, nil); advice != noAdvice {
+		run.LastGap += "\n" + clip(advice, maxAdviceRunes)
+	}
 	run.UpdatedAt = s.clock()
 	if _, err := s.store.UpdateAutopilotRun(ctx, run); err != nil {
 		return true, fmt.Errorf("autopilot: record the open question: %w", err)

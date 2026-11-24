@@ -58,6 +58,7 @@ func (s *Service) maintain(ctx context.Context) {
 			s.resolveParkedNotifications(ctx, run)
 			continue
 		}
+		s.digestParked(ctx, run, now)
 		switch run.State {
 		case domain.AutopilotPausedUsageLimit:
 			if limited, err := s.limited(ctx, run.SessionID); err == nil && !limited {
