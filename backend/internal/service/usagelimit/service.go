@@ -150,23 +150,6 @@ type AutopilotPolicy interface {
 	UsageLimit(ctx context.Context, id domain.SessionID) (covered, switchAccount bool)
 }
 
-// SetAutopilotPolicy binds the Autopilot policy after construction.
-func (s *Service) SetAutopilotPolicy(p AutopilotPolicy) {
-	s.policyMu.Lock()
-	s.policy = p
-	s.policyMu.Unlock()
-}
-
-func (s *Service) autopilotPolicy(ctx context.Context, id domain.SessionID) (covered, switchAccount bool) {
-	s.policyMu.RLock()
-	p := s.policy
-	s.policyMu.RUnlock()
-	if p == nil {
-		return false, false
-	}
-	return p.UsageLimit(ctx, id)
-}
-
 // Service is the usage-limit watcher.
 type Service struct {
 	policyMu sync.RWMutex
@@ -209,6 +192,23 @@ func New(d Deps) *Service {
 		s.stagger = defaultStagger
 	}
 	return s
+}
+
+// SetAutopilotPolicy binds the Autopilot policy after construction.
+func (s *Service) SetAutopilotPolicy(p AutopilotPolicy) {
+	s.policyMu.Lock()
+	s.policy = p
+	s.policyMu.Unlock()
+}
+
+func (s *Service) autopilotPolicy(ctx context.Context, id domain.SessionID) (covered, switchAccount bool) {
+	s.policyMu.RLock()
+	p := s.policy
+	s.policyMu.RUnlock()
+	if p == nil {
+		return false, false
+	}
+	return p.UsageLimit(ctx, id)
 }
 
 // Run sweeps until ctx ends.
