@@ -4371,7 +4371,7 @@ type UsageLimitPromptOption struct {
 
 // UsageLimitPromptSession is a session that stopped on the limit.
 type UsageLimitPromptSession struct {
-	SessionID   domain.SessionID `json:"sessionId"`
+	SessionID domain.SessionID `json:"sessionId"`
 	// ReviewID is set when it is the session's AO reviewer that stopped; SessionID is
 	// then the worker the review is of.
 	ReviewID    string           `json:"reviewId,omitempty"`

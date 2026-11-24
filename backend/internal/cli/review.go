@@ -353,7 +353,7 @@ Without a selector every running review of the worker is cancelled and the
 command prints each run it cancelled. Pass --run <id> to cancel one run, or
 --agent <harness> to cancel only that reviewer's runs; the other reviewers keep
 running.`,
-		Args:    atMostOneArg,
+		Args: atMostOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return ctx.stopReview(cmd, args, opts)
 		},

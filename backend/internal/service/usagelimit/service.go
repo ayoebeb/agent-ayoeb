@@ -127,35 +127,35 @@ type Deps struct {
 	Headroom Headroom
 	// Lister and Mover turn on the owner prompt: which accounts could take the
 	// stopped sessions, and how to move them. Without them AO only notifies.
-	Lister   AccountLister
-	Mover    SessionMover
+	Lister AccountLister
+	Mover  SessionMover
 	// Reviewers turns on the handling of reviewer stops. Without it a reviewer's
 	// stop is not looked at.
 	Reviewers Reviewers
-	Notifier Notifier
-	Reporter Reporter
-	Sender   Sender
-	Logger   *slog.Logger
-	Now      func() time.Time
+	Notifier  Notifier
+	Reporter  Reporter
+	Sender    Sender
+	Logger    *slog.Logger
+	Now       func() time.Time
 	// Stagger overrides the least time between two automatic resumes.
 	Stagger time.Duration
 }
 
 // Service is the usage-limit watcher.
 type Service struct {
-	store    Store
-	settings Settings
-	accounts Accounts
-	headroom Headroom
-	lister   AccountLister
-	mover    SessionMover
+	store     Store
+	settings  Settings
+	accounts  Accounts
+	headroom  Headroom
+	lister    AccountLister
+	mover     SessionMover
 	reviewers Reviewers
-	notifier Notifier
-	reporter Reporter
-	sender   Sender
-	log      *slog.Logger
-	now      func() time.Time
-	stagger  time.Duration
+	notifier  Notifier
+	reporter  Reporter
+	sender    Sender
+	log       *slog.Logger
+	now       func() time.Time
+	stagger   time.Duration
 
 	mu      sync.Mutex
 	running bool

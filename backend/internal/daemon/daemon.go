@@ -837,17 +837,17 @@ func Run(buildVersion string) error {
 		control.SetReviewerAccountEnv(agentAccountSvc.SessionLaunchEnvWith)
 	}
 	usageLimitSvc := usagelimit.New(usagelimit.Deps{
-		Store:    store,
-		Settings: settingsSvc,
-		Accounts: usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID, defaultAccount: agentAccountSvc.DefaultAccountID},
+		Store:     store,
+		Settings:  settingsSvc,
+		Accounts:  usageLimitAccounts{lookup: agentAccountSvc.SessionAccountID, defaultAccount: agentAccountSvc.DefaultAccountID},
 		Reviewers: reviewerLimits,
-		Headroom: agentAccountSvc,
-		Lister:   agentAccountSvc,
-		Mover:    limitMover,
-		Notifier: notificationWriter,
-		Reporter: usageLimitReporter{reports: reportSvc},
-		Sender:   usageLimitSender{sessions: reportSessions},
-		Logger:   log,
+		Headroom:  agentAccountSvc,
+		Lister:    agentAccountSvc,
+		Mover:     limitMover,
+		Notifier:  notificationWriter,
+		Reporter:  usageLimitReporter{reports: reportSvc},
+		Sender:    usageLimitSender{sessions: reportSessions},
+		Logger:    log,
 	})
 	// A session moved to another account while stopped on the old account's
 	// usage limit continues at once on the new one.
