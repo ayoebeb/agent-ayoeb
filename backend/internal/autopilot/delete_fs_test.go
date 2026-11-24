@@ -20,11 +20,11 @@ func makeLink(t *testing.T, link, target string) {
 		return
 	}
 	if runtime.GOOS == "windows" {
-		if out, err := aoprocess.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err == nil {
+		out, err := aoprocess.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput()
+		if err == nil {
 			return
-		} else {
-			t.Skipf("cannot create a symlink or a junction here: %v %s", err, out)
 		}
+		t.Skipf("cannot create a symlink or a junction here: %v %s", err, out)
 	}
 	t.Skip("cannot create a symlink here")
 }
