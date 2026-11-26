@@ -409,8 +409,10 @@ func TestEditAndDeleteRules(t *testing.T) {
 	if err := st.DeleteRule(r.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second delete: %v", err)
 	}
-	if len(st.Profile().Dismissed) != 0 {
-		t.Fatal("an owner's own rule is not 'dismissed learning'")
+	// Only the learned wording the owner replaced is dismissed; deleting their own
+	// rule adds nothing.
+	if d := st.Profile().Dismissed; len(d) != 1 || d[0] != "Quality over cost." {
+		t.Fatalf("dismissed = %v", d)
 	}
 	if _, err := st.AddRule(ScopeGlobal, "  ", ""); err == nil {
 		t.Fatal("empty rule must be refused")

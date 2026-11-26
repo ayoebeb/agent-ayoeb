@@ -4796,7 +4796,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "Autopilot 学到了什么",
-	"autopilot.learned.description": "Autopilot 根据你自己做过的选择，按你会做的方式决定。这里的所有内容都只保存在这台电脑上。",
+	"autopilot.learned.description": "Autopilot 根据你自己做过的选择，按你会做的方式决定。这些选择保存在这台电脑上，但更新配置时，你的问题、回答和规则会通过已登录的 claude 命令发送给 Claude（Sonnet），自动更新时也是如此。",
 	"autopilot.learned.stats": "已保存 {{total}} 条决定，其中 {{pending}} 条尚未纳入配置",
 	"autopilot.learned.updating": "正在更新配置",
 	"autopilot.learned.lastError": "上次配置更新失败：{{message}}",

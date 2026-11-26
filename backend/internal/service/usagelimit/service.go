@@ -393,13 +393,13 @@ func (s *Service) detect(ctx context.Context, turn domain.LimitStopTurn, limit *
 		return err
 	}
 	// One owner prompt per limit window, however many sessions stop on it.
-	if askOwner || switchByProfile {
+	if askOwner {
 		if err := s.ensurePrompt(ctx, stop, harness, now); err != nil {
 			s.log.Warn("record usage-limit prompt", "session", rec.ID, "err", err)
 		}
 	}
 	if covered && switchByProfile {
-		s.switchByProfile(ctx, stop, harness)
+		s.moveByProfile(ctx, stop, harness)
 	}
 	reason := ""
 	switch {

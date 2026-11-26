@@ -158,11 +158,33 @@ func (s *Store) Profile() Profile {
 	return p
 }
 
-// SetProfile replaces the profile (used by the learner).
-func (s *Store) SetProfile(p Profile) error {
+// ApplyLearned commits a profile update against the profile as it is now, not as
+// it was when the model was asked: the call takes minutes and the owner may add,
+// edit or delete rules meanwhile. Their rules and dismissals always win, and a
+// rule they removed or rewrote during the call is not brought back. Only the
+// given scopes are replaced.
+func (s *Store) ApplyLearned(asked Profile, learned []Rule, scopes map[string]bool, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data.Profile = p
+	current := make(map[string]string, len(s.data.Profile.Rules))
+	for _, r := range s.data.Profile.Rules {
+		current[r.ID] = r.Text
+	}
+	gone := map[string]bool{}
+	for _, r := range asked.Rules {
+		if text, ok := current[r.ID]; !ok || text != r.Text {
+			gone[strings.ToLower(normalizeSpace(r.Text))] = true
+		}
+	}
+	kept := make([]Rule, 0, len(learned))
+	for _, r := range learned {
+		if !gone[strings.ToLower(normalizeSpace(r.Text))] {
+			kept = append(kept, r)
+		}
+	}
+	next := MergeRules(s.data.Profile, kept, scopes, now)
+	next.LastLearnedAt, next.LastError = now, ""
+	s.data.Profile = next
 	return s.saveLocked()
 }
 
@@ -205,12 +227,23 @@ func (s *Store) EditRule(id, text string) (Rule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, r := range s.data.Profile.Rules {
-		if r.ID == id {
-			r.Text, r.Origin, r.UpdatedAt = text, OriginOwner, s.clock()
-			s.data.Profile.Rules[i] = r
-			s.data.Profile.UpdatedAt = r.UpdatedAt
-			return r, s.saveLocked()
+		if r.ID != id {
+			continue
 		}
+		if text != r.Text {
+			// The owner replaced these words: learning must not restate the old
+			// ones, and an account-switch permission they carried is withdrawn.
+			if r.Origin != OriginOwner {
+				s.data.Profile.Dismissed = appendCapped(s.data.Profile.Dismissed, r.Text, 40)
+			}
+			if r.Tag == TagUsageLimitSwitch {
+				r.Tag = TagUsageLimitWait
+			}
+		}
+		r.Text, r.Origin, r.UpdatedAt = text, OriginOwner, s.clock()
+		s.data.Profile.Rules[i] = r
+		s.data.Profile.UpdatedAt = r.UpdatedAt
+		return r, s.saveLocked()
 	}
 	return Rule{}, ErrNotFound
 }

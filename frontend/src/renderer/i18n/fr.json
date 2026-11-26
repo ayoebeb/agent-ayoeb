@@ -4933,7 +4933,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "Ce qu'Autopilot a appris",
-	"autopilot.learned.description": "Autopilot décide comme vous le feriez, d'après vos propres choix. Tout reste sur cet ordinateur.",
+	"autopilot.learned.description": "Autopilot décide comme vous le feriez, d'après vos propres choix. Ils sont enregistrés sur cet ordinateur, mais pour mettre à jour le profil, vos questions, réponses et règles sont envoyées à Claude (Sonnet) via votre commande claude connectée, y compris automatiquement.",
 	"autopilot.learned.stats": "{{total}} décisions enregistrées, {{pending}} pas encore dans le profil",
 	"autopilot.learned.updating": "mise à jour du profil en cours",
 	"autopilot.learned.lastError": "La dernière mise à jour du profil a échoué : {{message}}",

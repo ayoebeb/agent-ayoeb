@@ -300,6 +300,13 @@ func (s *Service) Done(ctx context.Context, id domain.SessionID, evidence, ciCan
 	}
 	failures, gaps := s.checkGates(ctx, run, rec, evidence, ciCannotRun)
 
+	// Deferred before the lock is, so it runs after the lock is released.
+	finished := false
+	defer func() {
+		if finished {
+			s.flushDigest(ctx, run)
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, found, err := s.store.GetAutopilotRun(ctx, run.ID)
@@ -323,6 +330,7 @@ func (s *Service) Done(ctx context.Context, id domain.SessionID, evidence, ciCan
 		return DoneResult{}, fmt.Errorf("autopilot: record the evidence: %w", err)
 	}
 	s.finishLocked(ctx, cur.ID, domain.AutopilotDone, domain.AutopilotEndGoalDone, "Done: "+clip(evidence, 200))
+	finished = true
 	final, _, _ := s.store.GetAutopilotRun(ctx, cur.ID)
 	return DoneResult{Accepted: true, Gaps: gaps, Run: final}, nil
 }

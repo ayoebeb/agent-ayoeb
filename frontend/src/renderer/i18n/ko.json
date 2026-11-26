@@ -4814,7 +4814,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "Autopilot이 배운 것",
-	"autopilot.learned.description": "Autopilot은 직접 내린 선택을 바탕으로 당신이라면 이렇게 결정했을 방식으로 판단합니다. 여기 있는 모든 내용은 이 컴퓨터에만 저장됩니다.",
+	"autopilot.learned.description": "Autopilot은 직접 내린 선택을 바탕으로 당신이라면 이렇게 결정했을 방식으로 판단합니다. 선택은 이 컴퓨터에 저장되지만, 프로필을 업데이트할 때는 질문, 답변, 규칙이 로그인된 claude 명령을 통해 Claude(Sonnet)로 전송됩니다(자동 업데이트 포함).",
 	"autopilot.learned.stats": "결정 {{total}}개 저장됨, {{pending}}개는 아직 프로필에 반영되지 않음",
 	"autopilot.learned.updating": "프로필 업데이트 중",
 	"autopilot.learned.lastError": "마지막 프로필 업데이트에 실패했습니다: {{message}}",

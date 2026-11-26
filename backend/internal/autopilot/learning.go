@@ -121,12 +121,28 @@ func (s *Service) correct(ctx context.Context, run domain.AutopilotRun, ev domai
 
 // digestParked sends one notification for everything parked and still open in a
 // run, once the oldest item has waited the digest interval. The agent keeps
-// working on everything else meanwhile. The source key names the set of items, so
-// an unchanged set never notifies twice, even across a restart.
+// working on everything else meanwhile.
 func (s *Service) digestParked(ctx context.Context, run domain.AutopilotRun, now time.Time) {
+	s.sendDigest(ctx, run, now, false)
+}
+
+// flushDigest sends what is still waiting for the digest when a run ends: a
+// finished run is never visited again, so it cannot wait out the interval.
+func (s *Service) flushDigest(ctx context.Context, run domain.AutopilotRun) {
+	s.sendDigest(context.WithoutCancel(ctx), run, s.clock(), true)
+}
+
+// sendDigest is both of those. The source key names the set of items and the
+// notification store remembers it, so an unchanged set is never sent twice and,
+// after a restart, never resolved either.
+func (s *Service) sendDigest(ctx context.Context, run domain.AutopilotRun, now time.Time, ending bool) {
 	if s.digestEvery <= 0 || s.notifier == nil {
 		return
 	}
+	// One digest at a time: a second sender must not replace the first one's row
+	// between its check and its write.
+	s.digestMu.Lock()
+	defer s.digestMu.Unlock()
 	open, err := s.store.ListOpenParkedAutopilotEvents(ctx, run.ID)
 	if err != nil || len(open) == 0 {
 		return
@@ -139,18 +155,19 @@ func (s *Service) digestParked(ctx context.Context, run domain.AutopilotRun, now
 		}
 		ids = append(ids, ev.ID)
 	}
-	if now.Sub(oldest) < s.digestEvery {
+	if !ending && now.Sub(oldest) < s.digestEvery {
 		return
 	}
 	sort.Strings(ids)
 	key := domain.AutopilotParkedSourceKeyPrefix + "digest:" + fingerprintOf(ids...)
-	s.mu.Lock()
-	if s.digestSent[run.ID] == key {
-		s.mu.Unlock()
+	sent, err := s.store.NotificationSourceKeyExists(ctx, key)
+	if err != nil {
+		s.log.Warn("autopilot: look up the parked digest", "run", run.ID, "err", err)
 		return
 	}
-	s.digestSent[run.ID] = key
-	s.mu.Unlock()
+	if sent {
+		return
+	}
 
 	name := ""
 	if rec, ok, err := s.store.GetSession(ctx, run.SessionID); err == nil && ok {
@@ -161,32 +178,35 @@ func (s *Service) digestParked(ctx context.Context, run domain.AutopilotRun, now
 		items = append(items, clip(ev.Summary, 80))
 	}
 	detail := fmt.Sprintf("%d items need you, Autopilot carried on with the rest: %s", len(open), strings.Join(items, "; "))
-	// The earlier digest (a smaller set) is replaced, not stacked.
-	if err := s.notifier.Resolve(ctx, ports.NotificationResolution{
-		Type: domain.NotificationAutopilotParked, SessionID: run.SessionID, ResolvedAt: now,
-	}); err != nil {
-		s.log.Warn("autopilot: replace the parked digest", "session", run.SessionID, "err", err)
+	// An earlier, smaller digest of this run is replaced rather than stacked. It
+	// is not when that would also close something this digest does not repeat: an
+	// earlier run's open items, or the notice that the run itself parked.
+	total, err := s.store.CountOpenParkedAutopilotEventsForSession(ctx, run.SessionID)
+	if err == nil && total == len(open) && (ending || run.State != domain.AutopilotParked) {
+		if err := s.notifier.Resolve(ctx, ports.NotificationResolution{
+			Type: domain.NotificationAutopilotParked, SessionID: run.SessionID, ResolvedAt: now,
+		}); err != nil {
+			s.log.Warn("autopilot: replace the parked digest", "session", run.SessionID, "err", err)
+		}
 	}
 	if err := s.notifier.Notify(ctx, ports.NotificationIntent{
 		Type: domain.NotificationAutopilotParked, SessionID: run.SessionID, ProjectID: run.ProjectID,
 		SessionDisplayName: name, Detail: clip(detail, 240), SourceKey: key, CreatedAt: now,
 	}); err != nil {
-		s.mu.Lock()
-		delete(s.digestSent, run.ID)
-		s.mu.Unlock()
 		s.log.Warn("autopilot: notify the parked digest", "run", run.ID, "err", err)
 	}
 }
 
 // CoversSession reports whether the session is covered by an Autopilot run that
-// is running or paused: its own, or its project's (an orchestrator's run covers
-// the workers it started). The usage-limit watcher asks this to decide a limit by
-// the owner's profile instead of asking the owner.
+// is running or paused, by the same membership the permission policy uses: its
+// own run, or an orchestrator's for the workers started after that run began. The
+// usage-limit watcher asks this to decide a limit by the owner's profile instead
+// of asking the owner.
 func (s *Service) CoversSession(ctx context.Context, id domain.SessionID) bool {
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil || !ok {
 		return false
 	}
-	runs, err := s.store.ListActiveAutopilotRunsForProject(ctx, rec.ProjectID)
-	return err == nil && len(runs) > 0
+	_, covered := s.runCovering(ctx, rec)
+	return covered
 }

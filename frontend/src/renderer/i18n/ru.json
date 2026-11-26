@@ -5045,7 +5045,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "Чему научился Autopilot",
-	"autopilot.learned.description": "Autopilot решает так, как решили бы вы, исходя из ваших собственных выборов. Всё это хранится только на этом компьютере.",
+	"autopilot.learned.description": "Autopilot решает так, как решили бы вы, исходя из ваших собственных выборов. Они хранятся на этом компьютере, но для обновления профиля ваши вопросы, ответы и правила отправляются в Claude (Sonnet) через вашу команду claude с выполненным входом, в том числе автоматически.",
 	"autopilot.learned.stats": "Сохранено решений: {{total}}, ещё не в профиле: {{pending}}",
 	"autopilot.learned.updating": "профиль обновляется",
 	"autopilot.learned.lastError": "Последнее обновление профиля не удалось: {{message}}",

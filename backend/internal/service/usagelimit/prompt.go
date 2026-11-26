@@ -179,7 +179,9 @@ func (s *Service) openPromptSessions(ctx context.Context, p domain.UsageLimitPro
 	seen := map[entry]bool{}
 	for _, stop := range stops {
 		key := entry{stop.SessionID, stop.ReviewID}
-		if seen[key] {
+		// A stop that already continued (an Autopilot session moved by the owner's
+		// profile, for one) is not part of the question any more.
+		if seen[key] || stop.ResumeState == domain.UsageLimitStopResumed {
 			continue
 		}
 		rec, found, err := s.store.GetSession(ctx, stop.SessionID)
@@ -335,10 +337,12 @@ func (s *Service) Wait(ctx context.Context, id string) error {
 	return nil
 }
 
-// switchByProfile answers the prompt of a window for the owner, as their profile
-// says: it moves the stopped sessions to the signed-in account with the most
-// room. With no such account the prompt stays open for the owner.
-func (s *Service) switchByProfile(ctx context.Context, stop domain.UsageLimitStop, harness domain.AgentHarness) {
+// moveByProfile does, for one stopped session Autopilot covers, what the owner's
+// profile says: it moves that session (or its stopped reviewer) to the signed-in
+// account with the most room. It never answers the window's prompt, which speaks
+// for every session stopped on the account: the ones Autopilot does not cover
+// stay the owner's choice. Without an account with room the session waits.
+func (s *Service) moveByProfile(ctx context.Context, stop domain.UsageLimitStop, harness domain.AgentHarness) {
 	if s.lister == nil || s.mover == nil || stop.AccountKey == "" {
 		return
 	}
@@ -350,8 +354,17 @@ func (s *Service) switchByProfile(ctx context.Context, stop domain.UsageLimitSto
 	if err != nil || len(targets) == 0 || targets[0].Full {
 		return
 	}
-	if _, err := s.Switch(ctx, domain.UsageLimitPromptID(stop.WindowKey), targets[0].AccountID); err != nil && !errors.Is(err, ErrPromptAnswered) {
-		s.log.Warn("usage limit: switch by the owner's profile", "err", err)
+	target := targets[0].AccountID
+	if stop.ReviewID != "" {
+		err = s.moveReviewer(ctx, PromptSession{ID: stop.SessionID, ReviewID: stop.ReviewID}, target)
+	} else {
+		err = s.mover.MoveToAccount(ctx, stop.SessionID, target)
+		if errors.Is(err, ports.ErrAgentAccountUnchanged) {
+			_, err = s.ResumeAfterAccountMove(ctx, stop.SessionID, target)
+		}
+	}
+	if err != nil {
+		s.log.Warn("usage limit: switch by the owner's profile", "session", stop.SessionID, "err", err)
 	}
 }
 

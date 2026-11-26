@@ -95,8 +95,10 @@ func newAutopilotLearnCommand(ctx *commandContext) *cobra.Command {
 		Use:   "learn",
 		Short: "See and feed what Autopilot learned about how you decide",
 		Long: `Autopilot learns how you decide from the choices you make in normal mode: each
-question an orchestrator asks you and your answer is stored locally, and a short
-profile of your rules is kept from them. With no flag this prints the profile.
+question an orchestrator asks you and your answer is stored on this computer, and
+a short profile of your rules is kept from them. Updating that profile sends the
+questions, answers and rules to Claude (Sonnet) through your signed-in claude
+command, also automatically. With no flag this prints the profile.
 
   --import    one-time scan of your past orchestrator conversations for question
               and answer pairs (only the pairs are stored)

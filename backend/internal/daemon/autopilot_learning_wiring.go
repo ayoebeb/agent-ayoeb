@@ -18,9 +18,9 @@ import (
 const autopilotParkDigestEvery = 15 * time.Minute
 
 // newAutopilotLearning opens the local store that holds what Autopilot learned
-// about how the owner decides. It lives under the data dir and is never sent
-// anywhere but the one Sonnet call that rewrites the profile. A failure returns
-// nil: Autopilot then runs as before, without learned advice.
+// about how the owner decides. It is stored under the data dir; the Sonnet call
+// that rewrites the profile is where its decision texts are sent. A failure
+// returns nil: Autopilot then runs as before, without learned advice.
 func newAutopilotLearning(dataDir string, st *store.Store, log *slog.Logger) *autopilotlearn.Service {
 	ls, err := autopilotlearn.Open(dataDir, nil)
 	if err != nil {

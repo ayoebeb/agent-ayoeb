@@ -1,7 +1,8 @@
 // Package autopilotlearn teaches Autopilot how the owner decides.
 //
-// It keeps three things, all local under the data dir and never sent anywhere
-// except the one Sonnet call that rewrites the profile:
+// It keeps three things, stored under the data dir. The questions, options,
+// answers and rules do leave the computer in one place: the Sonnet call that
+// rewrites the profile (through the owner's own claude command).
 //
 //   - pairs: an orchestrator's question (with the options and recommendation it
 //     offered) and the answer the owner gave in normal mode, captured live and
@@ -42,6 +43,11 @@ const ScopeGlobal = "global"
 // TagUsageLimitSwitch marks the one rule that lets Autopilot move work to another
 // account when a usage limit stops it. Without such a rule it waits for the reset.
 const TagUsageLimitSwitch = "usage_limit_switch"
+
+// TagUsageLimitWait marks a switch rule the owner rewrote. Its words are theirs
+// now and AO does not guess what they permit: while it exists Autopilot waits for
+// the reset, and learning cannot turn switching back on. Deleting the rule lifts it.
+const TagUsageLimitWait = "usage_limit_wait"
 
 // Bounds. The store is meant to stay small: it is read whole on every change.
 const (
@@ -102,12 +108,16 @@ type Profile struct {
 // UsageLimitSwitches reports whether the profile clearly allows moving work to
 // another account on a usage limit. The default, and every doubt, is to wait.
 func (p Profile) UsageLimitSwitches() bool {
+	allowed := false
 	for _, r := range p.Rules {
-		if r.Tag == TagUsageLimitSwitch && r.Scope == ScopeGlobal {
-			return true
+		switch r.Tag {
+		case TagUsageLimitWait:
+			return false
+		case TagUsageLimitSwitch:
+			allowed = allowed || r.Scope == ScopeGlobal
 		}
 	}
-	return false
+	return allowed
 }
 
 // PairID is the stable id of a pair, so the same decision captured live and

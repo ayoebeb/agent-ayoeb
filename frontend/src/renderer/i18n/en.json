@@ -4795,7 +4795,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "What Autopilot learned",
-	"autopilot.learned.description": "Autopilot decides the way you would, from the choices you made yourself. Everything here stays on this computer.",
+	"autopilot.learned.description": "Autopilot decides the way you would, from the choices you made yourself. They are stored on this computer, but to update the profile your questions, answers and rules are sent to Claude (Sonnet) through your signed-in claude command, also automatically.",
 	"autopilot.learned.stats": "{{total}} decisions stored, {{pending}} not yet in the profile",
 	"autopilot.learned.updating": "updating the profile",
 	"autopilot.learned.lastError": "The last profile update failed: {{message}}",

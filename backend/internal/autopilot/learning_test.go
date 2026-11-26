@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 type fakeAdvisor struct {
@@ -152,6 +154,7 @@ func TestUndoIsFedBackAsACorrection(t *testing.T) {
 func TestParkedItemsAreBatchedIntoOneNotificationAndTheRunCarriesOn(t *testing.T) {
 	e := newEnv(t)
 	e.svc.digestEvery = 10 * time.Minute
+	notes := e.realNotifications()
 	orch := e.orchestrator()
 	e.start(orch.ID, "task")
 	agent := asAgent(e.ctx, orch.ID)
@@ -168,27 +171,27 @@ func TestParkedItemsAreBatchedIntoOneNotificationAndTheRunCarriesOn(t *testing.T
 	if _, already, _ := e.svc.Park(agent, orch.ID, domain.HardLimitMoney, "upgrade the ci plan", "again"); !already {
 		t.Fatal("repeat park must be a no-op")
 	}
-	if e.notes.count() != 0 {
-		t.Fatalf("notifications = %d, want none until the digest is due", e.notes.count())
+	if notes.count() != 0 {
+		t.Fatalf("notifications = %d, want none until the digest is due", notes.count())
 	}
 	e.now = e.now.Add(5 * time.Minute)
 	e.svc.maintain(e.ctx)
-	if e.notes.count() != 0 {
-		t.Fatalf("notifications = %d before the interval", e.notes.count())
+	if notes.count() != 0 {
+		t.Fatalf("notifications = %d before the interval", notes.count())
 	}
 	e.now = e.now.Add(6 * time.Minute)
 	e.svc.maintain(e.ctx)
-	if e.notes.count() != 1 {
-		t.Fatalf("notifications = %d, want one digest", e.notes.count())
+	if notes.count() != 1 {
+		t.Fatalf("notifications = %d, want one digest", notes.count())
 	}
-	in := e.notes.intents[0]
+	in := notes.intents[0]
 	if !strings.Contains(in.Detail, "3 items") || !strings.Contains(in.Detail, "Upgrade the CI plan") || !strings.Contains(in.Detail, "Email the customer") ||
 		in.Type != domain.NotificationAutopilotParked || !strings.Contains(in.SourceKey, "digest:") {
 		t.Fatalf("digest = %+v", in)
 	}
 	e.svc.maintain(e.ctx)
-	if e.notes.count() != 1 {
-		t.Fatalf("an unchanged set must not notify again: %d", e.notes.count())
+	if notes.count() != 1 {
+		t.Fatalf("an unchanged set must not notify again: %d", notes.count())
 	}
 	if got := e.run(orch.ID).State; got != domain.AutopilotRunning {
 		t.Fatalf("state = %s: parked items must not stop the run", got)
@@ -196,8 +199,8 @@ func TestParkedItemsAreBatchedIntoOneNotificationAndTheRunCarriesOn(t *testing.T
 	// A new item joins the next digest, which replaces the previous one.
 	_, _, _ = e.svc.Park(agent, orch.ID, domain.HardLimitCredentials, "Rotate the token", "credentials")
 	e.svc.maintain(e.ctx)
-	if e.notes.count() != 2 || !strings.Contains(e.notes.intents[1].Detail, "4 items") {
-		t.Fatalf("second digest: count=%d", e.notes.count())
+	if notes.count() != 2 || !strings.Contains(notes.intents[1].Detail, "4 items") {
+		t.Fatalf("second digest: count=%d", notes.count())
 	}
 }
 
@@ -207,5 +210,136 @@ func TestWithoutADigestIntervalEveryItemStillNotifiesAtOnce(t *testing.T) {
 	e.start(orch.ID, "task")
 	if _, _, err := e.svc.Park(asAgent(e.ctx, orch.ID), orch.ID, domain.HardLimitMoney, "Upgrade the plan", "money"); err != nil || e.notes.count() != 1 {
 		t.Fatalf("err=%v notifications=%d", err, e.notes.count())
+	}
+}
+
+// The usage-limit policy covers exactly the sessions the permission policy does.
+func TestCoversSessionFollowsTheRunMembership(t *testing.T) {
+	e := newEnv(t)
+	orch := e.orchestrator()
+	earlier := e.session(domain.KindWorker, e.base.Add(-time.Hour), domain.SessionModeChat)
+
+	// A run on one worker covers that worker only.
+	solo := e.session(domain.KindWorker, e.base, domain.SessionModeChat)
+	e.start(solo.ID, "task")
+	for id, want := range map[domain.SessionID]bool{solo.ID: true, orch.ID: false, earlier.ID: false} {
+		if got := e.svc.CoversSession(e.ctx, id); got != want {
+			t.Fatalf("worker run: covers %s = %v, want %v", id, got, want)
+		}
+	}
+
+	// An orchestrator's run adds itself and the workers started after it began.
+	e.start(orch.ID, "task")
+	later := e.session(domain.KindWorker, e.now.Add(time.Minute), domain.SessionModeChat)
+	for id, want := range map[domain.SessionID]bool{orch.ID: true, later.ID: true, earlier.ID: false} {
+		if got := e.svc.CoversSession(e.ctx, id); got != want {
+			t.Fatalf("orchestrator run: covers %s = %v, want %v", id, got, want)
+		}
+	}
+	if e.svc.CoversSession(e.ctx, "missing") {
+		t.Fatal("an unknown session is not covered")
+	}
+}
+
+// storedNotifications writes through the real notification manager and store, so
+// de-duplication and resolution behave as in the daemon.
+type storedNotifications struct {
+	*notify.Manager
+	intents []ports.NotificationIntent
+}
+
+func (n *storedNotifications) Notify(ctx context.Context, in ports.NotificationIntent) error {
+	n.intents = append(n.intents, in)
+	return n.Manager.Notify(ctx, in)
+}
+
+func (n *storedNotifications) count() int { return len(n.intents) }
+
+func (e *env) realNotifications() *storedNotifications {
+	n := &storedNotifications{Manager: notify.New(notify.Deps{Store: e.db})}
+	e.svc.notifier = n
+	return n
+}
+
+// openNotices are the unresolved Autopilot notifications of a session.
+func (e *env) openNotices(id domain.SessionID) []domain.NotificationRecord {
+	e.t.Helper()
+	rows, err := e.db.ListNotifications(e.ctx, domain.NotificationListAll, time.Time{}, "", 100)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var out []domain.NotificationRecord
+	for _, row := range rows {
+		if row.SessionID == id && row.Type == domain.NotificationAutopilotParked && row.ResolvedAt.IsZero() {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func TestTheParkedDigestStaysOpenAcrossARestart(t *testing.T) {
+	e := newEnv(t)
+	e.svc.digestEvery = 10 * time.Minute
+	e.realNotifications()
+	orch := e.orchestrator()
+	e.start(orch.ID, "task")
+	if _, _, err := e.svc.Park(asAgent(e.ctx, orch.ID), orch.ID, domain.HardLimitMoney, "Upgrade the plan", "money"); err != nil {
+		t.Fatal(err)
+	}
+	e.now = e.now.Add(11 * time.Minute)
+	e.svc.maintain(e.ctx)
+	before := e.openNotices(orch.ID)
+	if len(before) != 1 {
+		t.Fatalf("open notices = %+v, want the digest", before)
+	}
+
+	// A new daemon over the same database remembers nothing in memory.
+	restarted := New(Deps{
+		Store: e.gates, Messenger: e.msgs, Interrupter: e.stops, Notifier: notify.New(notify.Deps{Store: e.db}),
+		Progress: e.progress, Approvals: e.approvals, ParkDigestEvery: 10 * time.Minute,
+		Clock: func() time.Time { return e.now }, Background: func(fn func()) { fn() },
+	})
+	restarted.maintain(e.ctx)
+	after := e.openNotices(orch.ID)
+	if len(after) != 1 || after[0].ID != before[0].ID {
+		t.Fatalf("open notices after a restart = %+v, want the same unresolved digest", after)
+	}
+}
+
+func TestEndingARunBeforeTheDigestIsDueStillTellsTheOwner(t *testing.T) {
+	for name, end := range map[string]func(e *env, id domain.SessionID){
+		"done": func(e *env, id domain.SessionID) {
+			agent := asAgent(e.ctx, id)
+			if _, err := e.svc.SetCriteria(agent, id, "Done when tests pass"); err != nil {
+				e.t.Fatal(err)
+			}
+			if res, err := e.svc.Done(agent, id, "go test ./... ok", ""); err != nil || !res.Accepted {
+				e.t.Fatalf("done = %+v, %v", res, err)
+			}
+		},
+		"stopped": func(e *env, id domain.SessionID) {
+			if _, err := e.svc.Stop(asUser(e.ctx), id); err != nil {
+				e.t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.svc.digestEvery = 10 * time.Minute
+			notes := e.realNotifications()
+			orch := e.orchestrator()
+			e.start(orch.ID, "task")
+			if _, _, err := e.svc.Park(asAgent(e.ctx, orch.ID), orch.ID, domain.HardLimitMoney, "Upgrade the plan", "money"); err != nil {
+				t.Fatal(err)
+			}
+			if notes.count() != 0 {
+				t.Fatal("nothing is sent before the digest is due")
+			}
+			end(e, orch.ID)
+			open := e.openNotices(orch.ID)
+			if notes.count() != 1 || len(open) != 1 || !strings.Contains(open[0].Body, "Upgrade the plan") {
+				t.Fatalf("sent %d, open = %+v: the parked item must reach the owner", notes.count(), open)
+			}
+		})
 	}
 }

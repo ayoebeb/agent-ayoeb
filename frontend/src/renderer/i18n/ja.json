@@ -4814,7 +4814,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "Autopilot が学んだこと",
-	"autopilot.learned.description": "Autopilot は、あなた自身の選択をもとに、あなたならこう決めるという形で判断します。ここにあるものはすべてこのコンピューターに保存されます。",
+	"autopilot.learned.description": "Autopilot は、あなた自身の選択をもとに、あなたならこう決めるという形で判断します。選択はこのコンピューターに保存されますが、プロファイルの更新時には、質問、回答、ルールがサインイン済みの claude コマンド経由で Claude（Sonnet）に送信されます（自動更新を含みます）。",
 	"autopilot.learned.stats": "{{total}} 件の判断を保存、{{pending}} 件はまだプロファイルに反映されていません",
 	"autopilot.learned.updating": "プロファイルを更新中",
 	"autopilot.learned.lastError": "前回のプロファイル更新に失敗しました: {{message}}",

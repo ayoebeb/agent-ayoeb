@@ -9,7 +9,7 @@ export type AutopilotLearningImport = components["schemas"]["AutopilotLearningIm
 
 export const autopilotLearningQueryKey = ["autopilot", "learning"] as const;
 
-/** What Autopilot learned about how the owner decides. The learned data lives on this computer only. */
+/** What Autopilot learned about how the owner decides. Stored on this computer; profile updates send it to Claude. */
 export async function fetchAutopilotLearning(): Promise<AutopilotLearning> {
 	const { data, error } = await apiClient.GET("/api/v1/autopilot/learning");
 	if (error || !data) throw apiErrorException(error, "Could not load what Autopilot learned");

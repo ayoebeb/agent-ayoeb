@@ -4814,7 +4814,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "Was Autopilot gelernt hat",
-	"autopilot.learned.description": "Autopilot entscheidet so, wie du es tun würdest, nach deinen eigenen Entscheidungen. Alles hier bleibt auf diesem Computer.",
+	"autopilot.learned.description": "Autopilot entscheidet so, wie du es tun würdest, nach deinen eigenen Entscheidungen. Sie werden auf diesem Computer gespeichert, aber zum Aktualisieren des Profils werden deine Fragen, Antworten und Regeln über deinen angemeldeten claude-Befehl an Claude (Sonnet) gesendet, auch automatisch.",
 	"autopilot.learned.stats": "{{total}} Entscheidungen gespeichert, {{pending}} noch nicht im Profil",
 	"autopilot.learned.updating": "Profil wird aktualisiert",
 	"autopilot.learned.lastError": "Die letzte Profilaktualisierung ist fehlgeschlagen: {{message}}",

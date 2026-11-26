@@ -73,8 +73,9 @@ func TestAutopilotWaitsForTheResetByDefault(t *testing.T) {
 // most room, with no question to the owner.
 func TestAutopilotSwitchesOnlyWhenTheProfileSaysSo(t *testing.T) {
 	h, mover, accounts := policyHarness(t, fakePolicy{covered: true, switches: true})
-	if len(mover.moved) == 0 {
-		t.Fatal("the profile allows switching: the sessions must move")
+	// Every stopped session moves, not only the first one of the window.
+	if len(mover.moved) != 2 {
+		t.Fatalf("moved = %v, want both stopped sessions", mover.moved)
 	}
 	for _, a := range *accounts {
 		if a != "acct-light" {
@@ -82,6 +83,36 @@ func TestAutopilotSwitchesOnlyWhenTheProfileSaysSo(t *testing.T) {
 		}
 	}
 	if prompts, _ := h.svc.ListPrompts(context.Background()); len(prompts) != 0 {
-		t.Fatalf("prompts = %+v, want the prompt answered", prompts)
+		t.Fatalf("prompts = %+v, want no prompt for covered sessions", prompts)
+	}
+}
+
+// sessionPolicy covers only the named sessions.
+type sessionPolicy map[domain.SessionID]bool
+
+func (p sessionPolicy) UsageLimit(_ context.Context, id domain.SessionID) (bool, bool) {
+	return p[id], p[id]
+}
+
+// A session driven by hand that stopped on the same account limit is neither
+// moved nor answered for: its prompt stays open for the owner.
+func TestAutopilotMovesOnlyTheSessionsItCovers(t *testing.T) {
+	for name, covered := range map[string]sessionPolicy{
+		"covered one detected first":   {"orch": true},
+		"covered one detected second": {"w1": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, mover, _ := policyHarness(t, covered)
+			if len(mover.moved) != 1 || !covered[mover.moved[0]] {
+				t.Fatalf("moved = %v, want only the covered session of %v", mover.moved, covered)
+			}
+			prompts, err := h.svc.ListPrompts(context.Background())
+			if err != nil || len(prompts) != 1 {
+				t.Fatalf("prompts = %+v, %v: the uncovered session keeps its question", prompts, err)
+			}
+			if len(prompts[0].Sessions) != 1 || covered[prompts[0].Sessions[0].ID] {
+				t.Fatalf("prompt sessions = %+v, want only the uncovered one", prompts[0].Sessions)
+			}
+		})
 	}
 }

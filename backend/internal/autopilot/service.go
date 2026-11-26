@@ -79,6 +79,7 @@ type Store interface {
 	GetAutopilotEvent(ctx context.Context, id string) (domain.AutopilotEvent, bool, error)
 	ListAutopilotEventsForRun(ctx context.Context, runID string, limit int) ([]domain.AutopilotEvent, error)
 	ListOpenParkedAutopilotEvents(ctx context.Context, runID string) ([]domain.AutopilotEvent, error)
+	NotificationSourceKeyExists(ctx context.Context, sourceKey string) (bool, error)
 	CountOpenParkedAutopilotEventsForSession(ctx context.Context, id domain.SessionID) (int, error)
 	ResolveAutopilotEvent(ctx context.Context, id string, at time.Time) (domain.AutopilotEvent, bool, error)
 	ListMergedPRNotificationsForProjectSince(ctx context.Context, project domain.ProjectID, since time.Time) ([]domain.NotificationRecord, error)
@@ -189,8 +190,8 @@ type Service struct {
 	// one lock per session, held while a message goes out and while Stop ends the
 	// run, so no continuation can land after Stop.
 	delivery map[domain.SessionID]*sync.Mutex
-	// digestSent is the parked-digest key last sent per run.
-	digestSent map[string]string
+	// digestMu serialises parked digests.
+	digestMu sync.Mutex
 }
 
 // lockDelivery takes the session's delivery fence and returns its release.
@@ -234,7 +235,7 @@ func New(d Deps) *Service {
 	s := &Service{
 		store: d.Store, messenger: d.Messenger, interrupter: d.Interrupter, notifier: d.Notifier,
 		progress: d.Progress, approvals: d.Approvals, usageLimited: d.UsageLimited, verifyTests: d.VerifyTests,
-		advisor: d.Advisor, digestEvery: d.ParkDigestEvery, digestSent: map[string]string{},
+		advisor: d.Advisor, digestEvery: d.ParkDigestEvery,
 		clock: d.Clock, newID: d.NewID, log: d.Logger, idleGrace: d.IdleGrace, minNudgeGap: d.MinNudgeGap,
 		background: d.Background, checkDelete: checkDeleteTargets, judging: map[domain.SessionID]bool{}, delivery: map[domain.SessionID]*sync.Mutex{},
 	}
@@ -494,6 +495,7 @@ func (s *Service) stop(ctx context.Context, id domain.SessionID, reason domain.A
 	}
 	s.finishLocked(ctx, run.ID, domain.AutopilotStopped, reason, summary)
 	s.mu.Unlock()
+	s.flushDigest(ctx, run)
 	s.resolveParkedNotifications(ctx, run)
 
 	// The run is already ended, so nothing below can restart it. Wait for any

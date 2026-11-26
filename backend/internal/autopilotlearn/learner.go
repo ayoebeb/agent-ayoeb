@@ -158,22 +158,24 @@ func (l *Learner) Update(ctx context.Context, force bool) (int, error) {
 			pending = pending[len(pending)-maxBatchPairs:]
 		}
 		profile := l.store.Profile()
+		// Only the global rules and those of the projects in this batch are
+		// rewritten; every other project's rules are left as they are.
+		scopes := projectsOf(pending)
+		scopes[ScopeGlobal] = true
 		out, err := l.llm.Complete(ctx, Model, BuildPrompt(profile, pending))
 		if err != nil {
 			l.failedAt = l.clock()
 			l.store.SetLastError(err.Error())
 			return folded, err
 		}
-		rules, err := ParseRules(out, projectsOf(pending))
+		rules, err := ParseRules(out, scopes)
 		if err != nil {
 			l.failedAt = l.clock()
 			l.store.SetLastError(err.Error())
 			return folded, err
 		}
 		l.failedAt = time.Time{}
-		next := MergeRules(profile, rules, l.clock())
-		next.LastLearnedAt, next.LastError = l.clock(), ""
-		if err := l.store.SetProfile(next); err != nil {
+		if err := l.store.ApplyLearned(profile, rules, scopes, l.clock()); err != nil {
 			return folded, err
 		}
 		ids := make([]string, 0, len(pending))
@@ -231,8 +233,13 @@ func BuildPrompt(profile Profile, pairs []Pair) string {
 		views = append(views, pairView{p.Project, p.Source, p.Question, p.Options, p.Recommendation, p.Answer})
 	}
 	pairJSON, _ := json.MarshalIndent(views, "", " ")
+	scopes := projectsOf(pairs)
+	scopes[ScopeGlobal] = true
 	var cur, pinned strings.Builder
 	for _, r := range profile.Rules {
+		if !scopes[r.Scope] {
+			continue
+		}
 		line := fmt.Sprintf("- [%s] %s\n", r.Scope, r.Text)
 		if r.Origin == OriginOwner {
 			pinned.WriteString(line)
@@ -280,7 +287,7 @@ func orNone(s string) string {
 // ParseRules reads the model's answer strictly: one JSON object with a rules
 // list. Rules with an unknown scope, empty or over-long text, or an unknown tag
 // are dropped; the counts per scope are capped.
-func ParseRules(out string, projects map[string]bool) ([]Rule, error) {
+func ParseRules(out string, scopes map[string]bool) ([]Rule, error) {
 	start, end := strings.Index(out, "{"), strings.LastIndex(out, "}")
 	if start < 0 || end <= start {
 		return nil, errors.New("autopilotlearn: the model did not return a JSON object")
@@ -299,7 +306,7 @@ func ParseRules(out string, projects map[string]bool) ([]Rule, error) {
 		if text == "" {
 			continue
 		}
-		if scope != ScopeGlobal && !projects[scope] {
+		if scope != ScopeGlobal && !scopes[scope] {
 			continue
 		}
 		limit := MaxRulesProject
@@ -320,9 +327,10 @@ func ParseRules(out string, projects map[string]bool) ([]Rule, error) {
 }
 
 // MergeRules keeps the owner's own rules exactly as they are, replaces the
-// learned ones with the model's list, and never brings back a dismissed rule.
-// A learned rule whose text is unchanged keeps its id.
-func MergeRules(p Profile, learned []Rule, now time.Time) Profile {
+// learned ones of the given scopes with the model's list, leaves the learned
+// rules of other scopes alone, and never brings back a dismissed rule. A learned
+// rule whose text is unchanged keeps its id.
+func MergeRules(p Profile, learned []Rule, scopes map[string]bool, now time.Time) Profile {
 	dismissed := map[string]bool{}
 	for _, d := range p.Dismissed {
 		dismissed[strings.ToLower(normalizeSpace(d))] = true
@@ -332,7 +340,7 @@ func MergeRules(p Profile, learned []Rule, now time.Time) Profile {
 	taken := map[string]bool{}
 	for _, r := range p.Rules {
 		key := r.Scope + "\x00" + strings.ToLower(normalizeSpace(r.Text))
-		if r.Origin == OriginOwner {
+		if r.Origin == OriginOwner || !scopes[r.Scope] {
 			out = append(out, r)
 			taken[key] = true
 		} else {

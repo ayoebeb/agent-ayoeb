@@ -231,7 +231,8 @@ usage-limit state of PR #23; until it is wired the loop never pauses.
 Autopilot learns how the owner decides (it builds on the Autopilot work above and
 needs it). Each question an orchestrator declares with `ao notify-user --waiting`,
 and the owner's next message to that orchestrator, is stored as a pair in
-`<data dir>/autopilot-learning/learning.json` (never sent anywhere); `ao autopilot
+`<data dir>/autopilot-learning/learning.json` (storage is local, but the profile
+update below sends the questions, options, answers and rules to Claude); `ao autopilot
 learn --import` reads past orchestrator transcripts once (Claude's
 `~/.claude/projects` and each saved account's `projects` folder, orchestrator
 folders only, human messages only) for more pairs. A short profile of global and

@@ -74,7 +74,7 @@ type AutopilotLearningRuleResponse struct {
 	Scope     string    `json:"scope" description:"\"global\", or the project the rule is for."`
 	Text      string    `json:"text"`
 	Origin    string    `json:"origin" enum:"learned,owner,correction" description:"learned: Autopilot wrote it from your decisions. owner: you wrote or edited it; learning never rewrites it."`
-	Tag       string    `json:"tag,omitempty" description:"usage_limit_switch marks the rule that lets Autopilot move work to another account on a usage limit."`
+	Tag       string    `json:"tag,omitempty" description:"usage_limit_switch marks the rule that lets Autopilot move work to another account on a usage limit; usage_limit_wait marks one the owner rewrote, which keeps Autopilot waiting for the reset."`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 

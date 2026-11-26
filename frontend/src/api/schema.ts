@@ -6009,7 +6009,7 @@ export interface components {
             origin: "learned" | "owner" | "correction";
             /** @description "global", or the project the rule is for. */
             scope: string;
-            /** @description usage_limit_switch marks the rule that lets Autopilot move work to another account on a usage limit. */
+            /** @description usage_limit_switch marks the rule that lets Autopilot move work to another account on a usage limit; usage_limit_wait marks one the owner rewrote, which keeps Autopilot waiting for the reset. */
             tag?: string;
             text: string;
             /** Format: date-time */

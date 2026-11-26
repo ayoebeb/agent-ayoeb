@@ -34,7 +34,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * What Autopilot learned about how the owner decides: the profile rules it
  * follows and the decisions they came from. The owner can edit or delete both,
  * add a rule, import past conversations, and ask for a profile update. Nothing
- * here can lift a hard limit, and the data never leaves this computer.
+ * here can lift a hard limit. The data is stored on this computer; a profile
+ * update sends the decision texts to Claude, which the description says.
  */
 export function AutopilotLearnedDialog({
 	open,

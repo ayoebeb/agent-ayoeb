@@ -4933,7 +4933,7 @@
 	"live.since": "{{age}} ago",
 	"live.detected.note": "A worker started this server by itself, so its output is not available here. Next time, ask workers to start servers with ao preview.",
 	"autopilot.learned.title": "O que o Autopilot aprendeu",
-	"autopilot.learned.description": "O Autopilot decide como você decidiria, a partir das escolhas que você fez. Tudo aqui fica neste computador.",
+	"autopilot.learned.description": "O Autopilot decide como você decidiria, a partir das escolhas que você fez. Elas ficam guardadas neste computador, mas para atualizar o perfil suas perguntas, respostas e regras são enviadas ao Claude (Sonnet) pelo comando claude conectado, inclusive automaticamente.",
 	"autopilot.learned.stats": "{{total}} decisões guardadas, {{pending}} ainda fora do perfil",
 	"autopilot.learned.updating": "atualizando o perfil",
 	"autopilot.learned.lastError": "A última atualização do perfil falhou: {{message}}",

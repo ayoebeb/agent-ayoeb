@@ -17733,7 +17733,8 @@ components:
           type: string
         tag:
           description: usage_limit_switch marks the rule that lets Autopilot move
-            work to another account on a usage limit.
+            work to another account on a usage limit; usage_limit_wait marks one the
+            owner rewrote, which keeps Autopilot waiting for the reset.
           type: string
         text:
           type: string
