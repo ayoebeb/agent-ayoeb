@@ -98,7 +98,7 @@ func (p sessionPolicy) UsageLimit(_ context.Context, id domain.SessionID) (bool,
 // moved nor answered for: its prompt stays open for the owner.
 func TestAutopilotMovesOnlyTheSessionsItCovers(t *testing.T) {
 	for name, covered := range map[string]sessionPolicy{
-		"covered one detected first":   {"orch": true},
+		"covered one detected first":  {"orch": true},
 		"covered one detected second": {"w1": true},
 	} {
 		t.Run(name, func(t *testing.T) {
