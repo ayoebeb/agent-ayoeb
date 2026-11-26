@@ -109,5 +109,6 @@ Opnieuw overstappen kan altijd met stap 2 van "Overstappen".
 - Na een backend-update kan de Firewall-vraag terugkomen (nieuw `ao.exe`-pad). Dat raakt alleen je telefoon via wifi; de tunnel blijft werken.
 - In Taakplanner staat nu ook **Ayo (daily) openen**. Daarmee opent een update het venster op je bureaublad, ook als die update komt van een agent die al vóór het aanmelden liep. De rollback haalt die taak weg.
 - Wijzig je het wachtwoord van je account, dan start een omgezette opstart-taak pas weer na een update van het opgeslagen wachtwoord. Doe dat in Taakplanner: de taak → Eigenschappen → OK → nieuw wachtwoord. Dat was voor de overstap ook al zo.
+- De aanmeldlink `ao-app://` (terugkeer uit de browser na aanmelden bij Cloud) wordt bewaakt zolang de daily setup aan staat: elke start, elke update met herstart en de update-watcher zetten hem terug als hij ontbreekt of ergens anders heen wijst (alleen `HKCU`, geen admin). `-SwitchFromInstalled -CheckOnly` toont `sign-in link: OK / missing / points to …`.
 - Autostart bij aanmelden uitzetten zonder terug te gaan: Taakbeheer → Opstart-apps → "Ayo (daily) autostart" uitschakelen.
 - Getest in een simulatie (andere map, andere poort, eigen opslag voor het token): `scripts/daily-ao/tests`. Zie het bestand `tests/README.md` voor de opdrachten.

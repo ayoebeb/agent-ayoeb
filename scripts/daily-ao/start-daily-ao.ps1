@@ -95,11 +95,14 @@ if ($Prepare -or $SetupGitHubToken) {
 		Write-Warn2 "$_"
 		exit 1
 	}
-	if ($SetupGitHubToken) { exit 0 }
+	if ($SetupGitHubToken) { Ensure-AoAppProtocol $cfg; exit 0 }
 }
 
 $transcript = Join-Path $cfg.LogDir ("start-{0}-{1}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID)
 Start-Transcript -LiteralPath $transcript | Out-Null
+
+# Every mode repairs a lost sign-in link, also when this run ends early below.
+Ensure-AoAppProtocol $cfg
 
 # Only the stable ao command: no AO process is started, stopped or built. State
 # is read and written under the update lock so a running update or watcher does
@@ -331,6 +334,8 @@ try {
 	if ($Boot) { try { $s = Read-DailyState $cfg; $s['lastBootError'] = @{ at = (Get-Date).ToString('o'); error = "$_" }; Write-DailyState $cfg $s } catch { } }
 	$script:startFailed = $true
 } finally {
+	# Again: this run may have switched the daily setup on or installed Electron.
+	Ensure-AoAppProtocol $cfg
 	Exit-StartLock
 	Stop-Transcript | Out-Null
 }

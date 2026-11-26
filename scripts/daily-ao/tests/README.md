@@ -4,7 +4,7 @@ Alles draait in een eigen map onder `%TEMP%` (`ao-sim-*`), met een eigen "AO-map
 
 | Bestand | Wat het bewijst | Duur |
 | --- | --- | --- |
-| `sim-unit.ps1` | checksum-weigering, Node-volgorde (fnm, portable, PATH), Git-ontbreekt-melding, scripts kopiëren en bijwerken (ook: kapot script wordt niet overgenomen), geen pc-specifieke namen of paden | seconden |
+| `sim-unit.ps1` | checksum-weigering, Node-volgorde (fnm, portable, PATH), Git-ontbreekt-melding, scripts kopiëren en bijwerken (ook: kapot script wordt niet overgenomen), geen pc-specifieke namen of paden, de aanmeldlink `ao-app://` op een eigen registersleutel (ontbreekt, fout, goed) | seconden |
 | `sim-github-token.ps1` | het token per repository-URL tegen een nep-GitHub (`fake-github.mjs`): verkeerd account, te veel rechten en klassiek token geweigerd, clone en fetch terwijl het verkeerde `gh`-account actief is, verlopen token, geen lekken, en de bestaande git/gh-aanmeldingen van de pc (globale config en andere Credential Manager-items) blijven byte voor byte gelijk | ~1 minuut |
 | `sim-guide-clone.ps1` | stap 2 van `tweede-pc-handleiding.nl.md` letterlijk, in Windows PowerShell 5.1 en PowerShell 7 | ~1 minuut |
 | `sim-fresh-machine.ps1` | een verse pc zonder Node en Go: `-Prepare` installeert ze losjes (checksum), bouwt, en verandert niets buiten de simulatiemap | 15 tot 30 minuten (Defender maakt het uitpakken traag), ~4 GB, downloadt echt |

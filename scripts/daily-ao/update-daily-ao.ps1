@@ -217,7 +217,7 @@ function Invoke-UpdatePass([switch]$NeverRestart) {
 		if ($answer -notmatch '^(j|ja|y|yes)$') { Write-Note 'Niet toegepast. Later: update-daily-ao.ps1'; return 'restart-pending' }
 	}
 	$plan = Get-UpdatePlan  # re-read: main may have moved while asking
-	Invoke-RestartUpdate $plan
+	try { Invoke-RestartUpdate $plan } finally { Ensure-AoAppProtocol $cfg }
 	return 'applied'
 }
 
@@ -251,6 +251,8 @@ try {
 					Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\conhost.exe') -ArgumentList $argLine | Out-Null
 					return
 				}
+				# A registry read per cycle; writes only when the sign-in link is wrong.
+				Ensure-AoAppProtocol $cfg
 				if (-not (Enter-UpdateLock 0)) { Start-Sleep -Seconds $IntervalSeconds; continue }
 				try { $r = Invoke-UpdateOnce -NeverRestart } finally { $updateLock.ReleaseMutex() }
 				if ($r -eq 'restart-pending') {

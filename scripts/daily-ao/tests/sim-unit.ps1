@@ -148,6 +148,52 @@ try {
 		foreach ($p in 'C:\\Users\\Ayoeb', 'NLSTATION', '\bDevelopment\b', 'Documents\\GitHub') { if ($text -match $p) { $hits += "$($f.Name): $p" } }
 	}
 	Assert-Sim ($hits.Count -eq 0) "no PC-specific user name, host name, task name or path in scripts or docs ($($hits -join '; '))"
+
+	Write-SimStep '7. The ao-app:// sign-in link (on a stand-in registry key, never the real one)'
+	$url = 'http://127.0.0.1:1/a/b.git'
+	Assert-Sim (-not $cfg.ManageProtocol) 'a simulation without its own protocolRegKey does not manage the link'
+	$threw = $false
+	try { Get-DailyConfig -ConfigFile (New-SimConfig $root $Port $url @{ protocolRegKey = 'Software\Classes\ao-app' }) | Out-Null } catch { $threw = $true }
+	Assert-Sim $threw 'a simulation pointing at the real ao-app key is refused'
+	$clone = Join-Path $root 'proto-clone'
+	$electron = Join-Path $clone 'frontend\node_modules\electron\dist\electron.exe'
+	New-Item -ItemType Directory -Force -Path (Split-Path $electron -Parent) | Out-Null; Set-Content -LiteralPath $electron -Value 'x'
+	$protoKey = 'Software\AoDailySim\ao-app'
+	$protoPs = "HKCU:\$protoKey"
+	Remove-Item -LiteralPath $protoPs -Recurse -Force -ErrorAction SilentlyContinue
+	$cfgP = Get-DailyConfig -ConfigFile (New-SimConfig $root $Port $url @{ checkout = $clone; protocolRegKey = $protoKey })
+	Initialize-DailyDirs $cfgP
+	$want = "`"$electron`" `"$(Join-Path $clone 'frontend')`" `"%1`""
+	function Get-SimLink { (Get-ItemProperty -LiteralPath "$protoPs\shell\open\command" -ErrorAction SilentlyContinue).'(default)' }
+	function Get-SimOutput([scriptblock]$Block) { (& $Block *>&1 | ForEach-Object { "$_" }) -join "`n" }
+	try {
+		Write-DailyState $cfgP @{ active = $false }
+		Ensure-AoAppProtocol $cfgP
+		Assert-Sim (-not (Test-Path -LiteralPath $protoPs)) 'nothing is written while the daily setup is not active'
+		Assert-Sim ((Get-SimOutput { Write-AoAppProtocolCheck $cfgP }) -match 'sign-in link: missing') '-CheckOnly says missing'
+		Assert-Sim (-not (Test-Path -LiteralPath $protoPs)) '...and writes nothing'
+		Write-DailyState $cfgP @{ active = $true }
+		$out = Get-SimOutput { Ensure-AoAppProtocol $cfgP }
+		Assert-Sim ((Get-SimLink) -ceq $want) 'a missing link is registered with the daily Electron command'
+		Assert-Sim ($null -ne (Get-Item -LiteralPath $protoPs).GetValue('URL Protocol', $null)) '...as a URL protocol'
+		Assert-Sim (@($out -split "`n").Count -eq 1 -and $out -match 'ao-app:// hersteld') '...and logs one line'
+		Assert-Sim ((Get-SimOutput { Ensure-AoAppProtocol $cfgP }) -eq '') 'a correct link is left alone, silently'
+		Assert-Sim ((Get-SimOutput { Write-AoAppProtocolCheck $cfgP }) -match 'sign-in link: OK') '-CheckOnly says OK'
+		$other = '"C:\elsewhere\app.exe" "%1"'
+		Set-ItemProperty -LiteralPath "$protoPs\shell\open\command" -Name '(default)' -Value $other
+		Assert-Sim ((Get-SimOutput { Write-AoAppProtocolCheck $cfgP }).Contains("sign-in link: points to $other")) '-CheckOnly says where a wrong link points'
+		Assert-Sim ((Get-SimLink) -ceq $other) '...and leaves it'
+		Ensure-AoAppProtocol $cfgP
+		Assert-Sim ((Get-SimLink) -ceq $want) 'a link pointing elsewhere is repaired'
+		Remove-ItemProperty -LiteralPath $protoPs -Name 'URL Protocol'
+		Assert-Sim ((Get-AoAppProtocolStatus $cfgP).State -eq 'missing') 'a key without "URL Protocol" counts as missing'
+		Remove-Item -LiteralPath $protoPs -Recurse -Force
+		foreach ($redirect in $null, 'http://127.0.0.1:3000/callback') {
+			$cfgNo = Get-DailyConfig -ConfigFile (New-SimConfig $root $Port $url @{ checkout = $clone; protocolRegKey = $protoKey; cloudAuthRedirect = $redirect })
+			Ensure-AoAppProtocol $cfgNo
+			Assert-Sim (-not (Test-Path -LiteralPath $protoPs)) "no link for cloudAuthRedirect '$redirect'"
+		}
+	} finally { Remove-Item -LiteralPath $protoPs -Recurse -Force -ErrorAction SilentlyContinue }
 } finally {
 	foreach ($k in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $savedEnv[$k]) }
 	if (-not $Keep) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
