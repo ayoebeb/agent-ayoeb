@@ -136,3 +136,53 @@ func TestRewritingTheSwitchRuleRevokesSwitching(t *testing.T) {
 		t.Fatal("with the owner's rule gone the learned one applies again")
 	}
 }
+
+func TestAnAnswerWithoutAValidRulesArrayLeavesTheProfileAlone(t *testing.T) {
+	for name, out := range map[string]string{
+		"missing":         `{}`,
+		"null":            `{"rules":null}`,
+		"other key":       `{"profile":[{"scope":"global","text":"x"}]}`,
+		"not an array":    `{"rules":"none"}`,
+		"object":          `{"rules":{}}`,
+		"null entry":      `{"rules":[null]}`,
+		"empty entry":     `{"rules":[{}]}`,
+		"entry sans text": `{"rules":[{"scope":"global","rule":"x"}]}`,
+		"strings":         `{"rules":["Test first."]}`,
+		"truncated":       `{"rules":[`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := newStore(t)
+			kept, _ := st.AddRule(ScopeGlobal, "Quality first.", OriginLearned)
+			_, _ = st.AddPairs([]Pair{pair("p", "q", "a", t0)})
+			l := NewLearner(st, &hookLLM{out: out}, func() time.Time { return t0 })
+
+			if _, err := l.Update(context.Background(), true); err == nil {
+				t.Fatalf("%s must be an error", out)
+			}
+			rules := st.Profile().Rules
+			if len(rules) != 1 || rules[0].ID != kept.ID {
+				t.Fatalf("profile = %+v, want it untouched", rules)
+			}
+			if _, unfolded := st.Counts(); unfolded != 1 {
+				t.Fatalf("unfolded = %d: the decision must wait for the next update", unfolded)
+			}
+			if st.Profile().LastError == "" {
+				t.Fatal("the failure must be visible")
+			}
+		})
+	}
+}
+
+// An explicit empty array is a real answer: nothing is learned any more.
+func TestAnEmptyRulesArrayIsAccepted(t *testing.T) {
+	st := newStore(t)
+	_, _ = st.AddRule(ScopeGlobal, "Quality first.", OriginLearned)
+	_, _ = st.AddPairs([]Pair{pair("p", "q", "a", t0)})
+	l := NewLearner(st, &hookLLM{out: `{"rules":[]}`}, func() time.Time { return t0 })
+	if n, err := l.Update(context.Background(), true); err != nil || n != 1 {
+		t.Fatalf("n = %d, err = %v", n, err)
+	}
+	if rules := st.Profile().Rules; len(rules) != 0 {
+		t.Fatalf("rules = %+v", rules)
+	}
+}

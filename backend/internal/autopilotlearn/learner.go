@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -170,6 +171,7 @@ func (l *Learner) Update(ctx context.Context, force bool) (int, error) {
 		}
 		rules, err := ParseRules(out, scopes)
 		if err != nil {
+			slog.Default().Warn("autopilot learning: unusable model answer, the profile is left as it is", "err", err)
 			l.failedAt = l.clock()
 			l.store.SetLastError(err.Error())
 			return folded, err
@@ -285,18 +287,29 @@ func orNone(s string) string {
 }
 
 // ParseRules reads the model's answer strictly: one JSON object with a rules
-// list. Rules with an unknown scope, empty or over-long text, or an unknown tag
-// are dropped; the counts per scope are capped.
+// array whose entries each have a scope and text, or it is an error. Rules for a
+// scope that was not asked about are dropped, over-long text is clipped, unknown
+// tags are removed and the counts per scope are capped.
 func ParseRules(out string, scopes map[string]bool) ([]Rule, error) {
 	start, end := strings.Index(out, "{"), strings.LastIndex(out, "}")
 	if start < 0 || end <= start {
 		return nil, errors.New("autopilotlearn: the model did not return a JSON object")
 	}
 	var parsed struct {
-		Rules []learnedRule `json:"rules"`
+		Rules []*learnedRule `json:"rules"`
 	}
 	if err := json.Unmarshal([]byte(out[start:end+1]), &parsed); err != nil {
 		return nil, fmt.Errorf("autopilotlearn: unreadable model answer: %w", err)
+	}
+	// The answer replaces learned rules, so one that is not the shape asked for
+	// must not read as "no rules". An explicit empty array is a real answer.
+	if parsed.Rules == nil {
+		return nil, errors.New("autopilotlearn: the model answer has no rules array")
+	}
+	for _, lr := range parsed.Rules {
+		if lr == nil || strings.TrimSpace(lr.Scope) == "" || strings.TrimSpace(lr.Text) == "" {
+			return nil, errors.New("autopilotlearn: the model answer has a rule without a scope or text")
+		}
 	}
 	var rules []Rule
 	count := map[string]int{}
