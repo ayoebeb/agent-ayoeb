@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_UI_SETTINGS, coerceUiSettings, type UiSettings } from "../shared/ui-locale";
@@ -51,6 +52,15 @@ function runSettingsOperation<T>(operation: () => Promise<T>): Promise<T> {
 /** Read UI settings, tolerating a missing or corrupt file (returns defaults). */
 export async function readUiSettings(stateDir: string): Promise<UiSettings> {
 	return readUiSettingsUnlocked(stateDir);
+}
+
+/** Synchronous read for choices that must be made before Electron is ready. */
+export function readUiSettingsSync(stateDir: string): UiSettings {
+	try {
+		return coerceUiSettings(JSON.parse(readFileSync(path.join(stateDir, UI_SETTINGS_FILE_NAME), "utf8")));
+	} catch {
+		return { ...DEFAULT_UI_SETTINGS };
+	}
 }
 
 /** Atomically and serially merge-write UI settings (temp file + rename). */

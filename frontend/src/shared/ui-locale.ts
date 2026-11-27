@@ -30,6 +30,8 @@ export interface UiSettings {
 	orchestratorWaitingSoundEnabled: boolean;
 	/** Shell used for newly opened standalone terminal panes. */
 	terminalShell: TerminalShellPreference;
+	/** Chromium GPU acceleration. Read once at startup, so a change applies on the next launch. */
+	hardwareAcceleration: boolean;
 }
 
 export const DEFAULT_TERMINAL_SHELL: TerminalShellPreference = { kind: "auto" };
@@ -39,6 +41,7 @@ export const DEFAULT_UI_SETTINGS: UiSettings = {
 	soundNotificationsEnabled: true,
 	orchestratorWaitingSoundEnabled: true,
 	terminalShell: DEFAULT_TERMINAL_SHELL,
+	hardwareAcceleration: true,
 };
 
 /** Normalize an unknown value to a supported UI locale. */
@@ -78,5 +81,7 @@ export function coerceUiSettings(raw: unknown): UiSettings {
 		soundNotificationsEnabled,
 		orchestratorWaitingSoundEnabled,
 		terminalShell: coerceTerminalShell(record.terminalShell),
+		// Only an explicit `false` turns the GPU off.
+		hardwareAcceleration: record.hardwareAcceleration !== false,
 	};
 }

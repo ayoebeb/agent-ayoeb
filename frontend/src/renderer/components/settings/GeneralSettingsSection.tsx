@@ -11,6 +11,7 @@ import { useTelemetryPolicyStore } from "../../stores/telemetry-policy-store";
 import { useAnalyticsOptOutStore } from "../../stores/analytics-opt-out-store";
 import { CliLinkSettings } from "./CliLinkSettingsRow";
 import { CliShadowSettingsRow } from "./CliShadowSettingsRow";
+import { HardwareAccelerationRow } from "./HardwareAccelerationRow";
 import { openChromeAgentsSettings } from "./BrowserChromeSection";
 import { Button } from "../ui/button";
 import { ArrowRight } from "@/components/app-icons";
@@ -556,6 +557,7 @@ export function GeneralSettingsSection({
 				{developerMode && <DiagnosticsRow />}
 				<CliLinkSettings enabled={developerMode} />
 				<CliShadowSettingsRow />
+				<HardwareAccelerationRow />
 				{developerMode && <SideChatsRow />}
 				{developerMode && <SplitPanesRow />}
 				{developerMode && <NewSidebarDesignRow />}
