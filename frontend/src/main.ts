@@ -271,6 +271,7 @@ import { ancestorRepositorySetupWarning, resolveCheckedOutBranch, scanImportFold
 import { parseOpenFolderPathArg } from "./main/open-folder-arg";
 import { registerRemotesIpc, remotesFilePath } from "./main/remotes-main";
 import { createDailyUpdateController } from "./main/daily-update";
+import { dailyLinkForwardDir, deepLinkHost } from "./main/daily-link-launch";
 import { sealSavedPasswords, setPasswordCipher } from "./main/remotes-store";
 import { createLocalHostIdentity, readRemoteIdentity } from "./main/remote-request";
 import { RemoteRegistry } from "./main/remote-registry";
@@ -371,11 +372,20 @@ if (disableGpu === "1" || disableGpu === "true" || disableGpu === "yes" || disab
 // exits immediately. That is a real constraint for a tool built around parallel
 // worktree sessions: two sessions could not both run the app. Packaged builds
 // are deliberately NOT overridable — their profile is part of the install.
+// A link opened from the browser into the daily Ayo has no such variable; it
+// takes the daily profile only to hand the link over (see dailyLinkForwardDir).
+const dailyLinkDir = dailyLinkForwardDir({
+	isPackaged: app.isPackaged,
+	env: process.env,
+	argv: process.argv,
+	appPath: app.getAppPath(),
+	homeDir: os.homedir(),
+});
 app.setPath(
 	"userData",
 	app.isPackaged
 		? path.join(os.homedir(), ".ao", "electron")
-		: (process.env.AO_DEV_ELECTRON_DIR ?? path.join(os.homedir(), ".ao", "dev", "electron")),
+		: (process.env.AO_DEV_ELECTRON_DIR ?? dailyLinkDir ?? path.join(os.homedir(), ".ao", "dev", "electron")),
 );
 
 // Resolve once against the launch cwd, before the daemon can chdir. The exact
@@ -670,7 +680,17 @@ protocol.registerSchemesAsPrivileged([
 // releases) the ao-app:// deep-link protocol used by WorkOS auth callbacks and
 // billing returns: a second launch that is about to exit must not change it.
 // See registerCloudProtocol. Must run before app.whenReady().
-if (!app.requestSingleInstanceLock()) {
+if (dailyLinkDir) {
+	// Asking for the lock hands this command line to the running daily Ayo (its
+	// second-instance event). Never carry on, also when none is running: this
+	// process lacks the daily environment, and registerCloudProtocol would
+	// release the daily ao-app:// claim.
+	const handedOver = !app.requestSingleInstanceLock();
+	console.log(
+		handedOver ? "[deep-link] handed to the running daily Ayo" : "[deep-link] no daily Ayo is running; link dropped",
+	);
+	app.exit(0);
+} else if (!app.requestSingleInstanceLock()) {
 	app.exit(0);
 } else {
 	registerCloudProtocol();
@@ -4309,6 +4329,7 @@ app.on("open-url", (event, url) => {
 app.on("second-instance", (_event, argv) => {
 	const deepLink = argv.find((value) => value.startsWith("ao-app://"));
 	if (deepLink) {
+		console.log(`[deep-link] received from a second launch: ${deepLinkHost(deepLink)}`);
 		void handleCloudDeepLinkAndFocus(deepLink);
 		return;
 	}
