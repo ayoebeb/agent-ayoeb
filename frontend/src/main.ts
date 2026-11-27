@@ -78,9 +78,12 @@ import {
 	coerceUiSettings,
 	DEFAULT_UI_SETTINGS,
 	readUiSettings,
+	readUiSettingsSync,
 	writeUiSettings,
 	type UiSettings,
 } from "./main/ui-settings";
+import { createDiagnosticsLog, diagnosticsLogDir } from "./main/window-diagnostics";
+import { createChildProcessMonitor, createReloadBudget, installWindowRecovery } from "./main/window-recovery";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -591,6 +594,46 @@ const isDev = !app.isPackaged;
 // on Windows (supervisorPipeFromRunFile derives it from the same dir basename).
 const DEV_DAEMON_PORT = 3002;
 const DEV_STATE_SUBDIR = "dev"; // ~/.ao/dev/
+
+// Blank-window diagnostics and self-repair (see main/window-recovery.ts). The
+// reload budget is shared by every window this run creates.
+const windowDiagnostics = createDiagnosticsLog({ dir: diagnosticsLogDir(process.env, desktopDataDir) });
+const windowReloadBudget = createReloadBudget();
+let appWillQuit = false;
+app.once("will-quit", () => {
+	appWillQuit = true;
+});
+
+// The in-app counterpart of AO_DISABLE_GPU above. Down here because it needs the
+// state directory; module evaluation still finishes before app ready.
+const startupRunFile = runFilePath();
+if (startupRunFile && !readUiSettingsSync(path.dirname(startupRunFile)).hardwareAcceleration) {
+	app.disableHardwareAcceleration();
+	windowDiagnostics("hardware-acceleration-off");
+}
+
+async function offerToDisableHardwareAcceleration(): Promise<void> {
+	const runFile = runFilePath();
+	if (!runFile || !(await readUiSettings(path.dirname(runFile))).hardwareAcceleration) return;
+	const { response } = await dialog.showMessageBox({
+		type: "warning",
+		buttons: ["Turn off hardware acceleration", "Not now"],
+		defaultId: 1,
+		cancelId: 1,
+		message: "The graphics process keeps crashing",
+		detail: "Turning off hardware acceleration can stop the window from going blank. It takes effect the next time Ayo starts, and you can turn it back on in Settings.",
+	});
+	windowDiagnostics("gpu-offer-answered", { turnOff: response === 0 });
+	if (response === 0) await writeUiSettings(path.dirname(runFile), { hardwareAcceleration: false });
+}
+
+const monitorChildProcess = createChildProcessMonitor({
+	log: windowDiagnostics,
+	onRepeatedGpuCrash: () => {
+		void offerToDisableHardwareAcceleration().catch((error) => windowDiagnostics("gpu-offer-failed", { error: String(error) }));
+	},
+});
+app.on("child-process-gone", (_event, details) => monitorChildProcess(details));
 
 const RENDERER_SCHEME = "app";
 const RENDERER_HOST = "renderer";
@@ -1380,6 +1423,24 @@ async function createWindowInternal(): Promise<void> {
 	}
 
 	showWhenRendererLoaded(mainWindow, shellWebContents);
+	const recoveryWindow = mainWindow;
+	installWindowRecovery({
+		contents: shellWebContents,
+		rendererUrl,
+		log: windowDiagnostics,
+		budget: windowReloadBudget,
+		isQuitting: () => appWillQuit,
+		// A shell view that lost its size shows only the window background.
+		repairShellView: () => {
+			if (recoveryWindow.isDestroyed() || recoveryWindow.isMinimized() || !recoveryWindow.isVisible()) return null;
+			const content = recoveryWindow.contentView.getBounds();
+			const shellBounds = composition.shellView.getBounds();
+			// One pixel is the compositor repaint nudge in window-composition.
+			if (Math.abs(content.width - shellBounds.width) <= 1 && Math.abs(content.height - shellBounds.height) <= 1) return null;
+			composition.resize();
+			return `shell ${shellBounds.width}x${shellBounds.height}, window ${content.width}x${content.height}`;
+		},
+	});
 	void shellWebContents.loadURL(rendererUrl());
 
 	if (isDev && process.env.AO_OPEN_DEVTOOLS === "1") {

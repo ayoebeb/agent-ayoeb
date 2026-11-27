@@ -39,7 +39,9 @@ describe("shared UI locale schema", () => {
 			soundNotificationsEnabled: true,
 			orchestratorWaitingSoundEnabled: true,
 			terminalShell: { kind: "auto" },
+			hardwareAcceleration: true,
 		});
+		expect(coerceUiSettings({ hardwareAcceleration: false }).hardwareAcceleration).toBe(false);
 		expect(coerceUiSettings({ locale: "en", soundNotificationsEnabled: false })).toEqual({
 			...DEFAULT_UI_SETTINGS,
 			soundNotificationsEnabled: false,

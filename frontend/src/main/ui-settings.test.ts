@@ -63,6 +63,7 @@ describe("ui-settings", () => {
 			soundNotificationsEnabled: false,
 			orchestratorWaitingSoundEnabled: true,
 			terminalShell: { kind: "git-bash" },
+			hardwareAcceleration: true,
 		});
 	});
 
