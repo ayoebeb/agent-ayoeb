@@ -59,7 +59,9 @@ type APIDeps struct {
 	OrchestratorWaiting controllers.OrchestratorWaitingService
 	// Autopilot runs a task to completion without the user: start, stop, the
 	// agent's own commands, and the run log.
-	Autopilot          controllers.AutopilotService
+	Autopilot controllers.AutopilotService
+	// AutopilotLearning is what Autopilot learned about how the owner decides.
+	AutopilotLearning  controllers.AutopilotLearningService
 	Reports            controllers.ReportService
 	NotificationStream controllers.NotificationStream
 	Push               controllers.PushRegistry
@@ -172,6 +174,7 @@ type API struct {
 	notifications          *controllers.NotificationsController
 	orchWaiting            *controllers.OrchestratorWaitingController
 	autopilot              *controllers.AutopilotController
+	autopilotLearning      *controllers.AutopilotLearningController
 	reports                *controllers.ReportsController
 	push                   *controllers.PushController
 	imports                *controllers.ImportController
@@ -237,20 +240,21 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 			AgentBrowser:             agentBrowserURL(cfg.AgentBrowserURL),
 			AgentBrowserToken:        cfg.AgentBrowserToken,
 		},
-		automations:   &controllers.AutomationsController{Svc: deps.Automations},
-		desktop:       &controllers.DesktopWorkspaceController{Svc: deps.DesktopWorkspaces},
-		usage:         &controllers.UsageController{Svc: deps.UsageSummary, Log: loggerOrDefault(log), Memory: deps.SessionMemory, Steps: deps.SessionSteps, Pressure: memoryPressure(deps.SessionMemory), Report: deps.UsageReport, LimitHistory: deps.UsageLimitHistory, LimitHistorySetting: deps.UsageLimitSetting, Prices: deps.UsagePrices},
-		prs:           &controllers.PRsController{Svc: deps.PRs},
-		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
-		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
-		orchWaiting:   &controllers.OrchestratorWaitingController{Svc: deps.OrchestratorWaiting},
-		autopilot:     &controllers.AutopilotController{Svc: deps.Autopilot},
-		reports:       &controllers.ReportsController{Svc: deps.Reports},
-		push:          &controllers.PushController{Registry: deps.Push},
-		imports:       &controllers.ImportController{Svc: deps.Import},
-		sessionImport: &controllers.SessionImportController{Svc: deps.SessionImport},
-		fs:            &controllers.FSController{Svc: deps.Directories},
-		shellTerms:    &controllers.ShellTerminalsController{Svc: deps.ShellTerminals},
+		automations:       &controllers.AutomationsController{Svc: deps.Automations},
+		desktop:           &controllers.DesktopWorkspaceController{Svc: deps.DesktopWorkspaces},
+		usage:             &controllers.UsageController{Svc: deps.UsageSummary, Log: loggerOrDefault(log), Memory: deps.SessionMemory, Steps: deps.SessionSteps, Pressure: memoryPressure(deps.SessionMemory), Report: deps.UsageReport, LimitHistory: deps.UsageLimitHistory, LimitHistorySetting: deps.UsageLimitSetting, Prices: deps.UsagePrices},
+		prs:               &controllers.PRsController{Svc: deps.PRs},
+		reviews:           &controllers.ReviewsController{Svc: deps.Reviews},
+		notifications:     &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
+		orchWaiting:       &controllers.OrchestratorWaitingController{Svc: deps.OrchestratorWaiting},
+		autopilot:         &controllers.AutopilotController{Svc: deps.Autopilot},
+		autopilotLearning: &controllers.AutopilotLearningController{Svc: deps.AutopilotLearning},
+		reports:           &controllers.ReportsController{Svc: deps.Reports},
+		push:              &controllers.PushController{Registry: deps.Push},
+		imports:           &controllers.ImportController{Svc: deps.Import},
+		sessionImport:     &controllers.SessionImportController{Svc: deps.SessionImport},
+		fs:                &controllers.FSController{Svc: deps.Directories},
+		shellTerms:        &controllers.ShellTerminalsController{Svc: deps.ShellTerminals},
 		commandRuns: &controllers.CommandRunsController{
 			Svc:            deps.CommandRuns,
 			UserClientGate: commandRunGate(cfg.AllowedOrigins, deps.CommandRunKey),
@@ -402,6 +406,7 @@ func (a *API) Register(root chi.Router) {
 			a.notifications.Register(r)
 			a.orchWaiting.Register(r)
 			a.autopilot.Register(r)
+			a.autopilotLearning.Register(r)
 			a.reports.Register(r)
 			a.push.Register(r)
 			a.imports.Register(r)

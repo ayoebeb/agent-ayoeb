@@ -54,6 +54,22 @@ func (s *Store) CreateNotification(ctx context.Context, rec domain.NotificationR
 	return notificationFromGen(row), true, nil
 }
 
+// NotificationSourceKeyExists reports whether a notification with this source key
+// was ever stored, resolved and dismissed ones included.
+func (s *Store) NotificationSourceKeyExists(ctx context.Context, sourceKey string) (bool, error) {
+	if sourceKey == "" {
+		return false, nil
+	}
+	_, err := s.qr.GetNotificationBySourceKey(ctx, sourceKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lookup notification source key: %w", err)
+	}
+	return true, nil
+}
+
 func (s *Store) getNotificationByDedupe(ctx context.Context, rec domain.NotificationRecord) (domain.NotificationRecord, bool, error) {
 	if rec.SourceKey != "" {
 		row, err := s.qw.GetNotificationBySourceKey(ctx, rec.SourceKey)

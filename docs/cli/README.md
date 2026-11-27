@@ -228,6 +228,27 @@ run and interrupts the sessions' current turns (the emergency stop). Usage-limit
 pause is a marked integration point (`autopilot.UsageLimitCheck`) for the
 usage-limit state of PR #23; until it is wired the loop never pauses.
 
+Autopilot learns how the owner decides (it builds on the Autopilot work above and
+needs it). Each question an orchestrator declares with `ao notify-user --waiting`,
+and the owner's next message to that orchestrator, is stored as a pair in
+`<data dir>/autopilot-learning/learning.json` (storage is local, but the profile
+update below sends the questions, options, answers and rules to Claude); `ao autopilot
+learn --import` reads past orchestrator transcripts once (Claude's
+`~/.claude/projects` and each saved account's `projects` folder, orchestrator
+folders only, human messages only) for more pairs. A short profile of global and
+per-project rules is kept from the pairs by a Sonnet call through the owner's own
+`claude` command (never Opus; incremental, five or more new pairs or one
+correction at a time). `ao autopilot advise --question ...` gives the agent that
+profile and the three to five most similar past decisions; `ao autopilot decide`
+takes `--based-on <pair ids>` and `--confidence high|medium|low`, written into the
+log, and low confidence means the safest option that can be undone. An Undo is fed
+back as a correction. Parked items are batched into one notification per run once
+the oldest has waited 15 minutes, and a usage limit under Autopilot waits for the
+reset unless a profile rule clearly allows another account. The hard limits are
+enforced before and after anything learned and cannot be changed by a rule. The
+owner reads and edits all of it under Settings, Autopilot, What Autopilot learned
+(`GET /api/v1/autopilot/learning`; user-only routes, an agent gets a 403).
+
 When a browser-displayable file is the requested artifact, agents should call
 `ao preview <workspace-path>` immediately after creating or materially updating
 the primary output. Markdown, HTML, PDF, SVG, and common images can be served

@@ -210,6 +210,8 @@ ao autopilot status --session mer-orchestrator-1
 ao autopilot log --session mer-orchestrator-1
 ao autopilot stop --session mer-orchestrator-1   # emergency stop; --all stops every run
 ao autopilot resume --session mer-orchestrator-1 # continue a parked run
+ao autopilot learn --import                      # learn from your past orchestrator conversations (once)
+ao autopilot learn                               # print what Autopilot learned about how you decide
 ```
 
 While it runs, AO sends the session the task again after every turn that did not finish it, answers its permission requests (and those of the workers it starts) inside its workspace, and never waits on you: the agent picks its recommended option and records it. It never spends money, weakens CI, pushes to main without review, deletes outside the workspace, uses admin rights, messages people outside AO, or changes credentials; an item that needs one is parked, and you get one notification for it. The run finishes only when the agent declares it done and an AO review of the exact head is approved and CI is green (CI that cannot start is recorded as a gap, not a pass). It parks itself, and tells you once, after 30 iterations (change it in Settings) or three iterations with no change. `ao autopilot log` is the "what I did while you were away" report.

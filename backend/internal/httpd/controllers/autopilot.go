@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,6 +55,7 @@ func (c *AutopilotController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/autopilot/criteria", c.criteria)
 	r.Post("/sessions/{sessionId}/autopilot/done", c.done)
 	r.Post("/sessions/{sessionId}/autopilot/decisions", c.decide)
+	r.Post("/sessions/{sessionId}/autopilot/advice", c.advice)
 	r.Post("/sessions/{sessionId}/autopilot/parked", c.park)
 }
 
@@ -226,12 +228,40 @@ func (c *AutopilotController) decide(w http.ResponseWriter, r *http.Request) {
 	if !decodeConversationBody(w, r, &req) {
 		return
 	}
-	ev, err := c.Svc.Decide(r.Context(), sessionParam(r), req.Question, req.Choice, req.Why)
+	var ev domain.AutopilotEvent
+	var err error
+	if ext, ok := c.Svc.(autopilotAdvisorService); ok && (len(req.BasedOn) > 0 || req.Confidence != "") {
+		ev, err = ext.DecideWithBasis(r.Context(), sessionParam(r), req.Question, req.Choice, req.Why,
+			autopilot.Basis{PairIDs: req.BasedOn, Confidence: req.Confidence})
+	} else {
+		ev, err = c.Svc.Decide(r.Context(), sessionParam(r), req.Question, req.Choice, req.Why)
+	}
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, AutopilotDecideResponse{Event: autopilotEventResponse(ev)})
+}
+
+func (c *AutopilotController) advice(w http.ResponseWriter, r *http.Request) {
+	if !c.ready(w, r, "POST", "/api/v1/sessions/{sessionId}/autopilot/advice") {
+		return
+	}
+	ext, ok := c.Svc.(autopilotAdvisorService)
+	if !ok {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/autopilot/advice")
+		return
+	}
+	var req AutopilotAdviceRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	text, err := ext.Advise(r.Context(), sessionParam(r), req.Question, req.Options)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, AutopilotAdviceResponse{Advice: text})
 }
 
 func (c *AutopilotController) park(w http.ResponseWriter, r *http.Request) {
@@ -278,10 +308,37 @@ func autopilotRunResponse(run domain.AutopilotRun, openParked int) AutopilotRunR
 }
 
 func autopilotEventResponse(ev domain.AutopilotEvent) AutopilotEventResponse {
-	return AutopilotEventResponse{
+	out := AutopilotEventResponse{
 		ID: ev.ID, RunID: ev.RunID, SessionID: string(ev.SessionID), Kind: string(ev.Kind), Iteration: ev.Iteration,
 		Summary: ev.Summary, Detail: ev.Detail, CreatedAt: ev.CreatedAt, ResolvedAt: timePtr(ev.ResolvedAt),
+		BasedOn: []string{},
 	}
+	if ev.Kind == domain.AutopilotEventDecision {
+		out.Detail, out.BasedOn, out.Confidence = splitDecisionBasis(ev.Detail)
+	}
+	return out
+}
+
+// splitDecisionBasis separates the "why" of a decision from the lines that say
+// which of the owner's past choices it followed and how confident it was.
+func splitDecisionBasis(detail string) (why string, basedOn []string, confidence string) {
+	basedOn = []string{}
+	var rest []string
+	for _, line := range strings.Split(detail, "\n") {
+		switch {
+		case strings.HasPrefix(line, "Based on your past choice: "):
+			basedOn = append(basedOn, strings.TrimPrefix(line, "Based on your past choice: "))
+		case strings.HasPrefix(line, "Confidence: low"):
+			confidence = "low"
+		case strings.HasPrefix(line, "Confidence: medium"):
+			confidence = "medium"
+		case strings.HasPrefix(line, "Confidence: high"):
+			confidence = "high"
+		default:
+			rest = append(rest, line)
+		}
+	}
+	return strings.Join(rest, "\n"), basedOn, confidence
 }
 
 func autopilotEventResponses(events []domain.AutopilotEvent) []AutopilotEventResponse {

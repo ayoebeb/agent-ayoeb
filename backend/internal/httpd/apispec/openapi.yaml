@@ -2315,6 +2315,284 @@ paths:
       summary: Ask the agent to undo one of its recorded Autopilot decisions
       tags:
       - autopilot
+  /api/v1/autopilot/learning:
+    get:
+      operationId: getAutopilotLearning
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotLearningResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'What Autopilot learned about how the owner decides: the profile rules
+        and the stored decisions'
+      tags:
+      - autopilot
+  /api/v1/autopilot/learning/import:
+    post:
+      operationId: importAutopilotLearning
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotLearningImportResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read past orchestrator conversations once and store the question and
+        answer pairs found
+      tags:
+      - autopilot
+  /api/v1/autopilot/learning/pairs/{pairId}:
+    delete:
+      operationId: deleteAutopilotLearningPair
+      parameters:
+      - description: Stored decision identifier.
+        in: path
+        name: pairId
+        required: true
+        schema:
+          description: Stored decision identifier.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Delete one stored decision
+      tags:
+      - autopilot
+  /api/v1/autopilot/learning/relearn:
+    post:
+      operationId: relearnAutopilotLearning
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotLearningRelearnResponse'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Update the profile now from the decisions it has not taken into account
+        yet (runs in the background)
+      tags:
+      - autopilot
+  /api/v1/autopilot/learning/rules:
+    post:
+      operationId: addAutopilotLearningRule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutopilotLearningRuleRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotLearningRuleResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Add a profile rule written by the owner
+      tags:
+      - autopilot
+  /api/v1/autopilot/learning/rules/{ruleId}:
+    delete:
+      operationId: deleteAutopilotLearningRule
+      parameters:
+      - description: Profile rule identifier, e.g. rule_1a2b3c4d.
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          description: Profile rule identifier, e.g. rule_1a2b3c4d.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Delete a profile rule; a learned rule is not brought back
+      tags:
+      - autopilot
+    patch:
+      operationId: editAutopilotLearningRule
+      parameters:
+      - description: Profile rule identifier, e.g. rule_1a2b3c4d.
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          description: Profile rule identifier, e.g. rule_1a2b3c4d.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutopilotLearningRuleEditRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotLearningRuleResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Edit a profile rule; it becomes the owner's own and learning never
+        rewrites it
+      tags:
+      - autopilot
   /api/v1/autopilot/stop:
     post:
       operationId: stopAllAutopilot
@@ -8203,6 +8481,64 @@ paths:
           description: Service Unavailable
       summary: Give a session one task to finish on its own, without waiting for the
         user
+      tags:
+      - autopilot
+  /api/v1/sessions/{sessionId}/autopilot/advice:
+    post:
+      operationId: adviseAutopilot
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutopilotAdviceRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutopilotAdviceResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: What the owner would choose for a question, from their profile and
+        the most similar past decisions
       tags:
       - autopilot
   /api/v1/sessions/{sessionId}/autopilot/criteria:
@@ -17088,6 +17424,24 @@ components:
       - status
       - scheduledFor
       type: object
+    AutopilotAdviceRequest:
+      properties:
+        options:
+          items:
+            type: string
+          type: array
+        question:
+          type: string
+      required:
+      - question
+      type: object
+    AutopilotAdviceResponse:
+      properties:
+        advice:
+          type: string
+      required:
+      - advice
+      type: object
     AutopilotCriteriaRequest:
       properties:
         criteria:
@@ -17099,7 +17453,21 @@ components:
       type: object
     AutopilotDecideRequest:
       properties:
+        basedOn:
+          description: Ids of the owner's past decisions this choice followed (from
+            the advice), at most 5.
+          items:
+            type: string
+          type: array
         choice:
+          type: string
+        confidence:
+          description: How sure the agent is that the owner would choose this. Low
+            means it took the safest option that can be undone.
+          enum:
+          - high
+          - medium
+          - low
           type: string
         question:
           type: string
@@ -17154,6 +17522,20 @@ components:
       type: object
     AutopilotEventResponse:
       properties:
+        basedOn:
+          description: 'For a decision: the past choices of the owner it followed,
+            as short lines.'
+          items:
+            type: string
+          type: array
+        confidence:
+          description: 'For a decision: how sure the agent was that the owner would
+            choose this.'
+          enum:
+          - high
+          - medium
+          - low
+          type: string
         createdAt:
           format: date-time
           type: string
@@ -17199,6 +17581,172 @@ components:
       - summary
       - detail
       - createdAt
+      - basedOn
+      type: object
+    AutopilotLearningImportResponse:
+      properties:
+        added:
+          description: Pairs that were new.
+          type: integer
+        files:
+          description: Orchestrator transcripts read.
+          type: integer
+        pairs:
+          description: Question and answer pairs found.
+          type: integer
+        skipped:
+          description: Transcripts skipped (too large or unreadable).
+          type: integer
+      required:
+      - files
+      - pairs
+      - added
+      - skipped
+      type: object
+    AutopilotLearningPairResponse:
+      properties:
+        answer:
+          type: string
+        at:
+          format: date-time
+          type: string
+        folded:
+          description: True once the profile took this decision into account.
+          type: boolean
+        id:
+          type: string
+        options:
+          items:
+            type: string
+          type: array
+        project:
+          type: string
+        question:
+          type: string
+        recommendation:
+          type: string
+        source:
+          description: 'live: captured as you answered. import: found in a past conversation.
+            correction: you undid a choice Autopilot made.'
+          enum:
+          - live
+          - import
+          - correction
+          type: string
+      required:
+      - id
+      - project
+      - at
+      - source
+      - question
+      - options
+      - recommendation
+      - answer
+      - folded
+      type: object
+    AutopilotLearningRelearnResponse:
+      properties:
+        started:
+          description: False when no model is available or an update is already running.
+          type: boolean
+      required:
+      - started
+      type: object
+    AutopilotLearningResponse:
+      properties:
+        canLearn:
+          description: False when no model can be reached to rewrite the profile.
+          type: boolean
+        importedAt:
+          description: When the history import last ran.
+          format: date-time
+          type:
+          - "null"
+          - string
+        lastError:
+          description: Why the last profile update failed; empty when it did not.
+          type: string
+        learnedAt:
+          description: When the profile was last rewritten.
+          format: date-time
+          type:
+          - "null"
+          - string
+        learning:
+          description: True while a profile update is running.
+          type: boolean
+        pairs:
+          description: The newest decisions first, at most 300.
+          items:
+            $ref: '#/components/schemas/AutopilotLearningPairResponse'
+          type: array
+        rules:
+          items:
+            $ref: '#/components/schemas/AutopilotLearningRuleResponse'
+          type: array
+        totalPairs:
+          type: integer
+        unfoldedPairs:
+          description: Decisions the profile has not taken into account yet.
+          type: integer
+      required:
+      - rules
+      - pairs
+      - totalPairs
+      - unfoldedPairs
+      - lastError
+      - canLearn
+      - learning
+      type: object
+    AutopilotLearningRuleEditRequest:
+      properties:
+        text:
+          type: string
+      required:
+      - text
+      type: object
+    AutopilotLearningRuleRequest:
+      properties:
+        scope:
+          description: '"global" or a project id; empty means global.'
+          type: string
+        text:
+          type: string
+      required:
+      - scope
+      - text
+      type: object
+    AutopilotLearningRuleResponse:
+      properties:
+        id:
+          type: string
+        origin:
+          description: 'learned: Autopilot wrote it from your decisions. owner: you
+            wrote or edited it; learning never rewrites it.'
+          enum:
+          - learned
+          - owner
+          - correction
+          type: string
+        scope:
+          description: '"global", or the project the rule is for.'
+          type: string
+        tag:
+          description: usage_limit_switch marks the rule that lets Autopilot move
+            work to another account on a usage limit; usage_limit_wait marks one the
+            owner rewrote, which keeps Autopilot waiting for the reset.
+          type: string
+        text:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - scope
+      - text
+      - origin
+      - updatedAt
       type: object
     AutopilotMergedPRResponse:
       properties:

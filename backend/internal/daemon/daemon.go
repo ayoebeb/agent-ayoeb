@@ -908,18 +908,32 @@ func Run(buildVersion string) error {
 	// waits on the user. It hears every turn that ends and every approval that
 	// is raised, and takes an orchestrator's declared wait instead of notifying.
 	autopilotDelivery := reportSemanticDelivery{chat: chatSvc, sessions: reportSessions, store: store}
+	// What Autopilot learns about how the owner decides stays under the data dir.
+	autopilotLearning := newAutopilotLearning(cfg.DataDir, store, log)
+	var autopilotAdvice autopilot.Advisor
+	var autopilotLearningAPI controllers.AutopilotLearningService
+	if autopilotLearning != nil {
+		autopilotAdvice = autopilotAdvisor{svc: autopilotLearning}
+		autopilotLearningAPI = autopilotLearning
+		orchestratorWaiting.SetAnswerRecorder(autopilotLearning)
+	}
 	autopilotSvc := autopilot.New(autopilot.Deps{
-		Store:        store,
-		Messenger:    autopilotMessenger{sessions: sessionSvc},
-		Interrupter:  autopilotDelivery,
-		Notifier:     notificationWriter,
-		Progress:     autopilot.GitProgress{},
-		Approvals:    chatSvc,
-		Logger:       log,
-		UsageLimited: autopilotUsageLimited(store, time.Now),
+		Advisor:         autopilotAdvice,
+		ParkDigestEvery: autopilotParkDigestEvery,
+		Store:           store,
+		Messenger:       autopilotMessenger{sessions: sessionSvc},
+		Interrupter:     autopilotDelivery,
+		Notifier:        notificationWriter,
+		Progress:        autopilot.GitProgress{},
+		Approvals:       chatSvc,
+		Logger:          log,
+		UsageLimited:    autopilotUsageLimited(store, time.Now),
 	})
 	autopilotRef.Store(autopilotSvc)
 	orchestratorWaiting.SetAutopilot(autopilotSvc)
+	if autopilotLearning != nil {
+		usageLimitSvc.SetAutopilotPolicy(usageLimitProfile{ap: autopilotSvc, learn: autopilotLearning})
+	}
 	chatSvc.SetApprovalObserver(autopilotApprovals{svc: autopilotSvc})
 	lcStack.LCM.AddTurnEndObserver(autopilotSvc)
 	go func() {
@@ -1343,6 +1357,7 @@ func Run(buildVersion string) error {
 		Notifications:          notifier,
 		OrchestratorWaiting:    orchestratorWaiting,
 		Autopilot:              autopilotSvc,
+		AutopilotLearning:      autopilotLearningAPI,
 		Reports:                reportSvc,
 		NotificationStream:     notificationHub,
 		Push:                   pushRegistry,

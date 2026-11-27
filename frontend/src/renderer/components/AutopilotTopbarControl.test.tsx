@@ -61,6 +61,7 @@ const event = (overrides: Partial<AutopilotEvent> = {}): AutopilotEvent => ({
 	iteration: 1,
 	summary: "Patch or refactor? → Patch the one function",
 	detail: "The task is one bug",
+	basedOn: [],
 	createdAt: "2026-11-17T09:10:00Z",
 	...overrides,
 });
@@ -253,6 +254,19 @@ describe("a parked run", () => {
 		const decisions = await screen.findByTestId("autopilot-decisions");
 		expect(decisions).toHaveTextContent("Patch or refactor? → Patch");
 		expect(decisions).toHaveTextContent("Smaller risk");
+	});
+
+	it("shows which of the owner's past choices a decision followed, and flags a low-confidence one", async () => {
+		const parked = parkedView();
+		parked.report!.decisions = [
+			{ ...parked.report!.decisions[0], basedOn: ["Merge small fix? → ja zonder CI wachten"], confidence: "low" },
+		];
+		viewMock.mockReturnValue(parked);
+		renderControl();
+		await userEvent.click(screen.getByRole("button", { name: "Autopilot parked · needs you" }));
+
+		expect(await screen.findByTestId("autopilot-decision-basis")).toHaveTextContent("Based on your past choices: Merge small fix? → ja zonder CI wachten");
+		expect(screen.getByTestId("autopilot-decision-low-confidence")).toHaveTextContent("Low confidence: it took the safest option that can be undone.");
 	});
 
 	it("lets the user undo a decision, and shows an undone one as undone without a button", async () => {

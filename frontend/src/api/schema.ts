@@ -911,6 +911,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/autopilot/learning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What Autopilot learned about how the owner decides: the profile rules and the stored decisions */
+        get: operations["getAutopilotLearning"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autopilot/learning/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read past orchestrator conversations once and store the question and answer pairs found */
+        post: operations["importAutopilotLearning"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autopilot/learning/pairs/{pairId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one stored decision */
+        delete: operations["deleteAutopilotLearningPair"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autopilot/learning/relearn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update the profile now from the decisions it has not taken into account yet (runs in the background) */
+        post: operations["relearnAutopilotLearning"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autopilot/learning/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a profile rule written by the owner */
+        post: operations["addAutopilotLearningRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/autopilot/learning/rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a profile rule; a learned rule is not brought back */
+        delete: operations["deleteAutopilotLearningRule"];
+        options?: never;
+        head?: never;
+        /** Edit a profile rule; it becomes the owner's own and learning never rewrites it */
+        patch: operations["editAutopilotLearningRule"];
+        trace?: never;
+    };
     "/api/v1/autopilot/stop": {
         parameters: {
             query?: never;
@@ -2953,6 +3056,23 @@ export interface paths {
         put?: never;
         /** Give a session one task to finish on its own, without waiting for the user */
         post: operations["startAutopilot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/autopilot/advice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** What the owner would choose for a question, from their profile and the most similar past decisions */
+        post: operations["adviseAutopilot"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5752,12 +5872,26 @@ export interface components {
             /** @enum {string} */
             status: "pending" | "spawning" | "running" | "completed" | "failed";
         };
+        AutopilotAdviceRequest: {
+            options?: string[];
+            question: string;
+        };
+        AutopilotAdviceResponse: {
+            advice: string;
+        };
         AutopilotCriteriaRequest: {
             /** @description A short checklist that says exactly when the task is done and how it will be proved. */
             criteria: string;
         };
         AutopilotDecideRequest: {
+            /** @description Ids of the owner's past decisions this choice followed (from the advice), at most 5. */
+            basedOn?: string[];
             choice: string;
+            /**
+             * @description How sure the agent is that the owner would choose this. Low means it took the safest option that can be undone.
+             * @enum {string}
+             */
+            confidence?: "high" | "medium" | "low";
             question: string;
             why: string;
         };
@@ -5780,6 +5914,13 @@ export interface components {
             run: components["schemas"]["AutopilotRunResponse"];
         };
         AutopilotEventResponse: {
+            /** @description For a decision: the past choices of the owner it followed, as short lines. */
+            basedOn: string[];
+            /**
+             * @description For a decision: how sure the agent was that the owner would choose this.
+             * @enum {string}
+             */
+            confidence?: "high" | "medium" | "low";
             /** Format: date-time */
             createdAt: string;
             detail: string;
@@ -5795,6 +5936,84 @@ export interface components {
             runId: string;
             sessionId: string;
             summary: string;
+        };
+        AutopilotLearningImportResponse: {
+            /** @description Pairs that were new. */
+            added: number;
+            /** @description Orchestrator transcripts read. */
+            files: number;
+            /** @description Question and answer pairs found. */
+            pairs: number;
+            /** @description Transcripts skipped (too large or unreadable). */
+            skipped: number;
+        };
+        AutopilotLearningPairResponse: {
+            answer: string;
+            /** Format: date-time */
+            at: string;
+            /** @description True once the profile took this decision into account. */
+            folded: boolean;
+            id: string;
+            options: string[];
+            project: string;
+            question: string;
+            recommendation: string;
+            /**
+             * @description live: captured as you answered. import: found in a past conversation. correction: you undid a choice Autopilot made.
+             * @enum {string}
+             */
+            source: "live" | "import" | "correction";
+        };
+        AutopilotLearningRelearnResponse: {
+            /** @description False when no model is available or an update is already running. */
+            started: boolean;
+        };
+        AutopilotLearningResponse: {
+            /** @description False when no model can be reached to rewrite the profile. */
+            canLearn: boolean;
+            /**
+             * Format: date-time
+             * @description When the history import last ran.
+             */
+            importedAt?: null | string;
+            /** @description Why the last profile update failed; empty when it did not. */
+            lastError: string;
+            /**
+             * Format: date-time
+             * @description When the profile was last rewritten.
+             */
+            learnedAt?: null | string;
+            /** @description True while a profile update is running. */
+            learning: boolean;
+            /** @description The newest decisions first, at most 300. */
+            pairs: components["schemas"]["AutopilotLearningPairResponse"][];
+            rules: components["schemas"]["AutopilotLearningRuleResponse"][];
+            totalPairs: number;
+            /** @description Decisions the profile has not taken into account yet. */
+            unfoldedPairs: number;
+        };
+        AutopilotLearningRuleEditRequest: {
+            text: string;
+        };
+        AutopilotLearningRuleRequest: {
+            /** @description "global" or a project id; empty means global. */
+            scope: string;
+            text: string;
+        };
+        AutopilotLearningRuleResponse: {
+            id: string;
+            /**
+             * @description learned: Autopilot wrote it from your decisions. owner: you wrote or edited it; learning never rewrites it.
+             * @enum {string}
+             */
+            origin: "learned" | "owner" | "correction";
+            /** @description "global", or the project the rule is for. */
+            scope: string;
+            /** @description usage_limit_switch marks the rule that lets Autopilot move work to another account on a usage limit; usage_limit_wait marks one the owner rewrote, which keeps Autopilot waiting for the reset. */
+            tag?: string;
+            text: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         AutopilotMergedPRResponse: {
             /** Format: date-time */
@@ -12720,6 +12939,393 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getAutopilotLearning: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotLearningResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    importAutopilotLearning: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotLearningImportResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    deleteAutopilotLearningPair: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Stored decision identifier. */
+                pairId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    relearnAutopilotLearning: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotLearningRelearnResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    addAutopilotLearningRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutopilotLearningRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotLearningRuleResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    deleteAutopilotLearningRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Profile rule identifier, e.g. rule_1a2b3c4d. */
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    editAutopilotLearningRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Profile rule identifier, e.g. rule_1a2b3c4d. */
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutopilotLearningRuleEditRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotLearningRuleResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20399,6 +21005,78 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    adviseAutopilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutopilotAdviceRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotAdviceResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

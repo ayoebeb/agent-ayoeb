@@ -55,9 +55,11 @@ func (s *Service) maintain(ctx context.Context) {
 			s.mu.Lock()
 			s.finishLocked(ctx, run.ID, domain.AutopilotStopped, domain.AutopilotEndSessionEnded, "Autopilot ended: the session ended")
 			s.mu.Unlock()
+			s.flushDigest(ctx, run)
 			s.resolveParkedNotifications(ctx, run)
 			continue
 		}
+		s.digestParked(ctx, run, now)
 		switch run.State {
 		case domain.AutopilotPausedUsageLimit:
 			if limited, err := s.limited(ctx, run.SessionID); err == nil && !limited {
@@ -163,6 +165,7 @@ func (s *Service) judgeRun(ctx context.Context, run domain.AutopilotRun, force b
 		s.mu.Lock()
 		s.finishLocked(ctx, run.ID, domain.AutopilotStopped, domain.AutopilotEndSessionEnded, "Autopilot ended: the session ended")
 		s.mu.Unlock()
+		s.flushDigest(ctx, run)
 		return
 	}
 	// Only the end of a turn is judged: a session that is working, or waiting on

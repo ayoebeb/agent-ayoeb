@@ -1,4 +1,8 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AutopilotLearnedDialog } from "../AutopilotLearnedDialog";
+import { Button } from "../ui/button";
+import { useAutopilotLearning } from "../../hooks/useAutopilotLearning";
 import { useSettings, useUpdateAutopilotMaxIterations } from "../../hooks/useSettings";
 import { SettingsOptionMenu, type SettingsOption } from "./SettingsOptionMenu";
 import { SettingsRow } from "./SettingsRow";
@@ -16,6 +20,8 @@ export function AutopilotSection() {
 	const { t } = useTranslation();
 	const { settings, isLoading } = useSettings();
 	const { update, saving, error } = useUpdateAutopilotMaxIterations();
+	const [learnedOpen, setLearnedOpen] = useState(false);
+	const { data: learning } = useAutopilotLearning(settings?.autopilotMaxIterations !== undefined);
 	const current = settings?.autopilotMaxIterations;
 	if (current === undefined) return null;
 
@@ -45,6 +51,19 @@ export function AutopilotSection() {
 					disabled={isLoading || saving}
 				/>
 			</SettingsRow>
+			<SettingsRow
+				label={t("settings.autopilot.learned.label")}
+				description={
+					learning
+						? t("settings.autopilot.learned.summary", { rules: learning.rules.length, decisions: learning.totalPairs })
+						: t("settings.autopilot.learned.description")
+				}
+			>
+				<Button type="button" variant="secondary" onClick={() => setLearnedOpen(true)}>
+					{t("settings.autopilot.learned.open")}
+				</Button>
+			</SettingsRow>
+			<AutopilotLearnedDialog open={learnedOpen} onOpenChange={setLearnedOpen} />
 		</SettingsSection>
 	);
 }

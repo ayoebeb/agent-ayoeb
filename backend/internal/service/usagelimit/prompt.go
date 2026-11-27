@@ -179,7 +179,9 @@ func (s *Service) openPromptSessions(ctx context.Context, p domain.UsageLimitPro
 	seen := map[entry]bool{}
 	for _, stop := range stops {
 		key := entry{stop.SessionID, stop.ReviewID}
-		if seen[key] {
+		// A stop that already continued (an Autopilot session moved by the owner's
+		// profile, for one) is not part of the question any more.
+		if seen[key] || stop.ResumeState == domain.UsageLimitStopResumed {
 			continue
 		}
 		rec, found, err := s.store.GetSession(ctx, stop.SessionID)
@@ -333,6 +335,37 @@ func (s *Service) Wait(ctx context.Context, id string) error {
 		return ErrPromptAnswered
 	}
 	return nil
+}
+
+// moveByProfile does, for one stopped session Autopilot covers, what the owner's
+// profile says: it moves that session (or its stopped reviewer) to the signed-in
+// account with the most room. It never answers the window's prompt, which speaks
+// for every session stopped on the account: the ones Autopilot does not cover
+// stay the owner's choice. Without an account with room the session waits.
+func (s *Service) moveByProfile(ctx context.Context, stop domain.UsageLimitStop, harness domain.AgentHarness) {
+	if s.lister == nil || s.mover == nil || stop.AccountKey == "" {
+		return
+	}
+	provider, ok := domain.AgentAccountProviderFor(harness)
+	if !ok {
+		return
+	}
+	targets, _, err := s.switchTargets(ctx, string(provider), stop.AccountKey)
+	if err != nil || len(targets) == 0 || targets[0].Full {
+		return
+	}
+	target := targets[0].AccountID
+	if stop.ReviewID != "" {
+		err = s.moveReviewer(ctx, PromptSession{ID: stop.SessionID, ReviewID: stop.ReviewID}, target)
+	} else {
+		err = s.mover.MoveToAccount(ctx, stop.SessionID, target)
+		if errors.Is(err, ports.ErrAgentAccountUnchanged) {
+			_, err = s.ResumeAfterAccountMove(ctx, stop.SessionID, target)
+		}
+	}
+	if err != nil {
+		s.log.Warn("usage limit: switch by the owner's profile", "session", stop.SessionID, "err", err)
+	}
 }
 
 // ensurePrompt records the owner prompt of a limit window the first time one of
