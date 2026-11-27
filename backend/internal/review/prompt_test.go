@@ -47,7 +47,8 @@ func TestReviewPromptRequiresInlineCommentsForRequiredChanges(t *testing.T) {
 		t.Fatalf("native review prompts must identify their owned implementation scope:\n%s\n%s", prompt, system)
 	}
 	for _, want := range []string{
-		"The worker receives only your inline comments, never the summary",
+		"The worker receives your inline comments, treats each one as a required change",
+		"every inline comment you could not post as \"findings\"",
 		"Put every finding that requires a change in \"comments\" as its own inline comment",
 		"including design-level findings",
 		"Leave optional or nice-to-have suggestions out of \"comments\"",

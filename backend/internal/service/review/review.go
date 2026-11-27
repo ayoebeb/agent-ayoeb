@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -92,6 +93,10 @@ type Service struct {
 	notifications      reviewNotificationSink
 	prRefresher        PRRefresher
 	reviewRefresher    ThreadRefresher
+	deliverer          ResultDeliverer
+	// reportedUndelivered holds the runs already reported as undelivered.
+	reportedMu          sync.Mutex
+	reportedUndelivered map[string]bool
 	// engineTrigger indirects the engine's source-tagged trigger so the
 	// instrumented path can be exercised without standing up a full engine and
 	// its eighteen-method store. Defaulted in New; only tests replace it.
@@ -111,9 +116,12 @@ func (s *Service) RecoverRunningReviews(ctx context.Context, stagger time.Durati
 }
 
 // SweepStalledReviews fails and retries once the reviews whose reviewer stopped
-// working, and returns the ones to report.
+// working, retries the results their worker has not received, and returns the
+// ones to report.
 func (s *Service) SweepStalledReviews(ctx context.Context) ([]reviewcore.StalledReview, error) {
-	return s.engine.SweepStalledReviews(ctx)
+	stalled, err := s.engine.SweepStalledReviews(ctx)
+	undelivered, deliveryErr := s.retryResultDeliveries(ctx)
+	return append(stalled, undelivered...), errors.Join(err, deliveryErr)
 }
 
 // RecoverChatReviewers restores durable reviewer-owned Chat controllers after
@@ -135,6 +143,8 @@ type Store interface {
 	ListPRReviews(ctx context.Context, prURL string) ([]domain.PullRequestReview, error)
 	ListPRComments(ctx context.Context, prURL string) ([]domain.PullRequestComment, error)
 	MarkPRCommentResolved(ctx context.Context, prURL, commentID string) (bool, error)
+	MarkReviewRunDelivered(ctx context.Context, id string, deliveredAt time.Time) (bool, error)
+	ListUndeliveredReviewRuns(ctx context.Context) ([]domain.ReviewRun, error)
 }
 
 // PRRefresher fetches one pull request fresh from its provider and records it
@@ -825,9 +835,32 @@ func (s *Service) ApplyReviewActivitySignal(ctx context.Context, reviewSessionID
 	return nil
 }
 
-// notPostedNote ends the body of a result that has no review on the pull
-// request.
-const notPostedNote = "_AO: no review was posted on the pull request (posting failed or was skipped). This result is recorded only in AO, so the worker did not receive it through the pull request._"
+// notPostedPrefix starts the line that ends the body of a result with no review
+// on the pull request.
+const notPostedPrefix = "_AO: posting the review on the pull request failed or was skipped: "
+
+// unpostedBody is the body recorded and delivered for a result that is not on
+// the pull request, so AO holds the only copy of its inline findings.
+func unpostedBody(body string, findings []domain.ReviewFinding, postError string) string {
+	var b strings.Builder
+	b.WriteString(body)
+	if len(findings) > 0 {
+		b.WriteString("\n\n### Inline findings\n")
+		for _, f := range findings {
+			location := f.Path
+			if f.Line > 0 {
+				location = fmt.Sprintf("%s:%d", f.Path, f.Line)
+			}
+			fmt.Fprintf(&b, "\n- `%s`: %s", location, strings.TrimSpace(f.Body))
+		}
+	}
+	reason := strings.Join(strings.Fields(postError), " ")
+	if reason == "" {
+		reason = "the reviewer gave no reason"
+	}
+	b.WriteString("\n\n" + notPostedPrefix + reason + "_")
+	return strings.TrimSpace(b.String())
+}
 
 // SubmittedReview is one review result supplied by the reviewer CLI.
 type SubmittedReview struct {
@@ -835,6 +868,10 @@ type SubmittedReview struct {
 	Verdict        domain.ReviewVerdict
 	Body           string
 	GithubReviewID string
+	// Findings and PostError matter only when no review was posted: the findings
+	// then reach the worker from AO alone, with why posting failed.
+	Findings  []domain.ReviewFinding
+	PostError string
 }
 
 // Submit records a reviewer's result for a specific worker review pass.
@@ -889,10 +926,14 @@ func (s *Service) SubmitMany(ctx context.Context, workerID domain.SessionID, rev
 		}
 		return nil, fmt.Errorf("%w: no submittable review runs in submission", ErrInvalid)
 	}
-	// The result reaches the worker through the PR itself: the reviewer posts
-	// its review on the provider, and the SCM observer forwards unresolved
-	// review comments to the worker like any other reviewer's. AO does not send
-	// a second, separate verdict message.
+	// The worker gets the result from AO whether or not the review reached the
+	// pull request. A failure here never fails the submission: the watchdog
+	// sweep retries and reports it.
+	for i := range runs {
+		if reason := s.deliverResult(ctx, &runs[i]); reason != "" {
+			slog.Default().WarnContext(ctx, "review result not delivered", "session", runs[i].SessionID, "run", runs[i].ID, "reason", reason)
+		}
+	}
 	return runs, nil
 }
 
@@ -925,7 +966,7 @@ func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, revi
 	// (an expired login, HTTP 401) is still recorded, and says it was not posted.
 	recorded := body
 	if githubReviewID == "" {
-		recorded = strings.TrimSpace(body + "\n\n" + notPostedNote)
+		recorded = unpostedBody(body, review.Findings, review.PostError)
 	}
 
 	switch run.Status {

@@ -81,7 +81,14 @@ handles the case where an earlier connection dropped after committing the result
 
 Submitting does not depend on GitHub: without `--review-id` (posting failed,
 for example with HTTP 401) the verdict is still recorded, and the body says that
-nothing was posted on the pull request.
+nothing was posted on the pull request. A `--reviews` item can then carry
+`postError` (why posting failed) and `findings` (`path`, `line`, `body`), which
+are added to the body.
+
+Orchestrator sends every recorded result to the worker when the session's review
+auto-inject is on. For a posted review it sends the verdict and body, and the
+inline comments follow from the pull request. A result the worker does not take
+is retried for 24 hours and reported once to the orchestrator.
 
 **Examples:**
 

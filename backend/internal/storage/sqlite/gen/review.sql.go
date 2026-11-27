@@ -994,6 +994,76 @@ func (q *Queries) ListRunningReviewRunsBySession(ctx context.Context, sessionID 
 	return items, nil
 }
 
+const listUndeliveredReviewRuns = `-- name: ListUndeliveredReviewRuns :many
+SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
+FROM review_run AS r
+WHERE r.status = 'complete' AND r.verdict != '' AND r.delivered_at IS NULL AND r.auto_inject_review
+  AND NOT EXISTS (
+    SELECT 1 FROM review_run AS n
+    WHERE n.session_id = r.session_id AND n.pr_url = r.pr_url AND n.harness = r.harness
+      AND n.verdict != '' AND n.created_at > r.created_at
+  )
+ORDER BY r.created_at ASC, r.id ASC
+`
+
+// Results still owed to their worker. A newer result of the same reviewer on the
+// same PR supersedes an older one.
+func (q *Queries) ListUndeliveredReviewRuns(ctx context.Context) ([]ReviewRun, error) {
+	rows, err := q.db.QueryContext(ctx, listUndeliveredReviewRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReviewRun{}
+	for rows.Next() {
+		var i ReviewRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReviewID,
+			&i.SessionID,
+			&i.Harness,
+			&i.PRURL,
+			&i.TargetSha,
+			&i.Status,
+			&i.Verdict,
+			&i.Body,
+			&i.CreatedAt,
+			&i.GithubReviewID,
+			&i.DeliveredAt,
+			&i.BatchID,
+			&i.AutoInjectReview,
+			&i.TriggerSource,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markReviewRunDelivered = `-- name: MarkReviewRunDelivered :execrows
+UPDATE review_run SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL
+`
+
+type MarkReviewRunDeliveredParams struct {
+	DeliveredAt sql.NullTime
+	ID          string
+}
+
+func (q *Queries) MarkReviewRunDelivered(ctx context.Context, arg MarkReviewRunDeliveredParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markReviewRunDelivered, arg.DeliveredAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const pauseRunningReviewRunsByReview = `-- name: PauseRunningReviewRunsByReview :execrows
 UPDATE review_run SET status = 'paused', body = ? WHERE review_id = ? AND status = 'running' AND verdict = ''
 `

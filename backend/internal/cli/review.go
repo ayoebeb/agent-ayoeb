@@ -90,10 +90,19 @@ type reviewRunResponse struct {
 
 // submitReviewItem mirrors controllers.SubmitReviewItem.
 type submitReviewItem struct {
-	RunID          string `json:"runId"`
-	Verdict        string `json:"verdict"`
-	Body           string `json:"body,omitempty"`
-	GithubReviewID string `json:"githubReviewId,omitempty"`
+	RunID          string          `json:"runId"`
+	Verdict        string          `json:"verdict"`
+	Body           string          `json:"body,omitempty"`
+	GithubReviewID string          `json:"githubReviewId,omitempty"`
+	Findings       []reviewFinding `json:"findings,omitempty"`
+	PostError      string          `json:"postError,omitempty"`
+}
+
+// reviewFinding mirrors domain.ReviewFinding.
+type reviewFinding struct {
+	Path string `json:"path"`
+	Line int    `json:"line,omitempty"`
+	Body string `json:"body"`
 }
 
 // submitReviewRequest mirrors controllers.SubmitReviewInput.

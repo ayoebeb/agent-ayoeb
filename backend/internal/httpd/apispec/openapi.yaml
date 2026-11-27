@@ -23882,6 +23882,18 @@ components:
         turnId:
           type: string
       type: object
+    ReviewFinding:
+      properties:
+        body:
+          type: string
+        line:
+          type: integer
+        path:
+          type: string
+      required:
+      - path
+      - body
+      type: object
     ReviewRun:
       properties:
         autoInjectReview:
@@ -26294,8 +26306,17 @@ components:
         body:
           description: Review body recorded by AO. Required for changes_requested.
           type: string
+        findings:
+          description: Inline findings, delivered to the worker by AO when no review
+            was posted.
+          items:
+            $ref: '#/components/schemas/ReviewFinding'
+          type: array
         githubReviewId:
           description: Id of the GitHub PR review the reviewer posted, if any.
+          type: string
+        postError:
+          description: Why posting the review on the pull request failed.
           type: string
         runId:
           description: Review run id being completed.

@@ -264,6 +264,7 @@ var shippedMigrations = map[int64]string{
 	20261124000000000: "20261124000000000_usage_limit_review_stops.sql",
 	20261124120000000: "20261124120000000_agent_stop_marks.sql",
 	20261124130000000: "20261124130000000_autopilot_runs.sql",
+	20261127000000000: "20261127000000000_backfill_review_result_delivered.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they

@@ -97,6 +97,9 @@ type SubmitReviewItem struct {
 	Verdict        string `json:"verdict" description:"Review verdict: approved or changes_requested."`
 	Body           string `json:"body,omitempty" description:"Review body recorded by AO. Required for changes_requested."`
 	GithubReviewID string `json:"githubReviewId,omitempty" description:"Id of the GitHub PR review the reviewer posted, if any."`
+	// Findings and PostError are used only when GithubReviewID is empty.
+	Findings  []domain.ReviewFinding `json:"findings,omitempty" description:"Inline findings, delivered to the worker by AO when no review was posted."`
+	PostError string                 `json:"postError,omitempty" description:"Why posting the review on the pull request failed."`
 }
 
 // SubmitReviewInput is the body of POST /api/v1/sessions/{sessionId}/reviews/submit.
@@ -427,6 +430,8 @@ func (c *ReviewsController) submit(w http.ResponseWriter, r *http.Request) {
 				Verdict:        domain.ReviewVerdict(item.Verdict),
 				Body:           item.Body,
 				GithubReviewID: item.GithubReviewID,
+				Findings:       item.Findings,
+				PostError:      item.PostError,
 			})
 		}
 	} else {

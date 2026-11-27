@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,13 +159,14 @@ type reviewerRuntime interface {
 // runtime. The reviewer reuses the worker's worktree (a fresh session worktree
 // would branch off the default branch and so would not contain the PR changes).
 type agentLauncher struct {
-	reviewers  ports.ReviewerResolver
-	runtime    reviewerRuntime
-	dataDir    string
-	runFile    string
-	auth       agentAuthResolver
-	executable func() (string, error)
-	chat       ReviewerChatController
+	githubToken GitHubTokenFunc
+	reviewers   ports.ReviewerResolver
+	runtime     reviewerRuntime
+	dataDir     string
+	runFile     string
+	auth        agentAuthResolver
+	executable  func() (string, error)
+	chat        ReviewerChatController
 	// defaultModel picks the model of a reviewer launched with none configured.
 	defaultModel DefaultModelFunc
 }
@@ -237,6 +239,36 @@ func WithRunFilePath(path string) LauncherOption {
 	return func(l *agentLauncher) {
 		l.runFile = path
 	}
+}
+
+// GitHubTokenFunc returns the token of the computer's gh login, as `gh auth
+// token` prints it under env.
+type GitHubTokenFunc func(ctx context.Context, env map[string]string) (string, error)
+
+// WithGitHubToken hands sandboxed reviewers the gh login workers use.
+func WithGitHubToken(token GitHubTokenFunc) LauncherOption {
+	return func(l *agentLauncher) { l.githubToken = token }
+}
+
+// shareGitHubLogin puts the gh login in a Codex reviewer's environment. Its
+// Windows sandbox runs commands as another user, who cannot open the keyring
+// gh keeps the token in, so every gh call there fails with HTTP 401. A token
+// variable that is already set wins, as it does for workers.
+func (l *agentLauncher) shareGitHubLogin(ctx context.Context, harness domain.ReviewerHarness, env map[string]string) {
+	if l.githubToken == nil || harness != domain.ReviewerCodex {
+		return
+	}
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if env[name] != "" || os.Getenv(name) != "" {
+			return
+		}
+	}
+	token, err := l.githubToken(ctx, env)
+	if token = strings.TrimSpace(token); err != nil || token == "" {
+		slog.Default().WarnContext(ctx, "reviewer starts without a GitHub login: `gh auth token` gave none", "err", err)
+		return
+	}
+	env["GH_TOKEN"] = token
 }
 
 // NewLauncher builds the production reviewer launcher.
@@ -540,7 +572,7 @@ func (l *agentLauncher) startReviewerChat(ctx context.Context, spec LaunchSpec, 
 		providerID, err = l.chat.StartReviewChat(ctx, start)
 	}
 	if err != nil {
-		return LaunchResult{}, agentlaunch.RedactError(err, spec.ProjectEnv)
+		return LaunchResult{}, redactLaunchError(err, spec.ProjectEnv, start.Env)
 	}
 	return LaunchResult{HandleID: reviewerChatHandlePrefix + spec.ReviewSessionID, LaunchID: strings.TrimSpace(spec.LaunchID), AgentSessionID: providerID}, nil
 }
@@ -620,7 +652,7 @@ func (l *agentLauncher) launchReviewerTerminalWithMode(ctx context.Context, spec
 		Env:           env,
 	})
 	if err != nil {
-		return LaunchResult{}, fmt.Errorf("reviewer runtime: %w", agentlaunch.RedactError(err, spec.ProjectEnv))
+		return LaunchResult{}, fmt.Errorf("reviewer runtime: %w", redactLaunchError(err, spec.ProjectEnv, env))
 	}
 	if cmd.InitialMessage != "" && !spec.DeferInitialMessage {
 		if err := l.waitForPromptReadiness(ctx, reviewer, handle); err != nil {
@@ -635,6 +667,11 @@ func (l *agentLauncher) launchReviewerTerminalWithMode(ctx context.Context, spec
 		agentSessionID = strings.TrimSpace(spec.AgentSessionID)
 	}
 	return LaunchResult{HandleID: handle.ID, LaunchID: strings.TrimSpace(spec.LaunchID), AgentSessionID: agentSessionID, NativeResumed: nativeResumed}, nil
+}
+
+// redactLaunchError strips project secrets and the shared GitHub token.
+func redactLaunchError(err error, projectEnv, env map[string]string) error {
+	return agentlaunch.RedactError(agentlaunch.RedactError(err, projectEnv), map[string]string{"GH_TOKEN": env["GH_TOKEN"]})
 }
 
 func (l *agentLauncher) waitForPromptReadiness(ctx context.Context, reviewer ports.Reviewer, handle ports.RuntimeHandle) error {
@@ -738,6 +775,7 @@ func (l *agentLauncher) runtimeEnv(ctx context.Context, spec LaunchSpec, argv []
 			env[key] = value
 		}
 	}
+	l.shareGitHubLogin(ctx, spec.Harness, env)
 	return env
 }
 

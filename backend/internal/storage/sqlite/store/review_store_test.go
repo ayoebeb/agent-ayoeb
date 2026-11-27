@@ -937,3 +937,41 @@ func TestInsertReviewRunAllowsRerunAfterApproval(t *testing.T) {
 		t.Fatalf("approval history = %+v, %v", runs, err)
 	}
 }
+
+// A result stays owed to its worker until it is stamped delivered or a newer
+// result of the same reviewer replaces it.
+func TestListUndeliveredReviewRuns(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+	rec, err := s.CreateSession(ctx, sampleRecord("mer"))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := s.UpsertReview(ctx, domain.Review{ID: "rev-1", SessionID: rec.ID, ProjectID: rec.ProjectID, Harness: domain.ReviewerCodex, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("upsert review: %v", err)
+	}
+	for i, id := range []string{"old", "new"} {
+		if err := s.InsertReviewRun(ctx, domain.ReviewRun{
+			ID: id, ReviewID: "rev-1", SessionID: rec.ID, Harness: domain.ReviewerCodex, PRURL: "pr1", TargetSHA: id,
+			Status: domain.ReviewRunRunning, CreatedAt: now.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+		if _, err := s.UpdateReviewRunResult(ctx, id, domain.ReviewRunComplete, domain.VerdictChangesRequested, "fix", "", true); err != nil {
+			t.Fatalf("complete %s: %v", id, err)
+		}
+	}
+
+	owed, err := s.ListUndeliveredReviewRuns(ctx)
+	if err != nil || len(owed) != 1 || owed[0].ID != "new" {
+		t.Fatalf("owed = %+v, err %v, want only the newest result", owed, err)
+	}
+	if ok, err := s.MarkReviewRunDelivered(ctx, "new", now); err != nil || !ok {
+		t.Fatalf("mark delivered: ok %v, err %v", ok, err)
+	}
+	if owed, err = s.ListUndeliveredReviewRuns(ctx); err != nil || len(owed) != 0 {
+		t.Fatalf("owed after delivery = %+v, err %v", owed, err)
+	}
+}
