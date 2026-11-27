@@ -39,7 +39,7 @@ Do these steps in order:
 
     printf '%%s' '{ "reviews": [ { "runId": "<run-id>", "verdict": "<approved|changes_requested>", "githubReviewId": "<id-from-step-1-or-empty>", "body": "<your full review markdown>" } ] }' | ao review submit --session %s --reviews -
 
-Only if step 1 genuinely fails on the provider for a PR, still include that run in step 2 with an empty githubReviewId so the result is recorded.`,
+Step 2 never depends on step 1. If posting fails on the provider for a PR (for example HTTP 401 or an expired login), do not stop: still run step 2 and include that run with an empty githubReviewId, and say in its body that posting failed and why. Never end your turn without running step 2.`,
 		spec.WorkerID, queueText, spec.WorkerID)
 	return prompt, systemPrompt
 }

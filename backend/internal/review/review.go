@@ -12,8 +12,10 @@ import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,6 +81,9 @@ type Store interface {
 	FailPausedReviewRunsByReview(ctx stdctx.Context, reviewID, body string) (int64, error)
 	ListRecoverableChatReviews(ctx stdctx.Context) ([]domain.Review, error)
 	RecordReviewChatControllerError(ctx stdctx.Context, id, message string, now time.Time) (bool, error)
+	ListRunningReviewRuns(ctx stdctx.Context) ([]domain.ReviewRun, error)
+	RelaunchReviewRun(ctx stdctx.Context, id, batchID, body string) (bool, error)
+	ReviewChatLastActivity(ctx stdctx.Context, reviewID string) (time.Time, bool, error)
 }
 
 // Sessions resolves the worker session under review.
@@ -107,6 +112,10 @@ type Deps struct {
 	Launcher   Launcher
 	// ChatRecoveryDone gates operations that could mistake a recovering reviewer for an exited one.
 	ChatRecoveryDone <-chan struct{}
+	// RecoversRunningRuns says RecoverRunningReviews will be called after this
+	// start. Until it returns, a reviewer that did not survive the restart is
+	// left for it to relaunch instead of being failed as exited.
+	RecoversRunningRuns bool
 
 	// AccountEnv resolves the launch environment of a signed-in account for a
 	// worker, so a reviewer can be moved to another account. Optional.
@@ -130,6 +139,12 @@ type Engine struct {
 	newID      func() string
 
 	chatRecoveryDone <-chan struct{}
+
+	// restartPending is true until the restart recovery of running passes ran.
+	restartPending atomic.Bool
+	probe          reviewerProbe
+	// watches is the reviewer watchdog's memory, by review id.
+	watches map[string]*reviewerWatch
 
 	// triggerMu guards triggerLocks; triggerLocks holds one mutex per worker
 	// session so concurrent Trigger calls for the same worker serialise (see
@@ -169,7 +184,10 @@ func New(d Deps) *Engine {
 		triggerLocks: make(map[domain.SessionID]*sync.Mutex),
 
 		chatRecoveryDone: d.ChatRecoveryDone,
+		watches:          make(map[string]*reviewerWatch),
 	}
+	e.restartPending.Store(d.RecoversRunningRuns)
+	e.probe, _ = d.Launcher.(reviewerProbe)
 	e.launcher = envLauncher{Launcher: d.Launcher, eng: e}
 	return e
 }
@@ -1198,7 +1216,7 @@ func (e *Engine) restoreReviewerLocked(
 		}
 		// A Chat reviewer has no pane by design; RecoverChatReviewers restores
 		// its durable conversation, so a missing handle is not a dead reviewer.
-		if other.InterfaceMode == domain.ReviewerInterfaceChat {
+		if other.InterfaceMode == domain.ReviewerInterfaceChat || e.restartPending.Load() {
 			continue
 		}
 		if _, err := e.cancelStaleRunningRuns(ctx, workerID, other.Harness, other, true, runs); err != nil {
@@ -1214,6 +1232,11 @@ func (e *Engine) restoreReviewerLocked(
 	}
 	previousRuns := reviewRunsForHarness(runs, harness)
 	if !hasReview && len(previousRuns) == 0 {
+		return RestoreReviewerResult{}, nil
+	}
+	// An idle restore here would leave a running pass with a reviewer that was
+	// never told to continue; the restart recovery relaunches it with its task.
+	if e.restartPending.Load() && slices.ContainsFunc(previousRuns, func(r domain.ReviewRun) bool { return r.Status == domain.ReviewRunRunning }) {
 		return RestoreReviewerResult{}, nil
 	}
 	if hasReview && reviewRow.ReviewerHandleID != "" {
@@ -1649,7 +1672,7 @@ const reviewerExitedBeforeSubmission = "reviewer process exited before submittin
 // durable failed-run facts. Probe errors are intentionally ignored: an unknown
 // runtime state is not proof that the reviewer exited.
 func (e *Engine) reconcileExitedReviewer(ctx stdctx.Context, review *domain.Review, runs []domain.ReviewRun) (bool, error) {
-	if review.ID == "" || review.ReviewerHandleID == "" || review.ReviewerActivityState != domain.ActivityActive {
+	if review.ID == "" || review.ReviewerHandleID == "" || review.ReviewerActivityState != domain.ActivityActive || e.restartPending.Load() {
 		return false, nil
 	}
 	hasRunning := false

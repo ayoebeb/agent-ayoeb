@@ -739,15 +739,74 @@ func TestSettleReviewChatWorkClearsOrphanedEpoch(t *testing.T) {
 	}
 }
 
+func TestReviewRestartRecoveryQueries(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "restart-review")
+	session, err := s.CreateSession(ctx, sampleRecord("restart-review"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	review := domain.Review{ID: "restart-review", SessionID: session.ID, ProjectID: session.ProjectID, Harness: domain.ReviewerCodex, CreatedAt: now, UpdatedAt: now}
+	if err := s.UpsertReview(ctx, review); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []domain.ReviewRun{
+		{ID: "running", BatchID: "batch-1", TargetSHA: "sha-1", Status: domain.ReviewRunRunning},
+		{ID: "done", BatchID: "batch-1", TargetSHA: "sha-2", Status: domain.ReviewRunComplete, Verdict: domain.VerdictApproved},
+	} {
+		run.ReviewID, run.SessionID, run.Harness, run.CreatedAt = review.ID, session.ID, domain.ReviewerCodex, now
+		if err := s.InsertReviewRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runs, err := s.ListRunningReviewRuns(ctx)
+	if err != nil || len(runs) != 1 || runs[0].ID != "running" {
+		t.Fatalf("running = %+v, %v", runs, err)
+	}
+	if ok, err := s.RelaunchReviewRun(ctx, "running", "batch-2", "resumed"); err != nil || !ok {
+		t.Fatalf("relaunch running = %v, %v", ok, err)
+	}
+	if ok, err := s.RelaunchReviewRun(ctx, "done", "batch-2", "resumed"); err != nil || ok {
+		t.Fatalf("relaunch completed = %v, %v, want untouched", ok, err)
+	}
+	if run, _, err := s.GetReviewRun(ctx, "running"); err != nil || run.BatchID != "batch-2" || run.Body != "resumed" || run.Status != domain.ReviewRunRunning {
+		t.Fatalf("relaunched run = %+v, %v", run, err)
+	}
+
+	if at, ok, err := s.ReviewChatLastActivity(ctx, review.ID); err != nil || ok {
+		t.Fatalf("activity without a conversation = %v %v %v", at, ok, err)
+	}
+	conversation, err := s.CreateReviewConversation(ctx, "restart-conversation", review.ID, session.ProjectID, session.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.ClaimReviewChatController(ctx, review.ID, "provider", "generation", now); err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	sent := now.Add(time.Minute)
+	if ok, err := s.AppendReviewUserMessage(ctx, conversation.ID, session.ID, review.ID, "generation", domain.ConversationMessage{ID: "restart-message", ClientMessageID: "review-batch:batch-2", Text: "Review", Origin: domain.MessageOriginDaemon}, "restart-turn", sent); err != nil || !ok {
+		t.Fatalf("append: %v %v", ok, err)
+	}
+	if at, ok, err := s.ReviewChatLastActivity(ctx, review.ID); err != nil || !ok || !at.Equal(sent) {
+		t.Fatalf("activity = %v %v %v, want %v", at, ok, err, sent)
+	}
+}
+
 func TestReviewerChatCompletionSettlesOnlyItsUnsubmittedBatch(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		state domain.TurnState
 		stale bool
 		human bool
+		// providerError is the turn's own failure, kept in the reason.
+		providerError string
 	}{
 		{name: "completed", state: domain.TurnStateCompleted},
 		{name: "failed", state: domain.TurnStateFailed},
+		{name: "rejected model", state: domain.TurnStateFailed, providerError: "The model is not supported"},
 		{name: "interrupted", state: domain.TurnStateInterrupted},
 		{name: "obsolete controller", state: domain.TurnStateCompleted, stale: true},
 		{name: "human chat", state: domain.TurnStateCompleted, human: true},
@@ -797,7 +856,7 @@ func TestReviewerChatCompletionSettlesOnlyItsUnsubmittedBatch(t *testing.T) {
 					t.Fatalf("replacement: %v %v", ok, err)
 				}
 			}
-			if err := s.SettleTurn(ctx, conversation.ID, "provider-turn", tc.state, "", now.Add(time.Second)); err != nil {
+			if err := s.SettleTurn(ctx, conversation.ID, "provider-turn", tc.state, tc.providerError, now.Add(time.Second)); err != nil {
 				t.Fatal(err)
 			}
 			missing, _, err := s.GetReviewRun(ctx, "missing")
@@ -811,8 +870,12 @@ func TestReviewerChatCompletionSettlesOnlyItsUnsubmittedBatch(t *testing.T) {
 			if missing.Status != want {
 				t.Fatalf("unsubmitted status = %s, want %s", missing.Status, want)
 			}
-			if want == domain.ReviewRunFailed && missing.Body != "reviewer Chat turn ended without submitting a result" {
-				t.Fatalf("failure explanation = %q", missing.Body)
+			reason := "reviewer Chat turn ended without submitting a result"
+			if tc.providerError != "" {
+				reason += ": " + tc.providerError
+			}
+			if want == domain.ReviewRunFailed && missing.Body != reason {
+				t.Fatalf("failure explanation = %q, want %q", missing.Body, reason)
 			}
 			submitted, _, err := s.GetReviewRun(ctx, "submitted")
 			if err != nil || submitted.Status != domain.ReviewRunComplete || submitted.Verdict != domain.VerdictApproved || submitted.Body != "submitted result" {

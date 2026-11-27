@@ -79,6 +79,10 @@ seconds. Validation errors return immediately. If the daemon remains unavailable
 the command reports failure and can be repeated safely; daemon idempotency
 handles the case where an earlier connection dropped after committing the result.
 
+Submitting does not depend on GitHub: without `--review-id` (posting failed,
+for example with HTTP 401) the verdict is still recorded, and the body says that
+nothing was posted on the pull request.
+
 **Examples:**
 
 ```bash
@@ -155,7 +159,14 @@ By default the command turns on the worker session's review auto-inject. The
 reviewer posts an inline GitHub comment for each change it requires, and Orchestrator
 forwards those comments to the worker like any other review comments. An
 approval adds no comments, so check the verdict with `ao review ls`. If a run
-shows `failed` or `cancelled`, trigger again; nothing else reports it.
+shows `failed` or `cancelled`, trigger again; apart from the case below,
+nothing else reports it. The reason is the run's `body` in
+`ao review ls --json`.
+
+A reviewer that does not survive an Orchestrator restart is relaunched on the
+same head. A run with no reviewer activity for about 20 minutes fails as
+`reviewer stopped` and is retried once; if the retry cannot start or stops too,
+the orchestrator gets one automatic report.
 
 **Examples:**
 

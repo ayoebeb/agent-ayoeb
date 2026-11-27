@@ -104,6 +104,18 @@ type reviewNotificationSink interface {
 
 var _ Manager = (*Service)(nil)
 
+// RecoverRunningReviews relaunches, after a daemon start, the reviewers that did
+// not survive it, spacing the launches by stagger.
+func (s *Service) RecoverRunningReviews(ctx context.Context, stagger time.Duration) error {
+	return s.engine.RecoverRunningReviews(ctx, stagger)
+}
+
+// SweepStalledReviews fails and retries once the reviews whose reviewer stopped
+// working, and returns the ones to report.
+func (s *Service) SweepStalledReviews(ctx context.Context) ([]reviewcore.StalledReview, error) {
+	return s.engine.SweepStalledReviews(ctx)
+}
+
 // RecoverChatReviewers restores durable reviewer-owned Chat controllers after
 // daemon startup. It is intentionally part of the required manager contract so
 // startup wiring cannot silently omit it.
@@ -813,6 +825,10 @@ func (s *Service) ApplyReviewActivitySignal(ctx context.Context, reviewSessionID
 	return nil
 }
 
+// notPostedNote ends the body of a result that has no review on the pull
+// request.
+const notPostedNote = "_AO: no review was posted on the pull request (posting failed or was skipped). This result is recorded only in AO, so the worker did not receive it through the pull request._"
+
 // SubmittedReview is one review result supplied by the reviewer CLI.
 type SubmittedReview struct {
 	RunID          string
@@ -905,6 +921,13 @@ func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, revi
 		return domain.ReviewRun{}, fmt.Errorf("%w: review run %q does not belong to worker %q", ErrInvalid, runID, workerID)
 	}
 
+	// The verdict never depends on the provider: a pass whose posting failed
+	// (an expired login, HTTP 401) is still recorded, and says it was not posted.
+	recorded := body
+	if githubReviewID == "" {
+		recorded = strings.TrimSpace(body + "\n\n" + notPostedNote)
+	}
+
 	switch run.Status {
 	case domain.ReviewRunRunning, domain.ReviewRunPaused:
 		session, found, err := s.store.GetSession(ctx, workerID)
@@ -914,7 +937,7 @@ func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, revi
 		if !found {
 			return domain.ReviewRun{}, fmt.Errorf("%w: worker session %q", ErrNotFound, workerID)
 		}
-		updated, err := s.store.UpdateReviewRunResult(ctx, run.ID, domain.ReviewRunComplete, verdict, body, githubReviewID, session.AutoInjectReview)
+		updated, err := s.store.UpdateReviewRunResult(ctx, run.ID, domain.ReviewRunComplete, verdict, recorded, githubReviewID, session.AutoInjectReview)
 		if err != nil {
 			return domain.ReviewRun{}, err
 		}
@@ -923,7 +946,7 @@ func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, revi
 		}
 		run.Status = domain.ReviewRunComplete
 		run.Verdict = verdict
-		run.Body = body
+		run.Body = recorded
 		run.GithubReviewID = githubReviewID
 		run.AutoInjectReview = session.AutoInjectReview
 		if githubReviewID != "" && s.reviewRefresher != nil {
@@ -953,7 +976,7 @@ func (s *Service) submitOne(ctx context.Context, workerID domain.SessionID, revi
 		if run.Verdict != verdict {
 			return domain.ReviewRun{}, fmt.Errorf("%w: review run %q already recorded verdict %q", ErrInvalid, runID, run.Verdict)
 		}
-		if body != "" && body != run.Body {
+		if body != "" && body != run.Body && recorded != run.Body {
 			return domain.ReviewRun{}, fmt.Errorf("%w: review run %q already recorded a different body", ErrInvalid, runID)
 		}
 		if githubReviewID != "" && githubReviewID != run.GithubReviewID {

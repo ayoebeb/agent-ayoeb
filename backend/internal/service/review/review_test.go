@@ -290,6 +290,35 @@ func TestSubmitRecordsTheResultWithoutASeparateDelivery(t *testing.T) {
 	}
 }
 
+// A reviewer whose GitHub posting was refused submits without a review id: the
+// verdict is still recorded and says nothing was posted.
+func TestSubmitRecordsTheVerdictWhenPostingFailed(t *testing.T) {
+	st := &fakeStore{
+		ok:  true,
+		run: domain.ReviewRun{ID: "run-1", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
+	}
+	svc := New(nil, st)
+	const body = "GitHub posting failed: HTTP 401 (Requires authentication)"
+
+	run, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictChangesRequested, body, "")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if run.Status != domain.ReviewRunComplete || run.Verdict != domain.VerdictChangesRequested {
+		t.Fatalf("run = %+v, want the verdict recorded", run)
+	}
+	if run.Body != body+"\n\n"+notPostedNote {
+		t.Fatalf("body = %q, want the review and the not-posted note", run.Body)
+	}
+
+	st.run = run
+	for _, retry := range []string{body, run.Body} {
+		if _, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictChangesRequested, retry, ""); err != nil {
+			t.Fatalf("retrying %q: %v", retry, err)
+		}
+	}
+}
+
 func TestApplyReviewActivitySignalPersistsNativeReviewerSessionID(t *testing.T) {
 	st := &fakeStore{
 		reviewOK: true,

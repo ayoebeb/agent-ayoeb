@@ -7,6 +7,7 @@ package gen
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -145,7 +146,8 @@ func (q *Queries) FailPausedReviewRunsByReview(ctx context.Context, arg FailPaus
 }
 
 const failUnsubmittedReviewBatchForChatTurn = `-- name: FailUnsubmittedReviewBatchForChatTurn :exec
-UPDATE review_run SET status = 'failed', body = 'reviewer Chat turn ended without submitting a result'
+UPDATE review_run SET status = 'failed', body = 'reviewer Chat turn ended without submitting a result' || COALESCE(
+    (SELECT ': ' || NULLIF(failed.error_message, '') FROM conversation_turns AS failed WHERE failed.id = ?1), '')
 WHERE status = 'running' AND verdict = '' AND batch_id != ''
   AND EXISTS (
     SELECT 1 FROM conversation_turns AS turn
@@ -161,6 +163,8 @@ WHERE status = 'running' AND verdict = '' AND batch_id != ''
   )
 `
 
+// The provider's own error is kept in the reason: without it a rejected model or
+// login looks like a reviewer that simply forgot to submit.
 func (q *Queries) FailUnsubmittedReviewBatchForChatTurn(ctx context.Context, turnID string) error {
 	_, err := q.db.ExecContext(ctx, failUnsubmittedReviewBatchForChatTurn, turnID)
 	return err
@@ -902,6 +906,50 @@ func (q *Queries) ListReviewsBySession(ctx context.Context, sessionID domain.Ses
 	return items, nil
 }
 
+const listRunningReviewRuns = `-- name: ListRunningReviewRuns :many
+SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
+FROM review_run WHERE status = 'running' AND verdict = '' ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListRunningReviewRuns(ctx context.Context) ([]ReviewRun, error) {
+	rows, err := q.db.QueryContext(ctx, listRunningReviewRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReviewRun{}
+	for rows.Next() {
+		var i ReviewRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReviewID,
+			&i.SessionID,
+			&i.Harness,
+			&i.PRURL,
+			&i.TargetSha,
+			&i.Status,
+			&i.Verdict,
+			&i.Body,
+			&i.CreatedAt,
+			&i.GithubReviewID,
+			&i.DeliveredAt,
+			&i.BatchID,
+			&i.AutoInjectReview,
+			&i.TriggerSource,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningReviewRunsBySession = `-- name: ListRunningReviewRunsBySession :many
 SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
 FROM review_run WHERE session_id = ? AND status IN ('running', 'paused') AND verdict = '' ORDER BY created_at DESC
@@ -983,6 +1031,26 @@ func (q *Queries) RecordReviewChatControllerError(ctx context.Context, arg Recor
 	return result.RowsAffected()
 }
 
+const relaunchReviewRun = `-- name: RelaunchReviewRun :execrows
+UPDATE review_run SET batch_id = ?, body = ? WHERE id = ? AND status = 'running' AND verdict = ''
+`
+
+type RelaunchReviewRunParams struct {
+	BatchID string
+	Body    string
+	ID      string
+}
+
+// A relaunched reviewer gets a new batch id, so its dispatch message is not
+// dropped as a duplicate and the end of the old turn cannot fail the new pass.
+func (q *Queries) RelaunchReviewRun(ctx context.Context, arg RelaunchReviewRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, relaunchReviewRun, arg.BatchID, arg.Body, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const restoreReviewLaunchState = `-- name: RestoreReviewLaunchState :execrows
 UPDATE review SET pr_url = ?, interface_mode = ?, reviewer_handle_id = ?, agent_session_id = ?,
     reviewer_activity_state = ?, reviewer_launch_id = ?, provider_conversation_id = ?,
@@ -1035,6 +1103,32 @@ func (q *Queries) ResumePausedReviewRunsByReview(ctx context.Context, reviewID s
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const reviewChatLastActivityAt = `-- name: ReviewChatLastActivityAt :one
+SELECT a.updated_at FROM conversations AS c
+JOIN conversation_activities AS a ON a.conversation_id = c.id
+WHERE c.review_id = ? ORDER BY a.updated_at DESC LIMIT 1
+`
+
+func (q *Queries) ReviewChatLastActivityAt(ctx context.Context, reviewID sql.NullString) (time.Time, error) {
+	row := q.db.QueryRowContext(ctx, reviewChatLastActivityAt, reviewID)
+	var updated_at time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
+}
+
+const reviewChatLastMessageAt = `-- name: ReviewChatLastMessageAt :one
+SELECT m.updated_at FROM conversations AS c
+JOIN conversation_messages AS m ON m.conversation_id = c.id
+WHERE c.review_id = ? ORDER BY m.updated_at DESC LIMIT 1
+`
+
+func (q *Queries) ReviewChatLastMessageAt(ctx context.Context, reviewID sql.NullString) (time.Time, error) {
+	row := q.db.QueryRowContext(ctx, reviewChatLastMessageAt, reviewID)
+	var updated_at time.Time
+	err := row.Scan(&updated_at)
+	return updated_at, err
 }
 
 const setReviewInterfaceMode = `-- name: SetReviewInterfaceMode :execrows

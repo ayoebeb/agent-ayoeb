@@ -1426,6 +1426,21 @@ func (s *Service) HasLiveControllerForOwner(owner domain.ConversationOwner) bool
 	return err == nil && controller.State() != ports.ChatControllerStopped
 }
 
+// TurnInProgressForOwner reports whether the owner's controller is working on a
+// turn, or still reattaching and so cannot say it is not.
+func (s *Service) TurnInProgressForOwner(owner domain.ConversationOwner) bool {
+	controller, err := s.ControllerForOwner(owner)
+	if err != nil {
+		return false
+	}
+	switch controller.State() {
+	case ports.ChatControllerBusy, ports.ChatControllerRecovering, ports.ChatControllerConnecting:
+		return true
+	default:
+		return false
+	}
+}
+
 // PreservesProviderOnRestart reports only established live ownership. Unknown
 // or recovering sessions remain conservative for the desktop update warning.
 func (s *Service) PreservesProviderOnRestart(sessionID domain.SessionID) bool {
