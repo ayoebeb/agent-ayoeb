@@ -99,6 +99,14 @@ type ReviewRun struct {
 	AutoInjectReview bool `json:"autoInjectReview"`
 }
 
+// ReviewFinding is one inline finding of a review: where it is and what must
+// change.
+type ReviewFinding struct {
+	Path string `json:"path"`
+	Line int    `json:"line,omitempty"`
+	Body string `json:"body"`
+}
+
 // ReviewTriggerSource identifies who initiated a review pass.
 type ReviewTriggerSource string
 

@@ -279,6 +279,21 @@ func (s *Store) UpdateReviewRunResult(ctx context.Context, id string, status dom
 	return n > 0, nil
 }
 
+// MarkReviewRunDelivered records that a pass's result reached its worker. It
+// reports false when the pass was already marked.
+func (s *Store) MarkReviewRunDelivered(ctx context.Context, id string, deliveredAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.MarkReviewRunDelivered(ctx, gen.MarkReviewRunDeliveredParams{
+		DeliveredAt: sql.NullTime{Time: deliveredAt, Valid: true},
+		ID:          id,
+	})
+	if err != nil {
+		return false, fmt.Errorf("mark review run %s delivered: %w", id, err)
+	}
+	return n > 0, nil
+}
+
 // SupersedeStaleRunningReviewRuns marks older running unverdicted passes for a
 // worker failed before starting a review for a newer commit.
 func (s *Store) SupersedeStaleRunningReviewRuns(ctx context.Context, sessionID domain.SessionID, prURL, targetSHA, body string) (int64, error) {
@@ -617,6 +632,20 @@ func (s *Store) ListRunningReviewRuns(ctx context.Context) ([]domain.ReviewRun, 
 	rows, err := s.qr.ListRunningReviewRuns(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list running review runs: %w", err)
+	}
+	out := make([]domain.ReviewRun, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, reviewRunFromRow(row))
+	}
+	return out, nil
+}
+
+// ListUndeliveredReviewRuns returns the completed passes whose result has not
+// reached its worker yet.
+func (s *Store) ListUndeliveredReviewRuns(ctx context.Context) ([]domain.ReviewRun, error) {
+	rows, err := s.qr.ListUndeliveredReviewRuns(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list undelivered review runs: %w", err)
 	}
 	out := make([]domain.ReviewRun, 0, len(rows))
 	for _, row := range rows {

@@ -90,6 +90,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 -- name: UpdateReviewRunResult :execrows
 UPDATE review_run SET status = ?, verdict = ?, body = ?, github_review_id = ?, auto_inject_review = ? WHERE id = ? AND status IN ('running', 'paused');
 
+-- name: MarkReviewRunDelivered :execrows
+UPDATE review_run SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL;
+
 -- name: SupersedeStaleRunningReviewRuns :execrows
 UPDATE review_run SET status = 'failed', body = ? WHERE session_id = ? AND pr_url = ? AND target_sha != ? AND status IN ('running', 'paused') AND verdict = '';
 
@@ -230,3 +233,16 @@ WHERE c.review_id = ? ORDER BY m.updated_at DESC LIMIT 1;
 SELECT a.updated_at FROM conversations AS c
 JOIN conversation_activities AS a ON a.conversation_id = c.id
 WHERE c.review_id = ? ORDER BY a.updated_at DESC LIMIT 1;
+
+-- Results still owed to their worker. A newer result of the same reviewer on the
+-- same PR supersedes an older one.
+-- name: ListUndeliveredReviewRuns :many
+SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
+FROM review_run AS r
+WHERE r.status = 'complete' AND r.verdict != '' AND r.delivered_at IS NULL AND r.auto_inject_review
+  AND NOT EXISTS (
+    SELECT 1 FROM review_run AS n
+    WHERE n.session_id = r.session_id AND n.pr_url = r.pr_url AND n.harness = r.harness
+      AND n.verdict != '' AND n.created_at > r.created_at
+  )
+ORDER BY r.created_at ASC, r.id ASC;

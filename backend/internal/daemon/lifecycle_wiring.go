@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -410,6 +411,7 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 	if models, ok := agentReadiness.(agentModelCatalog); ok {
 		reviewerModel = reviewerDefaultModel(models, codexagent.UsesCustomModelProvider, codexagent.ConfiguredModel, log)
 	}
+	reviewerGitHubLogin := reviewerGitHubToken(goruntime.GOOS)
 	reviewEngine := reviewcore.New(reviewcore.Deps{
 		// The manager's installer gate is bound after the installer is built.
 		HarnessUse: mgr,
@@ -421,7 +423,8 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 			reviewcore.WithRunFilePath(cfg.RunFilePath),
 			reviewcore.WithAgentAuth(reviewerAgentAuth{readiness: agentReadiness}),
 			reviewcore.WithReviewerChat(reviewerChat),
-			reviewcore.WithDefaultModel(reviewerModel)),
+			reviewcore.WithDefaultModel(reviewerModel),
+			reviewcore.WithGitHubToken(reviewerGitHubLogin)),
 
 		ChatRecoveryDone: reviewerRecoveryDone,
 		// The daemon runs the recovery once boot reconciliation settled.
@@ -431,6 +434,7 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 		reviewsvc.WithTelemetry(telemetry),
 		reviewsvc.WithNotificationSink(notifications),
 		reviewsvc.WithCodexAccountOperationGate(codexOperationGate),
+		reviewsvc.WithResultDeliverer(lcm),
 	}
 	if scmProvider != nil {
 		reviewOpts = append(reviewOpts,

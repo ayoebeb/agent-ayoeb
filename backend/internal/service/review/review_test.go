@@ -127,6 +127,36 @@ func (f *fakeStore) UpdateReviewRunResult(_ context.Context, id string, status d
 	return true, nil
 }
 
+func (f *fakeStore) MarkReviewRunDelivered(_ context.Context, id string, deliveredAt time.Time) (bool, error) {
+	if f.run.ID != id || f.run.DeliveredAt != nil {
+		return false, nil
+	}
+	f.run.DeliveredAt = &deliveredAt
+	return true, nil
+}
+
+func (f *fakeStore) ListUndeliveredReviewRuns(context.Context) ([]domain.ReviewRun, error) {
+	if f.run.Status != domain.ReviewRunComplete || f.run.DeliveredAt != nil || !f.run.AutoInjectReview {
+		return nil, nil
+	}
+	return []domain.ReviewRun{f.run}, nil
+}
+
+// fakeDeliverer records the results handed to the worker.
+type fakeDeliverer struct {
+	sent    []domain.ReviewRun
+	refused bool
+	err     error
+}
+
+func (f *fakeDeliverer) DeliverReviewResult(_ context.Context, run domain.ReviewRun) (bool, error) {
+	if f.err != nil || f.refused {
+		return false, f.err
+	}
+	f.sent = append(f.sent, run)
+	return true, nil
+}
+
 func (f *fakeStore) ListReviewRunsByBatch(context.Context, domain.SessionID, string) ([]domain.ReviewRun, error) {
 	out := append([]domain.ReviewRun(nil), f.batchRuns...)
 	return out, nil
@@ -267,55 +297,92 @@ func TestRequestRereviewRejectsUnknownReviewer(t *testing.T) {
 	}
 }
 
-// AO never sends the worker a separate verdict message: the reviewer's posted
-// review reaches the worker through the SCM observer like any other review. A
-// submitted result is recorded and stays complete.
-func TestSubmitRecordsTheResultWithoutASeparateDelivery(t *testing.T) {
-	st := &fakeStore{
+func runningReviewStore() *fakeStore {
+	return &fakeStore{
 		ok:  true,
-		run: domain.ReviewRun{ID: "run-1", SessionID: "mer-1", BatchID: "batch-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
-		prs: []domain.PullRequest{{URL: "pr1", HeadSHA: "sha1"}},
+		run: domain.ReviewRun{ID: "run-1", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning, CreatedAt: time.Now()},
 	}
-	svc := New(nil, st)
+}
 
-	for _, verdict := range []domain.ReviewVerdict{domain.VerdictChangesRequested, domain.VerdictApproved} {
-		st.run.Status, st.run.Verdict, st.run.Body = domain.ReviewRunRunning, domain.VerdictNone, ""
-		run, err := svc.Submit(context.Background(), "mer-1", "run-1", verdict, "body", "987")
+// A posted review's inline comments reach the worker from the pull request, so
+// AO sends the verdict and summary once and never repeats the findings.
+func TestSubmitDeliversAPostedResultOnceWithoutRepeatingFindings(t *testing.T) {
+	st, deliverer := runningReviewStore(), &fakeDeliverer{}
+	svc := New(nil, st, WithResultDeliverer(deliverer))
+	review := SubmittedReview{
+		RunID: "run-1", Verdict: domain.VerdictChangesRequested, Body: "summary", GithubReviewID: "987",
+		Findings: []domain.ReviewFinding{{Path: "a.go", Line: 3, Body: "nil check"}},
+	}
+
+	for range 2 {
+		runs, err := svc.SubmitMany(context.Background(), "mer-1", []SubmittedReview{review})
 		if err != nil {
-			t.Fatalf("%s: Submit: %v", verdict, err)
+			t.Fatalf("SubmitMany: %v", err)
 		}
-		if run.Status != domain.ReviewRunComplete || run.DeliveredAt != nil {
-			t.Fatalf("%s: run = %+v, want complete and never stamped delivered", verdict, run)
+		if runs[0].Status != domain.ReviewRunComplete || runs[0].DeliveredAt == nil {
+			t.Fatalf("run = %+v, want complete and stamped delivered", runs[0])
 		}
+	}
+	if len(deliverer.sent) != 1 || deliverer.sent[0].Body != "summary" || deliverer.sent[0].GithubReviewID != "987" {
+		t.Fatalf("sent = %+v, want one delivery of the summary only", deliverer.sent)
+	}
+	if reports, err := svc.retryResultDeliveries(context.Background()); err != nil || len(reports) != 0 || len(deliverer.sent) != 1 {
+		t.Fatalf("retry after delivery: reports %+v, err %v, sent %d", reports, err, len(deliverer.sent))
 	}
 }
 
 // A reviewer whose GitHub posting was refused submits without a review id: the
-// verdict is still recorded and says nothing was posted.
-func TestSubmitRecordsTheVerdictWhenPostingFailed(t *testing.T) {
-	st := &fakeStore{
-		ok:  true,
-		run: domain.ReviewRun{ID: "run-1", SessionID: "mer-1", PRURL: "pr1", TargetSHA: "sha1", Status: domain.ReviewRunRunning},
+// worker still gets the verdict, the findings and why posting failed.
+func TestSubmitDeliversFindingsWhenPostingFailed(t *testing.T) {
+	st, deliverer := runningReviewStore(), &fakeDeliverer{}
+	svc := New(nil, st, WithResultDeliverer(deliverer))
+	review := SubmittedReview{
+		RunID: "run-1", Verdict: domain.VerdictChangesRequested, Body: "summary",
+		Findings:  []domain.ReviewFinding{{Path: "a.go", Line: 3, Body: "nil check"}},
+		PostError: "HTTP 401:\nRequires authentication",
 	}
-	svc := New(nil, st)
-	const body = "GitHub posting failed: HTTP 401 (Requires authentication)"
 
-	run, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictChangesRequested, body, "")
+	runs, err := svc.SubmitMany(context.Background(), "mer-1", []SubmittedReview{review})
 	if err != nil {
-		t.Fatalf("Submit: %v", err)
+		t.Fatalf("SubmitMany: %v", err)
 	}
-	if run.Status != domain.ReviewRunComplete || run.Verdict != domain.VerdictChangesRequested {
-		t.Fatalf("run = %+v, want the verdict recorded", run)
-	}
-	if run.Body != body+"\n\n"+notPostedNote {
-		t.Fatalf("body = %q, want the review and the not-posted note", run.Body)
+	want := "summary\n\n### Inline findings\n\n- `a.go:3`: nil check\n\n" + notPostedPrefix + "HTTP 401: Requires authentication_"
+	if len(deliverer.sent) != 1 || deliverer.sent[0].Body != want || deliverer.sent[0].Verdict != domain.VerdictChangesRequested {
+		t.Fatalf("sent = %+v, want body %q", deliverer.sent, want)
 	}
 
-	st.run = run
-	for _, retry := range []string{body, run.Body} {
-		if _, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictChangesRequested, retry, ""); err != nil {
+	st.run = runs[0]
+	for _, retry := range []string{"summary", want} {
+		again := review
+		again.Body = retry
+		if _, err := svc.SubmitMany(context.Background(), "mer-1", []SubmittedReview{again}); err != nil {
 			t.Fatalf("retrying %q: %v", retry, err)
 		}
+	}
+	if len(deliverer.sent) != 1 {
+		t.Fatalf("sent %d times, want once", len(deliverer.sent))
+	}
+}
+
+// A worker that does not take the result keeps it owed and is reported once.
+func TestUndeliveredResultIsRetriedAndReportedOnce(t *testing.T) {
+	st, deliverer := runningReviewStore(), &fakeDeliverer{err: errors.New("pane is gone")}
+	svc := New(nil, st, WithResultDeliverer(deliverer))
+	if _, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictApproved, "fine", "987"); err != nil {
+		t.Fatalf("Submit must succeed when delivery fails: %v", err)
+	}
+
+	reports, err := svc.retryResultDeliveries(context.Background())
+	if err != nil || len(reports) != 1 || reports[0].WorkerID != "mer-1" || !strings.Contains(reports[0].Note, "pane is gone") {
+		t.Fatalf("reports = %+v, err %v, want one naming the failure", reports, err)
+	}
+	deliverer.err, deliverer.refused = nil, true
+	if reports, err := svc.retryResultDeliveries(context.Background()); err != nil || len(reports) != 0 {
+		t.Fatalf("second failure reported again: %+v, %v", reports, err)
+	}
+	deliverer.refused = false
+	if _, err := svc.retryResultDeliveries(context.Background()); err != nil || len(deliverer.sent) != 1 || st.run.DeliveredAt == nil {
+		t.Fatalf("recovered worker did not get the result: err %v, sent %d", err, len(deliverer.sent))
 	}
 }
 
@@ -433,7 +500,13 @@ func TestSubmitSnapshotsDisabledPolicyAndNeverDeliversOnRetry(t *testing.T) {
 		},
 		prs: []domain.PullRequest{{URL: "pr1", HeadSHA: "sha1"}},
 	}
-	svc := New(nil, st)
+	deliverer := &fakeDeliverer{}
+	svc := New(nil, st, WithResultDeliverer(deliverer))
+	defer func() {
+		if len(deliverer.sent) != 0 {
+			t.Errorf("disabled policy still delivered: %+v", deliverer.sent)
+		}
+	}()
 
 	run, err := svc.Submit(context.Background(), "mer-1", "run-1", domain.VerdictChangesRequested, "fix it", "987")
 	if err != nil {

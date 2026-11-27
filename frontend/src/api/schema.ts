@@ -8348,6 +8348,11 @@ export interface components {
             state?: "queued" | "running" | "completed" | "recovered" | "interrupted" | "failed";
             turnId?: string;
         };
+        ReviewFinding: {
+            body: string;
+            line?: number;
+            path: string;
+        };
         ReviewRun: {
             autoInjectReview: boolean;
             batchId: string;
@@ -9307,8 +9312,12 @@ export interface components {
         SubmitReviewItem: {
             /** @description Review body recorded by AO. Required for changes_requested. */
             body?: string;
+            /** @description Inline findings, delivered to the worker by AO when no review was posted. */
+            findings?: components["schemas"]["ReviewFinding"][];
             /** @description Id of the GitHub PR review the reviewer posted, if any. */
             githubReviewId?: string;
+            /** @description Why posting the review on the pull request failed. */
+            postError?: string;
             /** @description Review run id being completed. */
             runId: string;
             /** @description Review verdict: approved or changes_requested. */
