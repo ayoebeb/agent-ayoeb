@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,6 +175,44 @@ type Manager struct {
 
 	// terminals, when set, hosts servers in a PTY (guarded by mu).
 	terminals Terminals
+	// projectRoot, when set, finds the main checkout whose launch.json every
+	// worktree of the project inherits (guarded by mu).
+	projectRoot ProjectRootFunc
+
+	host hostLookup
+}
+
+// ProjectRootFunc returns the main checkout of the session's project, or "".
+type ProjectRootFunc func(ctx context.Context, sessionID domain.SessionID) string
+
+// SetProjectRoot late-binds the project main-checkout lookup.
+func (m *Manager) SetProjectRoot(fn ProjectRootFunc) {
+	m.mu.Lock()
+	m.projectRoot = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) projectRootFor(ctx context.Context, sessionID domain.SessionID) string {
+	m.mu.Lock()
+	lookup := m.projectRoot
+	m.mu.Unlock()
+	if lookup == nil {
+		return ""
+	}
+	return lookup(ctx, sessionID)
+}
+
+// portUsedByOtherSession reports whether another session's server holds port.
+// A bind test alone misses servers listening only on ::1 or a wildcard.
+func (m *Manager) portUsedByOtherSession(sessionID domain.SessionID, port int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, run := range m.runs {
+		if id != sessionID && run.running() && run.status.Port == port {
+			return true
+		}
+	}
+	return false
 }
 
 // New creates a managed preview-server supervisor.
@@ -190,6 +229,7 @@ func New(log *slog.Logger, dataDir ...string) *Manager {
 		log:        log,
 		runs:       make(map[domain.SessionID]*serverRun),
 		operations: make(map[domain.SessionID]*sessionOperation),
+		host:       systemHost(),
 	}
 	if len(dataDir) > 0 && strings.TrimSpace(dataDir[0]) != "" {
 		manager.registryPath = filepath.Join(dataDir[0], processRegistryFile)
@@ -244,7 +284,7 @@ func (m *Manager) Start(
 		}
 	}()
 
-	cfg, err := loadConfiguration(workspacePath, configurationName)
+	cfg, err := loadConfiguration(workspacePath, m.projectRootFor(ctx, sessionID), configurationName)
 	if err != nil {
 		return stoppedStatus(sessionID), err
 	}
@@ -259,11 +299,25 @@ func (m *Manager) Start(
 	if _, err := resolveTargetURL(cfg.URL, validationPort); err != nil {
 		return stoppedStatus(sessionID), err
 	}
+	// Resolve before stopping, so a misspelled executable leaves the running
+	// server alone.
+	baseEnv := os.Environ()
+	_, searchPath := m.host.withSearchPath(previewEnvironment(baseEnv, projectEnv, cfg.Env, sessionID, validationPort), projectEnv, cfg.Env)
+	resolve := func(port int) (string, error) {
+		return m.host.resolveExecutable(interpolatePort(cfg.RuntimeExecutable, port), workingDir, searchPath, m.host.getenv("PATHEXT"))
+	}
+	if _, err := resolve(validationPort); err != nil {
+		return stoppedStatus(sessionID), err
+	}
 	if _, err := m.stop(context.Background(), sessionID); err != nil {
 		return stoppedStatus(sessionID), err
 	}
 
-	port, reservation, err := reservePort(cfg.Port, cfg.AutoPort)
+	preferredPort := cfg.Port
+	if cfg.AutoPort && m.portUsedByOtherSession(sessionID, preferredPort) {
+		preferredPort = 0
+	}
+	port, reservation, err := reservePort(preferredPort, cfg.AutoPort)
 	if err != nil {
 		var previewErr Error
 		if errors.As(err, &previewErr) {
@@ -280,9 +334,9 @@ func (m *Manager) Start(
 	if err != nil {
 		return stoppedStatus(sessionID), err
 	}
-	executable := interpolatePort(cfg.RuntimeExecutable, port)
-	if strings.ContainsAny(executable, `/\`) && !filepath.IsAbs(executable) {
-		executable = filepath.Join(workingDir, executable)
+	executable, err := resolve(port)
+	if err != nil {
+		return stoppedStatus(sessionID), err
 	}
 	args := make([]string, len(cfg.RuntimeArgs))
 	for i, arg := range cfg.RuntimeArgs {
@@ -291,7 +345,7 @@ func (m *Manager) Start(
 
 	cmd := previewCommand(executable, args...)
 	cmd.Dir = workingDir
-	cmd.Env = previewEnvironment(os.Environ(), projectEnv, cfg.Env, sessionID, port)
+	cmd.Env, _ = m.host.withSearchPath(previewEnvironment(baseEnv, projectEnv, cfg.Env, sessionID, port), projectEnv, cfg.Env)
 	logs := newLineBuffer(maxBufferedLogLines)
 	cmd.Stdout = logs
 	cmd.Stderr = logs
@@ -312,7 +366,7 @@ func (m *Manager) Start(
 		done: make(chan struct{}),
 		logs: logs,
 	}
-	run.status.Command = commandLine(executable, args)
+	run.status.Command = commandLine(interpolatePort(cfg.RuntimeExecutable, port), args)
 	terminals := m.terminalLauncher()
 	// Arbitrary project servers cannot inherit a generic pre-bound socket. Keep
 	// the selected port reserved through command construction, then release it
@@ -704,76 +758,133 @@ func (m *Manager) statusForLocked(run *serverRun) Status {
 	return status
 }
 
-func loadConfiguration(workspacePath, requestedName string) (Configuration, error) {
+// loadConfiguration picks a configuration from the worktree's launch.json and
+// the one in the project's main checkout, which every worktree inherits. A
+// worktree entry replaces the project entry of the same name.
+func loadConfiguration(workspacePath, projectPath, requestedName string) (Configuration, error) {
 	if strings.TrimSpace(workspacePath) == "" {
 		return Configuration{}, serviceError("PREVIEW_WORKSPACE_MISSING", "session workspace is unavailable")
 	}
-	configPath := filepath.Join(workspacePath, filepath.FromSlash(ConfigPath))
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Configuration{}, serviceError(
-				"PREVIEW_CONFIG_NOT_FOUND",
-				fmt.Sprintf("preview configuration not found at %s", ConfigPath),
-			)
-		}
-		return Configuration{}, serviceError("PREVIEW_CONFIG_INVALID", fmt.Sprintf("read %s: %v", ConfigPath, err))
-	}
-	var file launchFile
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&file); err != nil {
-		return Configuration{}, serviceError("PREVIEW_CONFIG_INVALID", fmt.Sprintf("decode %s: %v", ConfigPath, err))
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("unexpected trailing JSON value")
-		}
-		return Configuration{}, serviceError("PREVIEW_CONFIG_INVALID", fmt.Sprintf("decode %s: %v", ConfigPath, err))
-	}
-	if file.Version != 1 {
-		return Configuration{}, serviceError("PREVIEW_CONFIG_INVALID", "preview configuration version must be 1")
-	}
-	if len(file.Configurations) == 0 {
-		return Configuration{}, serviceError("PREVIEW_CONFIG_INVALID", "preview configuration has no configurations")
-	}
 	requestedName = strings.TrimSpace(requestedName)
-	if requestedName == "" && len(file.Configurations) > 1 {
-		return Configuration{}, serviceError(
-			"PREVIEW_CONFIGURATION_REQUIRED",
-			"multiple preview configurations exist; specify one by name",
-		)
+	own, err := readLaunchFile(filepath.Join(workspacePath, filepath.FromSlash(ConfigPath)), ConfigPath, false)
+	if err != nil {
+		return Configuration{}, err
 	}
-	seen := make(map[string]struct{}, len(file.Configurations))
-	var selected *Configuration
-	for i := range file.Configurations {
-		cfg := file.Configurations[i]
-		cfg.Name = strings.TrimSpace(cfg.Name)
-		if cfg.Name == "" {
-			return Configuration{}, serviceError("PREVIEW_CONFIG_INVALID", "preview configuration name is required")
-		}
-		if _, duplicate := seen[cfg.Name]; duplicate {
-			return Configuration{}, serviceError(
-				"PREVIEW_CONFIG_INVALID",
-				fmt.Sprintf("duplicate preview configuration name %q", cfg.Name),
-			)
-		}
-		seen[cfg.Name] = struct{}{}
-		if err := validateConfiguration(&cfg); err != nil {
+	named := func(list []Configuration, name string) int {
+		return slices.IndexFunc(list, func(cfg Configuration) bool { return cfg.Name == name })
+	}
+	// A name the worktree defines never depends on the project file being valid.
+	if i := named(own, requestedName); i >= 0 {
+		return own[i], nil
+	}
+	var merged []Configuration
+	if strings.TrimSpace(projectPath) != "" && !sameDirectory(workspacePath, projectPath) {
+		shared := filepath.Join(projectPath, filepath.FromSlash(ConfigPath))
+		if merged, err = readLaunchFile(shared, shared, true); err != nil {
 			return Configuration{}, err
 		}
-		if requestedName == "" || cfg.Name == requestedName {
-			candidate := cfg
-			selected = &candidate
+	}
+	for _, cfg := range own {
+		if i := named(merged, cfg.Name); i >= 0 {
+			merged[i] = cfg
+		} else {
+			merged = append(merged, cfg)
 		}
 	}
-	if selected != nil {
-		return *selected, nil
+	if len(merged) == 0 {
+		return Configuration{}, serviceError(
+			"PREVIEW_CONFIG_NOT_FOUND",
+			fmt.Sprintf("preview configuration not found at %s in the worktree or the project's main checkout", ConfigPath),
+		)
+	}
+	if requestedName == "" {
+		if len(merged) == 1 {
+			return merged[0], nil
+		}
+		names := make([]string, len(merged))
+		for i, cfg := range merged {
+			names[i] = cfg.Name
+		}
+		return Configuration{}, serviceError(
+			"PREVIEW_CONFIGURATION_REQUIRED",
+			"multiple preview configurations exist; specify one by name: "+strings.Join(names, ", "),
+		)
+	}
+	if i := named(merged, requestedName); i >= 0 {
+		return merged[i], nil
 	}
 	return Configuration{}, serviceError(
 		"PREVIEW_CONFIGURATION_NOT_FOUND",
 		fmt.Sprintf("preview configuration %q was not found", requestedName),
 	)
+}
+
+func sameDirectory(a, b string) bool {
+	first, firstErr := os.Stat(a)
+	second, secondErr := os.Stat(b)
+	return firstErr == nil && secondErr == nil && os.SameFile(first, second)
+}
+
+// readLaunchFile reads and validates one launch file; no file is no entries.
+// A shared (project) entry that leaves autoPort out and does not pin its URL
+// gets a free port per worktree, preferring its configured one.
+func readLaunchFile(configPath, label string, shared bool) ([]Configuration, error) {
+	invalid := func(format string, args ...any) error {
+		return serviceError("PREVIEW_CONFIG_INVALID", fmt.Sprintf(format, args...))
+	}
+	data, err := os.ReadFile(configPath) //nolint:gosec // fixed file name under a registered project or worktree
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, invalid("read %s: %v", label, err)
+	}
+	var file launchFile
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&file); err != nil {
+		return nil, invalid("decode %s: %v", label, err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("unexpected trailing JSON value")
+		}
+		return nil, invalid("decode %s: %v", label, err)
+	}
+	if file.Version != 1 {
+		return nil, invalid("preview configuration version must be 1")
+	}
+	if len(file.Configurations) == 0 {
+		return nil, invalid("preview configuration has no configurations")
+	}
+	var explicit struct {
+		Configurations []struct {
+			AutoPort *bool `json:"autoPort"`
+		} `json:"configurations"`
+	}
+	if err := json.Unmarshal(data, &explicit); err != nil {
+		return nil, invalid("decode %s: %v", label, err)
+	}
+	seen := make(map[string]struct{}, len(file.Configurations))
+	for i := range file.Configurations {
+		cfg := &file.Configurations[i]
+		cfg.Name = strings.TrimSpace(cfg.Name)
+		if cfg.Name == "" {
+			return nil, invalid("preview configuration name is required")
+		}
+		if _, duplicate := seen[cfg.Name]; duplicate {
+			return nil, invalid("duplicate preview configuration name %q", cfg.Name)
+		}
+		seen[cfg.Name] = struct{}{}
+		if shared && explicit.Configurations[i].AutoPort == nil &&
+			(strings.TrimSpace(cfg.URL) == "" || strings.Contains(cfg.URL, "${PORT}")) {
+			cfg.AutoPort = true
+		}
+		if err := validateConfiguration(cfg); err != nil {
+			return nil, err
+		}
+	}
+	return file.Configurations, nil
 }
 
 func validateConfiguration(cfg *Configuration) error {

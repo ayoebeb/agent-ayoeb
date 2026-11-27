@@ -18,11 +18,7 @@ import (
 
 func previewCommand(name string, args ...string) *exec.Cmd {
 	if resolved, err := exec.LookPath(name); err == nil && isWindowsBatchFile(resolved) {
-		shell := strings.TrimSpace(os.Getenv("COMSPEC"))
-		if shell == "" {
-			shell = "cmd.exe"
-		}
-		cmd := aoprocess.Command(shell) //nolint:gosec // COMSPEC is the OS-selected command interpreter for .cmd/.bat shims
+		cmd := aoprocess.Command(windowsShell()) //nolint:gosec // COMSPEC is the OS-selected command interpreter for .cmd/.bat shims
 		cmd.Args = nil
 		if cmd.SysProcAttr == nil {
 			cmd.SysProcAttr = &syscall.SysProcAttr{}
@@ -37,6 +33,15 @@ func previewCommand(name string, args ...string) *exec.Cmd {
 	}
 	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NEW_PROCESS_GROUP
 	return cmd
+}
+
+// windowsShell is always absolute: a bare "cmd.exe" would be looked up in the
+// server's working directory.
+func windowsShell() string {
+	if shell := strings.TrimSpace(os.Getenv("COMSPEC")); filepath.IsAbs(shell) {
+		return shell
+	}
+	return filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
 }
 
 func isWindowsBatchFile(path string) bool {
@@ -153,14 +158,10 @@ func forceKillPreviewProcess(cmd *exec.Cmd, startTime string) error {
 // command interpreter with the same quoting previewCommand uses.
 func ptyArgv(executable string, args []string) []string {
 	if resolved, err := exec.LookPath(executable); err == nil && isWindowsBatchFile(resolved) {
-		shell := strings.TrimSpace(os.Getenv("COMSPEC"))
-		if shell == "" {
-			shell = "cmd.exe"
-		}
 		// One command string quoted for cmd.exe, exactly as previewCommand builds
 		// it. The ConPTY host passes `cmd.exe /d /s /c <line>` through verbatim
 		// (conpty.cmdExeRawLine) instead of re-quoting each argument natively.
-		return []string{shell, "/d", "/s", "/c", windowsBatchCommandLine(resolved, args)}
+		return []string{windowsShell(), "/d", "/s", "/c", windowsBatchCommandLine(resolved, args)}
 	}
 	return append([]string{executable}, args...)
 }

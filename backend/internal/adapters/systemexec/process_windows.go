@@ -51,13 +51,17 @@ func quoteWindowsBatchArg(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
-func refreshExecutablePath() {
-	paths := []string{os.Getenv("Path")}
-	paths = append(paths,
+// PersistentPath is the Path a newly opened shell would get from the machine
+// and user environment, which a long-running daemon may not have.
+func PersistentPath() string {
+	return mergeWindowsPath(
 		registryPath(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Session Manager\Environment`),
 		registryPath(registry.CURRENT_USER, `Environment`),
 	)
-	if merged := mergeWindowsPath(paths...); merged != "" {
+}
+
+func refreshExecutablePath() {
+	if merged := mergeWindowsPath(os.Getenv("Path"), PersistentPath()); merged != "" {
 		_ = os.Setenv("Path", merged)
 	}
 }

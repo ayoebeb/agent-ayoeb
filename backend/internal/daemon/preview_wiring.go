@@ -6,7 +6,33 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/previewserver"
+	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 )
+
+// managedPreviewProjectRoot returns the lookup for a session's project main
+// checkout. A lookup that fails means only the worktree's own config applies.
+func managedPreviewProjectRoot(sessions previewRootSessions, projects previewRootProjects, log *slog.Logger) previewserver.ProjectRootFunc {
+	return func(ctx context.Context, id domain.SessionID) string {
+		sess, err := sessions.Get(ctx, id)
+		if err != nil || sess.ProjectID == "" {
+			return ""
+		}
+		res, err := projects.Get(ctx, sess.ProjectID)
+		if err != nil || res.Project == nil {
+			log.Warn("find project checkout for preview configuration", "session", id, "err", err)
+			return ""
+		}
+		return res.Project.Path
+	}
+}
+
+type previewRootSessions interface {
+	Get(ctx context.Context, id domain.SessionID) (domain.Session, error)
+}
+
+type previewRootProjects interface {
+	Get(ctx context.Context, id domain.ProjectID) (projectsvc.GetResult, error)
+}
 
 // previewExitSessions is the slice of the session service the managed preview
 // exit callback needs: read the current preview URL and clear it.

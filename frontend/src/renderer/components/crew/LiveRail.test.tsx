@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,12 +105,31 @@ describe("LiveRail", () => {
 		expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ sessionId: "w2" }) }));
 	});
 
-	it("follows the server picked in the store and switches on tab click", async () => {
+	it("lists every running server at once with its worker, URL link and Stop", async () => {
+		live.servers = [managed, detected];
+		renderRail();
+		const rows = within(screen.getByRole("list", { name: "Running servers" })).getAllByRole("listitem");
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toHaveTextContent("vite :5173");
+		expect(rows[0]).toHaveTextContent("Fix login");
+		expect(rows[0]).toHaveTextContent("Answering");
+		expect(rows[1]).toHaveTextContent("Docs");
+		expect(rows[1]).toHaveTextContent("Not answering");
+
+		const link = within(rows[1]!).getByRole("link", { name: "http://127.0.0.1:3000/" });
+		expect(link).toHaveAttribute("href", "http://127.0.0.1:3000/");
+		await userEvent.click(link);
+		expect(openLink).toHaveBeenCalledWith("http://127.0.0.1:3000/");
+		await userEvent.click(within(rows[1]!).getByRole("button", { name: "Stop node :3000" }));
+		expect(stop.mutate).toHaveBeenCalledWith("detected:3000");
+	});
+
+	it("follows the server picked in the store and switches on row click", async () => {
 		live.servers = [managed, detected];
 		useUiStore.setState({ inspectorSessions: { "p-orchestrator": { isOpen: true, view: "live", liveServerKey: "detected:3000" } } });
 		renderRail();
 		expect(screen.getByTestId("live-server-detected")).toBeInTheDocument();
-		await userEvent.click(screen.getByRole("tab", { name: /vite :5173/ }));
+		await userEvent.click(screen.getByRole("button", { name: /vite :5173.*Fix login/ }));
 		expect(useUiStore.getState().inspectorSessions["p-orchestrator"]?.liveServerKey).toBe("managed:w1");
 	});
 

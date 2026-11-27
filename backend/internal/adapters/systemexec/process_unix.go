@@ -13,4 +13,8 @@ func commandContext(ctx context.Context, name string, args ...string) (*exec.Cmd
 	return aoprocess.CommandContext(ctx, name, args...), nil //nolint:gosec // Callers supply server-owned argv.
 }
 
+// PersistentPath is empty off Windows: there is no per-user environment store
+// to read beyond what the daemon already inherited.
+func PersistentPath() string { return "" }
+
 func refreshExecutablePath() {}

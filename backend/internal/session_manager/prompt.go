@@ -477,5 +477,5 @@ func projectValue(value string) string {
 // workerDevServerPrompt asks workers to start long-running dev servers through
 // ao preview, so they show in the Live overview with a terminal.
 func workerDevServerPrompt() string {
-	return "## Dev Servers\n\nStart long-running dev servers through `ao preview` (with a `.ao/launch.json` configuration) instead of a background shell command, so they appear in Live with a terminal and Stop/Restart buttons."
+	return "## Dev Servers\n\nStart long-running dev servers through `ao preview` (with a `.ao/launch.json` configuration; the one in the project's main checkout is inherited by every worktree) instead of a background shell command, so they appear in Live with a terminal and Stop/Restart buttons."
 }

@@ -94,6 +94,18 @@ Start a named configuration from `.ao/launch.json`, wait for its loopback URL,
 and open it in this worker's Browser panel. The name is optional when exactly
 one configuration exists.
 
+Configurations come from two files: `.ao/launch.json` in the project's main
+checkout, which every worktree of the project inherits, and the worktree's own
+`.ao/launch.json`, which replaces an inherited entry of the same name. Do not
+copy the shared file into a worktree. An inherited entry that omits `autoPort`
+and has no fixed `url` gets a free port per worktree (its `port` is preferred
+and optional), so pass `${PORT}` to the server.
+
+A bare `runtimeExecutable` such as `npm`, `npx` or `node` is found like in a
+normal shell: on the daemon's PATH, the user's saved PATH and the fnm, nvm or
+Volta default. It is never looked up in the working directory, so write
+`./name` for a script there. Never hardcode an absolute path to Node.
+
 ```bash
 ao preview start [configuration] [--json]
 ao preview status [--json]
