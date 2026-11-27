@@ -75,7 +75,7 @@ describe("ReviewerSelect", () => {
 		expect(screen.getByRole("button", { name: "Reviewer" })).toHaveTextContent("Codex · GPT Test");
 	});
 
-	it("selecting the reported reviewer model keeps following the agent", async () => {
+	it("sends the reported default model literally when it is chosen", async () => {
 		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 		client.setQueryData(["agent-models", "codex", ""], {
 			agentId: "codex", selectionMode: "catalog", models: [
@@ -91,7 +91,7 @@ describe("ReviewerSelect", () => {
 		await userEvent.click(screen.getByRole("button", { name: "Reviewer" }));
 		await userEvent.click(screen.getByRole("menuitem", { name: /Codex/ }));
 		await userEvent.click(screen.getByRole("menuitem", { name: "GPT Test" }));
-		expect(onConfigChange).toHaveBeenCalledWith("codex", {});
+		expect(onConfigChange).toHaveBeenCalledWith("codex", { model: "gpt-test" });
 	});
 
 	it("offers a keyboard-reachable agent default in a non-current harness submenu", async () => {
@@ -117,7 +117,7 @@ describe("ReviewerSelect", () => {
 		expect(onConfigChange).toHaveBeenCalledWith("codex", {});
 	});
 
-	it("does not duplicate the agent default for the current harness, and marks the default model selected", async () => {
+	it("marks the agent default, not the catalog's default model, when no model is chosen", async () => {
 		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 		client.setQueryData(["agent-models", "codex", ""], {
 			agentId: "codex", selectionMode: "catalog", models: [
@@ -131,8 +131,9 @@ describe("ReviewerSelect", () => {
 		/></QueryClientProvider>);
 		await userEvent.click(screen.getByRole("button", { name: "Reviewer" }));
 		await userEvent.click(screen.getByRole("menuitem", { name: /Codex/ }));
-		expect(screen.queryByRole("menuitem", { name: "Use agent model" })).not.toBeInTheDocument();
-		expect(screen.getByText("GPT Test").closest("[data-active]")).not.toBeNull();
+		expect(screen.getAllByRole("menuitem", { name: "Use agent model" })).toHaveLength(1);
+		expect(screen.getByText("Use agent model").closest("[data-active]")).not.toBeNull();
+		expect(screen.getByText("GPT Test").closest("[data-active]")).toBeNull();
 		expect(screen.getByText("GPT Other").closest("[data-active]")).toBeNull();
 	});
 

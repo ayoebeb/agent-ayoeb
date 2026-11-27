@@ -285,21 +285,26 @@ function ReviewerHarnessOption({
 				/>
 			</OptionMenuSubTrigger>
 			<OptionMenuSubContent className="w-[15rem]">
-				{(!isCurrentHarness || (!isCurrentDefaultSelection && !defaultModel)) && (
-					<OptionMenuItem onSelect={selectDefault}>
-						{t(catalog?.selectionMode === "mode" ? "settings.models.useAgentMode" : "settings.models.useAgentModel")}
+				{/* A model pick is sent as itself, so "no pick" needs its own entry. */}
+				{(catalog?.selectionMode !== "mode" || !isCurrentHarness || (!isCurrentDefaultSelection && !defaultModel)) && (
+					<OptionMenuItem onSelect={selectDefault} active={catalog?.selectionMode !== "mode" && isCurrentDefaultSelection}>
+						<span className="flex min-w-0 items-center justify-between gap-3">
+							<span className="min-w-0 truncate">{t(catalog?.selectionMode === "mode" ? "settings.models.useAgentMode" : "settings.models.useAgentModel")}</span>
+							{catalog?.selectionMode !== "mode" && isCurrentDefaultSelection ? <Check aria-hidden="true" className="size-4" /> : null}
+						</span>
 					</OptionMenuItem>
 				)}
 				{!catalogKnown ? (
 					<OptionMenuItem disabled>{t("common.loading", { defaultValue: "Loading…" })}</OptionMenuItem>
 				) : null}
 				{options.map((option) => {
-					const config = option.value === defaultModel ? {} : option.kind === "mode" ? { mode: option.value } : { model: option.value };
+					// A model is stored literally, the catalog's default too: no model
+					// means the project's or agent's own choice, which can differ.
+					const config = option.kind === "model" ? { model: option.value } : option.value === defaultModel ? {} : { mode: option.value };
 					const selected =
 						isCurrentHarness &&
-						((option.kind === "mode" && currentMode === option.value) ||
-							(option.kind === "model" && currentModel === option.value) ||
-							(isCurrentDefaultSelection && option.value === defaultModel));
+						((option.kind === "mode" && (currentMode === option.value || (isCurrentDefaultSelection && option.value === defaultModel))) ||
+							(option.kind === "model" && currentModel === option.value));
 					return (
 						<OptionMenuItem
 							key={`${option.kind}:${option.value}`}
