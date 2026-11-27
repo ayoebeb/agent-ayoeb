@@ -83,7 +83,7 @@ func newPreviewCommand(ctx *commandContext) *cobra.Command {
 		Long: "Start a session-owned dev server and open its preview. Configurations come from " +
 			".ao/launch.json in the project's main checkout, shared by every worktree, and in " +
 			"the worktree itself, which replaces shared entries of the same name.",
-		Args:  atMostOneArg,
+		Args: atMostOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configuration := ""
 			if len(args) == 1 {
