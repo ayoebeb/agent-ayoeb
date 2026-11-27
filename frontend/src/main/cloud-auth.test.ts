@@ -707,9 +707,48 @@ describe("registerCloudProtocol", () => {
     vi.clearAllMocks();
     (app as { isPackaged: boolean }).isPackaged = options.isPackaged;
     vi.mocked(app.isDefaultProtocolClient).mockReturnValue(options.ownsScheme ?? false);
-    const { registerCloudProtocol } = await import("./cloud-auth");
-    return { app, registerCloudProtocol };
+    const { beginCloudSignIn, registerCloudProtocol } = await import("./cloud-auth");
+    return { app, beginCloudSignIn, registerCloudProtocol };
   }
+
+  // Starts a sign-in on a freshly loaded build and records whether the claim was
+  // made before the browser opened.
+  async function signIn(options: Parameters<typeof load>[0]) {
+    const { app, beginCloudSignIn } = await load(options);
+    mocks.encryptionAvailable = true;
+    mocks.getAuthorizationUrlWithPKCE.mockResolvedValue({ url: "https://workos.example/authorize", state: "s", codeVerifier: "v" });
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "ao-cloud-protocol-"));
+    try {
+      await beginCloudSignIn(dataDir);
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+    expect(mocks.openExternal).toHaveBeenCalledTimes(1);
+    return app;
+  }
+
+  const deepLinkDevBuild = { isPackaged: false, redirect: "ao-app://callback", platform: "win32" } as const;
+
+  it("re-claims a lost ao-app:// before opening the browser to sign in", async () => {
+    const app = await signIn(deepLinkDevBuild);
+    expect(app.isDefaultProtocolClient).toHaveBeenCalledWith("ao-app", process.execPath, [devScript]);
+    expect(app.setAsDefaultProtocolClient).toHaveBeenCalledWith("ao-app", process.execPath, [devScript]);
+    expect(vi.mocked(app.setAsDefaultProtocolClient).mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.openExternal.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("leaves an intact claim alone when signing in", async () => {
+    const app = await signIn({ ...deepLinkDevBuild, ownsScheme: true });
+    expect(app.setAsDefaultProtocolClient).not.toHaveBeenCalled();
+  });
+
+  it("does not claim ao-app:// for a loopback sign-in", async () => {
+    // Port 0: the one-shot callback server must not need port 3000 to be free.
+    const app = await signIn({ isPackaged: false, redirect: "http://127.0.0.1:0/callback" });
+    expect(app.isDefaultProtocolClient).not.toHaveBeenCalled();
+    expect(app.setAsDefaultProtocolClient).not.toHaveBeenCalled();
+  });
 
   it("claims ao-app:// for the packaged app, and keeps it", async () => {
     const { app, registerCloudProtocol } = await load({ isPackaged: true });

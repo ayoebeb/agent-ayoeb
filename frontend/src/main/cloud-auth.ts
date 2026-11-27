@@ -498,6 +498,8 @@ export async function beginCloudSignIn(dataDir: string): Promise<void> {
   });
   if (useLoopbackRedirect) {
     startLoopbackCallbackServer(dataDir);
+  } else {
+    ensureCloudProtocol();
   }
   await shell.openExternal(url);
 }
@@ -704,6 +706,24 @@ export async function showCloudSignInFailure(error: unknown): Promise<void> {
   });
 }
 
+// A dev build is launched as `electron <app dir>`; Windows ties the scheme to
+// that exact command, so every protocol call names it.
+function devProtocolClient(): [path?: string, args?: string[]] {
+  return process.defaultApp && process.argv.length >= 2
+    ? [process.execPath, [path.resolve(process.argv[1])]]
+    : [];
+}
+
+// The claim made at startup can be lost while the app runs (another app's
+// uninstaller deletes it, or another build takes it), and a deep-link sign-in
+// then has nowhere to return to. Checked again just before the browser opens.
+function ensureCloudProtocol(): void {
+  const client = devProtocolClient();
+  if (!app.isDefaultProtocolClient("ao-app", ...client)) {
+    app.setAsDefaultProtocolClient("ao-app", ...client);
+  }
+}
+
 // registerCloudProtocol makes this build the ao-app:// handler, or gives the
 // scheme up when it shouldn't hold it. Call it once this process is the app's
 // single instance, before app.whenReady().
@@ -723,12 +743,7 @@ export async function showCloudSignInFailure(error: unknown): Promise<void> {
 // set to a bounce page or ao-app://callback) does need the scheme. It claims it
 // for as long as it runs and gives it back when it quits.
 export function registerCloudProtocol(): void {
-  // A dev build is launched as `electron <app dir>`; Windows ties the scheme to
-  // that exact command, so every call below names it.
-  const devApp: [path?: string, args?: string[]] =
-    process.defaultApp && process.argv.length >= 2
-      ? [process.execPath, [path.resolve(process.argv[1])]]
-      : [];
+  const devApp = devProtocolClient();
   const canRelease = process.platform !== "linux";
   if (!app.isPackaged && useLoopbackRedirect) {
     if (canRelease && app.isDefaultProtocolClient("ao-app", ...devApp)) {

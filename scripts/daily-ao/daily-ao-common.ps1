@@ -76,7 +76,9 @@ function Test-PathInside([string]$Child, [string]$Parent) {
 # objects from; none by default), fnmRoot (where fnm keeps Node; null = ignore
 # fnm), cloudAuthRedirect (null = never claim ao-app://), extraEnv, goZipCache,
 # nodeZipCache, simulation, envRegKey (simulation only: the HKCU subkey that
-# stands in for Environment, so a simulation never touches the real user PATH).
+# stands in for Environment, so a simulation never touches the real user PATH),
+# protocolRegKey (simulation only: the HKCU subkey that stands in for
+# Software\Classes\ao-app; without it a simulation leaves the link alone).
 function Get-DailyConfig {
 	param([string]$ConfigFile)
 	$o = @{}
@@ -120,7 +122,7 @@ function Get-DailyConfig {
 	# start the window through the "Ayo (daily) openen" task as session 0 would,
 	# and treat named tasks as boot tasks (only admins can create a task with a
 	# boot trigger, so the simulation's copy has none).
-	foreach ($k in 'forceTaskHelper', 'frontendViaTask', 'simBootTasks', 'envRegKey') {
+	foreach ($k in 'forceTaskHelper', 'frontendViaTask', 'simBootTasks', 'envRegKey', 'protocolRegKey') {
 		if ($o[$k] -and -not $isSimulation) { throw "Config key '$k' is only allowed in a simulation." }
 	}
 	# The user PATH lives in HKCU\Environment. A simulation gets its own key (a
@@ -131,6 +133,12 @@ function Get-DailyConfig {
 		throw 'A simulation config must set its own envRegKey (never the real user environment).'
 	}
 	$manageUserPath = $isReal -or [bool]$o['envRegKey']
+	# Same rule for the ao-app:// link: there is one per Windows user, so only the
+	# real AO home writes it, and a simulation only below its own key.
+	$protocolRegKey = if ($o['protocolRegKey']) { [string]$o['protocolRegKey'] } else { 'Software\Classes\ao-app' }
+	if ($o['protocolRegKey'] -and $protocolRegKey.Trim('\') -match '^Software\\Classes(\\|$)') {
+		throw 'A simulation config must set its own protocolRegKey outside Software\Classes (never the real ao-app link).'
+	}
 
 	[pscustomobject]@{
 		AoHome            = $aoHome
@@ -152,6 +160,8 @@ function Get-DailyConfig {
 		BinDir            = Join-Path $dailyDir 'bin'
 		EnvRegKey         = $envRegKey
 		ManageUserPath    = $manageUserPath
+		ProtocolRegKey    = $protocolRegKey
+		ManageProtocol    = $isReal -or [bool]$o['protocolRegKey']
 		Checkout          = $checkout
 		Frontend          = Join-Path $checkout 'frontend'
 		ToolsDir          = $toolsDir
@@ -607,6 +617,72 @@ function Sync-DailyCli($cfg) {
 	} catch {
 		Write-Warn2 "stabiele ao bijwerken mislukt (de update zelf gaat door): $_"
 		return 'failed'
+	}
+}
+
+# --- ao-app:// (Cloud sign-in return, billing links) -------------------------------
+# The dev Electron claims the link only when it starts and gives it back when it
+# quits, and another app can delete it (the old installed app's uninstaller does).
+# Without it the browser has nowhere to return to after signing in. HKCU only.
+
+function Get-AoAppElectronExe($cfg) { Join-Path ([IO.Path]::GetFullPath($cfg.Frontend)) 'node_modules\electron\dist\electron.exe' }
+
+# Exactly what the dev Electron writes (registerCloudProtocol in cloud-auth.ts).
+function Get-AoAppProtocolCommand($cfg) {
+	return "`"$(Get-AoAppElectronExe $cfg)`" `"$([IO.Path]::GetFullPath($cfg.Frontend))`" `"%1`""
+}
+
+# A loopback redirect never comes back through ao-app:// (the app releases it then).
+function Test-AoAppProtocolUsed($cfg) {
+	return [bool]$cfg.CloudAuthRedirect -and $cfg.CloudAuthRedirect -notmatch '^\s*https?://(127\.0\.0\.1|localhost)([:/?#]|\s*$)'
+}
+
+# Read-only. State is 'ok', 'missing' or 'other'; Command is what is registered.
+function Get-AoAppProtocolStatus($cfg) {
+	$command = $null; $isUrl = $false
+	$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($cfg.ProtocolRegKey, $false)
+	if ($key) {
+		try {
+			$isUrl = $null -ne $key.GetValue('URL Protocol', $null)
+			$sub = $key.OpenSubKey('shell\open\command', $false)
+			if ($sub) { try { $command = [string]$sub.GetValue('', '') } finally { $sub.Dispose() } }
+		} finally { $key.Dispose() }
+	}
+	$state = if (-not $isUrl -or -not $command) { 'missing' } elseif ($command -ieq (Get-AoAppProtocolCommand $cfg)) { 'ok' } else { 'other' }
+	return [pscustomobject]@{ State = $state; Command = $command }
+}
+
+# Points ao-app:// at the daily Electron when it is missing or points elsewhere.
+# Only while the daily setup is active, so -Prepare or a rollback never takes the
+# link from the installed app. Never throws: it must not fail a start or update.
+function Ensure-AoAppProtocol($cfg) {
+	try {
+		if (-not $cfg.ManageProtocol -or -not (Test-AoAppProtocolUsed $cfg)) { return }
+		if (-not (Read-DailyState $cfg)['active']) { return }
+		if (-not (Test-Path -LiteralPath (Get-AoAppElectronExe $cfg))) { return }
+		$status = Get-AoAppProtocolStatus $cfg
+		if ($status.State -eq 'ok') { return }
+		$key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($cfg.ProtocolRegKey)
+		try {
+			$key.SetValue('', 'URL:ao-app')
+			$key.SetValue('URL Protocol', '')
+			$sub = $key.CreateSubKey('shell\open\command')
+			try { $sub.SetValue('', (Get-AoAppProtocolCommand $cfg)) } finally { $sub.Dispose() }
+		} finally { $key.Dispose() }
+		Write-Ok "aanmeldlink ao-app:// hersteld ($(if ($status.State -eq 'missing') { 'ontbrak' } else { "wees naar $($status.Command)" }))"
+	} catch { Write-Warn2 "aanmeldlink ao-app:// herstellen mislukt: $_" }
+}
+
+# The -CheckOnly line. Changes nothing.
+function Write-AoAppProtocolCheck($cfg) {
+	if (-not (Test-AoAppProtocolUsed $cfg)) { Write-Ok 'sign-in link: niet nodig (cloudAuthRedirect gaat niet via ao-app://)'; return }
+	if (-not $cfg.ManageProtocol) { Write-Note 'sign-in link: niet beheerd (niet de echte AO-map)'; return }
+	$status = Get-AoAppProtocolStatus $cfg
+	$later = '(wordt hersteld bij een start zodra de daily setup aan staat)'
+	switch ($status.State) {
+		'ok' { Write-Ok 'sign-in link: OK' }
+		'missing' { Write-Note "sign-in link: missing $later" }
+		default { Write-Note "sign-in link: points to $($status.Command) $later" }
 	}
 }
 
@@ -1910,6 +1986,7 @@ function Invoke-SwitchCheck($cfg, [hashtable]$State, [switch]$Preflight) {
 
 	# --- Desktop credentials ------------------------------------------------------
 	Write-Step 'Cloud-aanmelding en opgeslagen remotes'
+	try { Write-AoAppProtocolCheck $cfg } catch { Write-Warn2 "sign-in link niet te lezen: $_" }
 	$sync = @(Get-CredentialSyncPlan $cfg)
 	if ($sync.Count) { foreach ($c in $sync) { Write-Note "bij het starten: $($c.Label)" } }
 	else { Write-Ok 'gelijk of afwezig; er wordt niets gekopieerd' }
