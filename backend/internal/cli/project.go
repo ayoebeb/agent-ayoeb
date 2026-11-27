@@ -444,7 +444,7 @@ func buildProjectConfig(opts projectSetConfigOptions, changed func(name string) 
 		cfg.PreRemove = opts.preRemove
 	}
 	if changed("reviewer") {
-		cfg.Reviewers = reviewersForFlags(opts.reviewers)
+		cfg.Reviewers = reviewersForFlags(opts.reviewers, cfg.Reviewers)
 	}
 	return cfg, nil
 }
@@ -467,8 +467,9 @@ func (c *commandContext) currentProjectConfig(ctx context.Context, id string) (p
 }
 
 // reviewersForFlags turns repeated --reviewer harness values into the config
-// shape. The daemon validates the harness vocabulary.
-func reviewersForFlags(harnesses []string) []reviewerConfig {
+// shape. A harness already configured keeps its model and tuning. The daemon
+// validates the harness vocabulary.
+func reviewersForFlags(harnesses []string, saved []reviewerConfig) []reviewerConfig {
 	if len(harnesses) == 0 {
 		return nil
 	}
@@ -478,7 +479,11 @@ func reviewersForFlags(harnesses []string) []reviewerConfig {
 		if harness == "" {
 			continue
 		}
-		reviewers = append(reviewers, reviewerConfig{Harness: harness})
+		reviewer := reviewerConfig{Harness: harness}
+		if i := slices.IndexFunc(saved, func(r reviewerConfig) bool { return r.Harness == harness }); i >= 0 {
+			reviewer = saved[i]
+		}
+		reviewers = append(reviewers, reviewer)
 	}
 	if len(reviewers) == 0 {
 		return nil

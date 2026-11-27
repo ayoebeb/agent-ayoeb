@@ -175,7 +175,10 @@ export function AgentModelField({
 	// Cloud saves only explicit picks, but an unset model still names the one the
 	// agent uses by default rather than a generic placeholder.
 	const catalogDefault = followCatalogDefaults ? undefined : catalog?.models?.find((item) => item.isDefault && isConcreteModelID(item.id));
-	const unsetLabel = emptyLabel ?? (catalogDefault ? agentModelDisplayLabel(agentId, catalogDefault.label) : undefined);
+	// A local project stores what is picked, so an unset field says it is unset
+	// rather than naming the catalog's default.
+	const unsetLabel = emptyLabel ?? (followCatalogDefaults ? t("settings.models.useConfiguredDefault")
+		: catalogDefault ? agentModelDisplayLabel(agentId, catalogDefault.label) : undefined);
 	const customModelEntry = catalog?.customModelEntry ?? (catalog?.allowCustom || allowCustomFallback ? "direct" : "none");
 	const refreshCatalog = async () => {
 		if (cloudSourced) {
@@ -213,6 +216,8 @@ export function AgentModelField({
 						disabled={catalogFetching || agentId === ""}
 						onChange={selectCatalogModel}
 						onCustom={selectCustomModel}
+						explicitDefault={followCatalogDefaults}
+						onUseDefault={followCatalogDefaults ? () => selectCatalogModel("") : undefined}
 						triggerClassName={cn(MENU_TRIGGER_CHROME, "w-fit")}
 						compact
 						recentScope={agentId}

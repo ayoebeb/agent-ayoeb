@@ -1282,3 +1282,22 @@ func TestAuthStatusUsesCustomModelProviderKey(t *testing.T) {
 		})
 	}
 }
+
+func TestConfiguredModel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	if got := ConfiguredModel(); got != "" {
+		t.Fatalf("without config.toml = %q", got)
+	}
+	for config, want := range map[string]string{
+		"model = \"gpt-a\"\n": "gpt-a",
+		"model = \"gpt-a\"\nprofile = \"work\"\n[profiles.work]\nmodel = \"gpt-b\"\n": "gpt-b",
+	} {
+		if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := ConfiguredModel(); got != want {
+			t.Fatalf("ConfiguredModel(%q) = %q, want %q", config, got, want)
+		}
+	}
+}

@@ -384,6 +384,33 @@ func codexHomeDir() string {
 	return filepath.Join(userHome, ".codex")
 }
 
+// ConfiguredModel is the model config.toml makes Codex launch with when none is
+// passed, with the active profile's choice first. Empty when it names none.
+func ConfiguredModel() string {
+	home := codexHomeDir()
+	if home == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		return ""
+	}
+	var config struct {
+		Model    string `toml:"model"`
+		Profile  string `toml:"profile"`
+		Profiles map[string]struct {
+			Model string `toml:"model"`
+		} `toml:"profiles"`
+	}
+	if toml.Unmarshal(data, &config) != nil {
+		return ""
+	}
+	if model := strings.TrimSpace(config.Profiles[config.Profile].Model); model != "" {
+		return model
+	}
+	return strings.TrimSpace(config.Model)
+}
+
 type codexModelProvider struct {
 	EnvKey             string `toml:"env_key"`
 	RequiresOpenAIAuth bool   `toml:"requires_openai_auth"`

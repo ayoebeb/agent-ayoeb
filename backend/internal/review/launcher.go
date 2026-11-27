@@ -165,6 +165,8 @@ type agentLauncher struct {
 	auth       agentAuthResolver
 	executable func() (string, error)
 	chat       ReviewerChatController
+	// defaultModel picks the model of a reviewer launched with none configured.
+	defaultModel DefaultModelFunc
 }
 
 type preLaunchReviewer interface {
@@ -195,6 +197,28 @@ func WithAgentAuth(auth agentAuthResolver) LauncherOption {
 	return func(l *agentLauncher) {
 		l.auth = auth
 	}
+}
+
+// DefaultModelFunc returns the model for a reviewer with none configured, or
+// "" to leave the choice to the agent.
+type DefaultModelFunc func(ctx context.Context, harness domain.ReviewerHarness) (string, error)
+
+// WithDefaultModel keeps a reviewer with no configured model from silently
+// inheriting an agent default the account cannot run.
+func WithDefaultModel(resolve DefaultModelFunc) LauncherOption {
+	return func(l *agentLauncher) { l.defaultModel = resolve }
+}
+
+func (l *agentLauncher) withDefaultModel(ctx context.Context, spec LaunchSpec) (LaunchSpec, error) {
+	if l.defaultModel == nil || spec.AgentConfig.Model != "" {
+		return spec, nil
+	}
+	model, err := l.defaultModel(ctx, spec.Harness)
+	if err != nil {
+		return spec, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	spec.AgentConfig.Model = model
+	return spec, nil
 }
 
 // WithExecutable overrides os.Executable for reviewer PATH pinning. Production
@@ -459,6 +483,10 @@ func truncateReviewHistoryBody(body string) string {
 }
 
 func (l *agentLauncher) Spawn(ctx context.Context, spec LaunchSpec) (LaunchResult, error) {
+	spec, err := l.withDefaultModel(ctx, spec)
+	if err != nil {
+		return LaunchResult{}, err
+	}
 	inv, err := l.prepareInvocation(ctx, spec)
 	if err != nil {
 		return LaunchResult{}, err
@@ -476,6 +504,10 @@ func (l *agentLauncher) Spawn(ctx context.Context, spec LaunchSpec) (LaunchResul
 }
 
 func (l *agentLauncher) RestoreTerminal(ctx context.Context, spec LaunchSpec) (LaunchResult, error) {
+	spec, err := l.withDefaultModel(ctx, spec)
+	if err != nil {
+		return LaunchResult{}, err
+	}
 	inv, err := l.prepareIdleInvocation(spec)
 	if err != nil {
 		return LaunchResult{}, err

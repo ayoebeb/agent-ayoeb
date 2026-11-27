@@ -129,29 +129,10 @@ function LocalProjectSettingsAdapter({
 	);
 }
 
-function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, section = "general", onSaveState }: {
-	project: Project;
-	projectId: string;
-	hostId?: string;
-	hostConnected: boolean;
-	onSaved: () => Promise<void>;
-	section?: ProjectSettingsSection;
-	onSaveState?: (state: ProjectSettingsSaveState) => void;
-}) {
-	const { t } = useTranslation();
-	const queryClient = useQueryClient();
-	const setOrchestratorReplacementError = useUiStore((state) => state.setOrchestratorReplacementError);
-	const workspaceQuery = useQuery({ ...workspaceQueryOptions, enabled: !hostId });
-	const remoteProjectQuery = useRemoteProjectQuery(hostId ?? "", projectId);
+function projectSettingsDraft(project: Project): ProjectSettingsDraft {
 	const config = project.config ?? {};
-	const isScratchProject = project.kind === "scratch";
-	const { settings } = useSettings(hostId);
-	const intakeVisible = !isScratchProject && !!settings?.trackerIntakeEnabled;
-	const workspace = hostId ? remoteProjectQuery.data : workspaceQuery.data?.find((item) => item.id === projectId);
-	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
-	const openProjectImport = useSessionImportStore((state) => state.openProjectImport);
 	const intake: TrackerIntakeConfig = config.trackerIntake ?? {};
-	const initialValues: ProjectSettingsDraft = {
+	return {
 		displayName: project.name,
 		defaultBranch: config.defaultBranch ?? DEFAULT_BRANCH_AUTO,
 		sessionPrefix: config.sessionPrefix ?? "",
@@ -176,12 +157,69 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
 	};
+}
+
+const ROLE_DRAFT_FIELDS = [
+	["workerAgent", "workerModel", "workerMode", "workerEffort", "workerPermissions"],
+	["orchestratorAgent", "orchestratorModel", "orchestratorMode", "orchestratorEffort", "orchestratorPermissions"],
+	["reviewerHarness", "reviewerModel", "reviewerMode", "reviewerEffort", "reviewerPermissions"],
+] as const;
+
+/**
+ * The stored settings with only the fields the user edited laid over them, so
+ * saving one field never rewrites another from what the form read earlier.
+ */
+function applyDraftEdits(stored: ProjectSettingsDraft, previous: ProjectSettingsDraft, values: ProjectSettingsDraft): ProjectSettingsDraft {
+	const next: Record<string, unknown> = { ...stored };
+	const take = (key: keyof ProjectSettingsDraft) => { next[key] = values[key]; };
+	const edited = (key: keyof ProjectSettingsDraft) => values[key] !== previous[key];
+	(Object.keys(values) as Array<keyof ProjectSettingsDraft>).filter(edited).forEach(take);
+	for (const fields of ROLE_DRAFT_FIELDS) {
+		const [agent] = fields;
+		// A model, effort or mode belongs to its agent: when the agent was switched
+		// here, or elsewhere under an edit made here, the role is saved as shown.
+		if (edited(agent) || (stored[agent] !== previous[agent] && fields.some(edited))) fields.forEach(take);
+	}
+	return next as ProjectSettingsDraft;
+}
+
+function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, section = "general", onSaveState }: {
+	project: Project;
+	projectId: string;
+	hostId?: string;
+	hostConnected: boolean;
+	onSaved: () => Promise<void>;
+	section?: ProjectSettingsSection;
+	onSaveState?: (state: ProjectSettingsSaveState) => void;
+}) {
+	const { t } = useTranslation();
+	const queryClient = useQueryClient();
+	const setOrchestratorReplacementError = useUiStore((state) => state.setOrchestratorReplacementError);
+	const workspaceQuery = useQuery({ ...workspaceQueryOptions, enabled: !hostId });
+	const remoteProjectQuery = useRemoteProjectQuery(hostId ?? "", projectId);
+	const config = project.config ?? {};
+	const isScratchProject = project.kind === "scratch";
+	const { settings } = useSettings(hostId);
+	const intakeVisible = !isScratchProject && !!settings?.trackerIntakeEnabled;
+	const workspace = hostId ? remoteProjectQuery.data : workspaceQuery.data?.find((item) => item.id === projectId);
+	const activeOrchestrator = newestActiveOrchestrator(workspace?.sessions ?? []);
+	const openProjectImport = useSessionImportStore((state) => state.openProjectImport);
+	const initialValues = projectSettingsDraft(project);
 	const lastOrchestratorRef = useRef(config.orchestrator?.agent ?? "");
 	const replacementAttemptedRef = useRef(false);
 	const replacementFailedRef = useRef(false);
 	const agentsQuery = useAgentReadinessQuery(true, hostId);
 	useEnsureAgentReadiness({ hostId });
-	const persist = async (values: ProjectSettingsDraft): Promise<SettingsSaveResult> => {
+	const persist = async (edited: ProjectSettingsDraft, previous: ProjectSettingsDraft): Promise<SettingsSaveResult> => {
+		const client = hostId ? clientForHost(hostId) : apiClient;
+		// The PUT replaces the whole config, so build it on the stored one, not on
+		// what this page read when it opened.
+		const current = await client.GET("/api/v1/projects/{id}", { params: { path: { id: projectId } } });
+		if (current.error) throw apiErrorException(current.error);
+		if (current.data?.status !== "ok") throw new Error(t("settings.project.degraded"));
+		const latest = current.data.project as Project;
+		const config = latest.config ?? {};
+		const values = applyDraftEdits(projectSettingsDraft(latest), previous, edited);
 		const savedKey = JSON.stringify(values);
 		const displayName = values.displayName.trim();
 		const { model: _legacyModel, mode: _legacyMode, effort: _legacyEffort, permissions: _legacyPermissions, ...sharedAgentConfig } = config.agentConfig ?? {};
@@ -247,6 +285,8 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 										values.reviewerPermissions,
 									),
 								},
+								// The form edits the first reviewer only; keep the rest.
+								...(config.reviewers?.slice(1).filter((reviewer) => reviewer.harness !== values.reviewerHarness) ?? []),
 							]
 						: undefined,
 					trackerIntake: buildIntake(
@@ -260,7 +300,7 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 					autoReview: values.autoReview,
 					workersRequestReview: values.workersRequestReview || undefined,
 				};
-		const { error } = await (hostId ? clientForHost(hostId) : apiClient).PUT("/api/v1/projects/{id}", {
+		const { error } = await client.PUT("/api/v1/projects/{id}", {
 			params: { path: { id: projectId } },
 			body: { displayName, config: next },
 		});
@@ -311,9 +351,9 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 			savedKey,
 		} satisfies SettingsSaveResult;
 	};
-	const save = async (values: ProjectSettingsDraft) => {
+	const save = async (values: ProjectSettingsDraft, previous: ProjectSettingsDraft) => {
 		try {
-			const result = await persist(values);
+			const result = await persist(values, previous);
 			void captureRendererEvent("ao.settings.saved", { project_id: projectId });
 			void queryClient.invalidateQueries({ queryKey: projectQueryKey(projectId, hostId) });
 			void queryClient.invalidateQueries({ queryKey: hostId ? ["project-config", hostId, projectId] : ["project-config", projectId] });
@@ -322,7 +362,7 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 				if (!hostId) setOrchestratorReplacementError(projectId, result.replacementFailure);
 				if (result.spawnError) captureOrchestratorReplacementFailure(result.spawnError, hostId ? refKey({ host: hostId, id: projectId }) : projectId);
 			}
-			return { replacementError: result.replacementError };
+			return { values: JSON.parse(result.savedKey) as ProjectSettingsDraft, replacementError: result.replacementError };
 		} catch (error) {
 			void captureRendererEvent("ao.renderer.settings_save_failed", { project_id: projectId });
 			throw error;

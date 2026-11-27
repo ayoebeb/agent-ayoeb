@@ -503,6 +503,70 @@ describe("ProjectSettingsForm", () => {
 		);
 	});
 
+	const discoveredCodexModels = {
+		agent: "codex", selectionMode: "catalog", allowCustom: false,
+		models: [{ id: "gpt-6.2-astra", label: "Astra" }, { id: "gpt-6.2-sol", label: "Sol", isDefault: true }],
+	};
+	const codexReviewProject = (config: Record<string, unknown>) => ({
+		id: "proj-1", name: "Project One", kind: "single_repo", path: "/repo/project-one", repo: "", defaultBranch: "main", config,
+	});
+
+	it("saves the picked model even when the catalog marks it as the default", async () => {
+		const project = codexReviewProject({
+			worker: { agent: "claude-code" }, orchestrator: { agent: "claude-code" },
+			reviewers: [{ harness: "codex", agentConfig: { effort: "xhigh" } }],
+		});
+		getMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/agents/readiness") return agentCatalogResponse;
+			if (path === "/api/v1/agents/{agent}/models") return { data: discoveredCodexModels };
+			return { data: { status: "ok", project } };
+		});
+		renderSettings("proj-1", undefined, "agents");
+		const picker = await screen.findByRole("button", { name: "Reviewer model" });
+		await waitFor(() => expect(picker).toBeEnabled());
+		// Nothing is saved, so the field must not read as if Sol were.
+		expect(picker).toHaveTextContent("Use project or agent default");
+		await userEvent.click(picker);
+		await userEvent.click(screen.getByRole("menuitem", { name: /Sol/ }));
+		submitSettings();
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		expect(putMock.mock.calls[0][1].body.config.reviewers).toEqual([
+			{ harness: "codex", agentConfig: { effort: "xhigh", model: "gpt-6.2-sol" } },
+		]);
+	});
+
+	it("keeps settings changed elsewhere when saving another field", async () => {
+		const config: Record<string, unknown> = {
+			worker: { agent: "claude-code" }, orchestrator: { agent: "claude-code" },
+			reviewers: [{ harness: "codex" }],
+		};
+		let stored = codexReviewProject(config);
+		getMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/agents/readiness") return agentCatalogResponse;
+			if (path === "/api/v1/agents/{agent}/models") return { data: discoveredCodexModels };
+			return { data: { status: "ok", project: stored } };
+		});
+		renderSettings("proj-1", undefined, "agents");
+		const picker = await screen.findByRole("button", { name: "Reviewer model" });
+		await waitFor(() => expect(picker).toBeEnabled());
+		// Saved by someone else after this page read the project.
+		stored = codexReviewProject({
+			...config,
+			worker: { agent: "claude-code", agentConfig: { model: "claude-sonnet-5-5" } },
+			reviewers: [{ harness: "codex", agentConfig: { effort: "xhigh" } }, { harness: "claude-code" }],
+		});
+		await userEvent.click(picker);
+		await userEvent.click(screen.getByRole("menuitem", { name: /Astra/ }));
+		submitSettings();
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		const saved = putMock.mock.calls[0][1].body.config;
+		expect(saved.worker.agentConfig).toEqual({ model: "claude-sonnet-5-5" });
+		expect(saved.reviewers).toEqual([
+			{ harness: "codex", agentConfig: { effort: "xhigh", model: "gpt-6.2-astra" } },
+			{ harness: "claude-code" },
+		]);
+	});
+
 	it("saves Claude effort from the combined model picker", async () => {
 		getMock.mockImplementation(async (path: string) => {
 			if (path === "/api/v1/agents") return agentCatalogResponse;
@@ -1114,7 +1178,7 @@ describe("ProjectSettingsForm", () => {
 		renderSettings("proj-1", undefined, "agents");
 
 		expect(await screen.findAllByText("model refresh unavailable")).toHaveLength(3);
-		expect(screen.getByRole("button", { name: "Worker model" })).toHaveTextContent("Select model");
+		expect(screen.getByRole("button", { name: "Worker model" })).toHaveTextContent("Use project or agent default");
 	});
 
 	it("shows cached models immediately and deduplicates background revalidation", async () => {
@@ -1158,7 +1222,7 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings("proj-1", undefined, "agents");
 
-		expect(await screen.findByRole("button", { name: "Worker model" })).toHaveTextContent("Select model");
+		expect(await screen.findByRole("button", { name: "Worker model" })).toHaveTextContent("Use project or agent default");
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(postMock).toHaveBeenCalledWith("/api/v1/agents/{agent}/models/refresh", {
 			params: {

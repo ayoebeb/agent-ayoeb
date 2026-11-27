@@ -12,6 +12,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/activitydispatch"
+	codexagent "github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/codex"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/fx/herdr"
 	agentregistry "github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/registry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/container/dockerreap"
@@ -405,6 +406,10 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 		}
 	}
 	reviewerChat, _ := chat.(reviewcore.ReviewerChatController)
+	var reviewerModel reviewcore.DefaultModelFunc
+	if models, ok := agentReadiness.(agentModelCatalog); ok {
+		reviewerModel = reviewerDefaultModel(models, codexagent.UsesCustomModelProvider, codexagent.ConfiguredModel, log)
+	}
 	reviewEngine := reviewcore.New(reviewcore.Deps{
 		// The manager's installer gate is bound after the installer is built.
 		HarnessUse: mgr,
@@ -415,7 +420,8 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 		Launcher: reviewcore.NewLauncher(reviewers, runtime, cfg.DataDir,
 			reviewcore.WithRunFilePath(cfg.RunFilePath),
 			reviewcore.WithAgentAuth(reviewerAgentAuth{readiness: agentReadiness}),
-			reviewcore.WithReviewerChat(reviewerChat)),
+			reviewcore.WithReviewerChat(reviewerChat),
+			reviewcore.WithDefaultModel(reviewerModel)),
 
 		ChatRecoveryDone: reviewerRecoveryDone,
 		// The daemon runs the recovery once boot reconciliation settled.
