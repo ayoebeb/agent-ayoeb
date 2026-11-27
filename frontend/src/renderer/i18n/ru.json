@@ -5037,6 +5037,7 @@
 	"live.open": "Open",
 	"live.restart": "Restart",
 	"live.stop": "Stop",
+	"live.stopServer": "Остановить {{label}}",
 	"live.openTerminalHere": "Open terminal in this folder",
 	"live.actionFailed": "That did not work. The server may already have stopped.",
 	"live.fact.command": "Command",

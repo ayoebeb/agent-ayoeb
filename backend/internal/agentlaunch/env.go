@@ -310,6 +310,28 @@ func nodeRuntimeDir(ctx context.Context, lookPath func(string) (string, error)) 
 	return ""
 }
 
+// PreferredNodeInstall picks one of several Node install directories named by
+// version (for example ~/.nvm/versions/node/v22.1.0): the one matching alias
+// when there is one, otherwise the newest. "" when paths is empty.
+func PreferredNodeInstall(paths []string, alias string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	sorted := append([]string(nil), paths...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return compareNodeVersion(filepath.Base(sorted[i]), filepath.Base(sorted[j])) > 0
+	})
+	want := normalizeNodeVersion(alias)
+	for _, path := range sorted {
+		version := normalizeNodeVersion(filepath.Base(path))
+		// An alias may name only a major or minor version ("22", "22.1").
+		if want != "" && (version == want || strings.HasPrefix(version, want+".")) {
+			return path
+		}
+	}
+	return sorted[0]
+}
+
 func versionedNodeMatches(pattern string) []string {
 	matches, _ := filepath.Glob(pattern)
 	sort.SliceStable(matches, func(i, j int) bool {

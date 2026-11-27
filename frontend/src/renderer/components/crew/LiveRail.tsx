@@ -18,12 +18,14 @@ import type { WorkspaceSession } from "../../types/workspace";
 import { TerminalPane } from "../TerminalPane";
 import { Button } from "../ui/button";
 import { Pressable } from "../ui/pressable";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { LiveHealthDot } from "./LiveServerChips";
 
 /**
- * The orchestrator's Live tab: every dev server running for the project, one
- * selected at a time, with what it is, who started it, its output, a terminal
- * you can type in (for servers AO started), and Open / Restart / Stop.
+ * The orchestrator's Live tab: every dev server running for the project in one
+ * list (worker, URL, Stop), and below it the selected one with what it is, who
+ * started it, its output, a terminal you can type in (for servers AO started),
+ * and Open / Restart / Stop.
  */
 export function LiveRail({ active, orchestrator }: { active: boolean; orchestrator: WorkspaceSession }) {
 	const { t } = useTranslation();
@@ -43,29 +45,82 @@ export function LiveRail({ active, orchestrator }: { active: boolean; orchestrat
 	return (
 		<div className="flex h-full min-h-0 flex-col" data-testid="live-rail">
 			{servers.length > 1 ? (
-				<div aria-label={t("live.list.aria")} className="flex shrink-0 flex-wrap gap-1 border-b border-border px-3 py-2" role="tablist">
-					{servers.map((server) => {
-						const isSelected = server.key === selected.key;
-						return (
-							<Pressable
-								aria-selected={isSelected}
-								className={cn(
-									"inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-mono text-caption text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
-									isSelected && "bg-accent text-foreground",
-								)}
-								data-active={isSelected ? "true" : undefined}
-								key={server.key}
-								onClick={() => setLiveServerKey(uiKey, server.key)}
-								role="tab"
-							>
-								<LiveHealthDot health={server.health} />
-								{liveServerLabel(server)}
-							</Pressable>
-						);
-					})}
-				</div>
+				<LiveServerList
+					onSelect={(key) => setLiveServerKey(uiKey, key)}
+					orchestrator={orchestrator}
+					selectedKey={selected.key}
+					servers={servers}
+				/>
 			) : null}
 			<LiveServerDetail key={selected.key} orchestrator={orchestrator} server={selected} />
+		</div>
+	);
+}
+
+/** All running servers at once, so none has to be selected to open or stop it. */
+function LiveServerList({
+	onSelect,
+	orchestrator,
+	selectedKey,
+	servers,
+}: {
+	onSelect: (key: string) => void;
+	orchestrator: WorkspaceSession;
+	selectedKey: string;
+	servers: readonly LiveServer[];
+}) {
+	const { t } = useTranslation();
+	const openInBrowser = useSessionBrowserLink(orchestrator);
+	const { stop } = useLiveServerActions(orchestrator);
+	return (
+		<div className="shrink-0 border-b border-border">
+			<ul aria-label={t("live.list.aria")} className="board-scrollbar max-h-48 divide-y divide-border overflow-y-auto">
+				{servers.map((server) => {
+					const isSelected = server.key === selectedKey;
+					const label = liveServerLabel(server);
+					return (
+						<li className={cn("flex items-center gap-2 px-3 py-1.5", isSelected && "bg-accent")} key={server.key}>
+							<div className="flex min-w-0 flex-1 flex-col items-start">
+								<Pressable
+									aria-current={isSelected ? "true" : undefined}
+									className="flex max-w-full items-center gap-1.5 rounded-sm text-left outline-none focus-visible:outline-2 focus-visible:outline-ring"
+									onClick={() => onSelect(server.key)}
+								>
+									<LiveHealthDot health={server.health} />
+									<span className="sr-only">{t(server.health === "up" ? "live.health.up" : "live.health.down")}</span>
+									<span className="shrink-0 font-mono text-caption text-foreground">{label}</span>
+									<span className="truncate text-caption text-muted-foreground">{server.sessionName || server.sessionId}</span>
+								</Pressable>
+								<a
+									className="max-w-full truncate rounded-sm pl-3 font-mono text-caption text-markdown-link underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+									href={server.url}
+									onClick={(event) => {
+										event.preventDefault();
+										openInBrowser(server.url);
+									}}
+								>
+									{server.url}
+								</a>
+							</div>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										aria-label={t("live.stopServer", { label })}
+										disabled={stop.isPending}
+										onClick={() => stop.mutate(server.key)}
+										size="icon-sm"
+										variant="destructive-ghost"
+									>
+										<CircleStop aria-hidden="true" className="size-icon-md" />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent side="left">{t("live.stop")}</TooltipContent>
+							</Tooltip>
+						</li>
+					);
+				})}
+			</ul>
+			{stop.isError ? <p className="px-3 py-1.5 text-xs text-destructive" role="alert">{t("live.actionFailed")}</p> : null}
 		</div>
 	);
 }

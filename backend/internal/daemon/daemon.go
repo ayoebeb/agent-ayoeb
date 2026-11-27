@@ -1053,6 +1053,8 @@ func Run(buildVersion string) error {
 	// Managed preview servers run in PTYs so the Live tab can attach a terminal.
 	managedPreview.SetTerminals(previewTerminals{terminals: shellTermSvc, runtime: runtimeAdapter})
 	reapAbandonedPreviewTerminals(ctx, shellTermSvc, log)
+	// Every worktree inherits the launch.json in its project's main checkout.
+	managedPreview.SetProjectRoot(managedPreviewProjectRoot(sessionSvc, projectSvc, log))
 	liveServers := newLiveServerService(liveServerDeps{dataDir: cfg.DataDir, managed: managedPreview, sessions: sessionSvc, projects: projectSvc, runtime: runtimeAdapter})
 	// Agents started by hand in a shell give its tab their logo and status.
 	if rt, ok := runtimeAdapter.(shellagent.Runtime); ok {

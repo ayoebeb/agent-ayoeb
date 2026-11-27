@@ -244,7 +244,7 @@ Selects what the desktop Browser panel displays for the session identified by `A
 | `ao preview status` | Show the managed preview process and recent bounded logs. |
 | `ao preview stop` | Stop the managed process tree. |
 
-`.ao/launch.json` is optional project configuration. Orchestrator does not infer or scaffold development servers, and static files do not require one.
+`.ao/launch.json` is optional project configuration. The one in the project's main checkout is inherited by every worktree; a worktree's own file replaces entries of the same name. An inherited entry gets a free port per worktree unless it sets `autoPort` or a fixed `url`, so pass `${PORT}` to the server. Orchestrator does not infer or scaffold development servers, and static files do not require one.
 
 ### `ao browser`
 
