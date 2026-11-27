@@ -74,6 +74,15 @@ const roleFields: Record<ProjectSettingsRole, RoleFields> = {
 	reviewer: { agent: "reviewerHarness", model: "reviewerModel", mode: "reviewerMode", effort: "reviewerEffort", permissions: "reviewerPermissions" },
 };
 
+/** Takes the values that changed on the server into a draft, keeping the user's unsaved edits. */
+function adoptServerValues(draft: ProjectSettingsDraft, saved: ProjectSettingsDraft, server: ProjectSettingsDraft): ProjectSettingsDraft {
+	const next: Record<string, unknown> = { ...draft };
+	for (const key of Object.keys(server) as Array<keyof ProjectSettingsDraft>) {
+		if (draft[key] === saved[key]) next[key] = server[key];
+	}
+	return next as ProjectSettingsDraft;
+}
+
 // Both persistence adapters render this page. Drafts, validation, autosave and
 // common controls live here so a UI change applies to local and Cloud projects.
 export function ProjectSettingsEditor({ initialValues, section, capabilities, details, workspaceRepos, repository, renderAgent, defaultReviewer = () => "", modelScope, modelHostId, cloudOrgId, reviewerWarning, autoReviewDescription, intakeDescription, save, onSaveState, saveUnchanged = false, disabled = false, generalExtra }: {
@@ -94,7 +103,8 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 	autoReviewDescription?: string;
 	/** The issue intake row's description, for an intake with rules of its own. */
 	intakeDescription?: string;
-	save: (values: ProjectSettingsDraft) => Promise<{ values?: ProjectSettingsDraft; replacementError?: string | null }>;
+	/** `previous` is what the form last knew as saved, so an adapter can write only the edited fields. */
+	save: (values: ProjectSettingsDraft, previous: ProjectSettingsDraft) => Promise<{ values?: ProjectSettingsDraft; replacementError?: string | null }>;
 	onSaveState?: (state: ProjectSettingsSaveState) => void;
 	saveUnchanged?: boolean;
 	/** Read-only sections appended to the General page (e.g. a Cloud project's Coder template). */
@@ -112,7 +122,7 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 	const [showSaving, setShowSaving] = useState(false);
 	const [validity, setValidity] = useState({ worker: true, orchestrator: true, reviewer: true });
 	const mutation = useMutation({
-		mutationFn: (values: ProjectSettingsDraft) => save(values),
+		mutationFn: (values: ProjectSettingsDraft) => save(values, JSON.parse(saved.current) as ProjectSettingsDraft),
 		onSuccess: (result, values) => {
 			const normalized = result.values ?? values;
 			saved.current = JSON.stringify(normalized);
@@ -126,6 +136,17 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 			setError(cause instanceof Error ? cause.message : t("settings.project.saveFailed"));
 		},
 	});
+	// The stored settings can change while the page is open (another window, the
+	// CLI, an agent). Show what is really saved instead of the first read.
+	const serverKey = JSON.stringify(initialValues);
+	const seenServerKey = useRef(serverKey);
+	useEffect(() => {
+		if (serverKey === seenServerKey.current || mutation.isPending) return;
+		seenServerKey.current = serverKey;
+		const lastSaved = JSON.parse(saved.current) as ProjectSettingsDraft;
+		saved.current = serverKey;
+		setDraft((current) => adoptServerValues(current, lastSaved, initialValues));
+	}, [serverKey, mutation.isPending]);
 	const dirty = JSON.stringify(draft) !== saved.current;
 	const intake = { enabled: draft.intakeEnabled, repo: draft.intakeRepo, assignee: draft.intakeAssignee };
 	const intakeIncomplete = capabilities.intake && intakeNeedsRule(intake);

@@ -297,6 +297,13 @@ func TestProjectSetConfig_FlagsUpdateOnlyChangedFields(t *testing.T) {
 			},
 		},
 		{
+			name: "naming a saved reviewer again keeps its tuning",
+			args: []string{"--reviewer", "claude-code", "--reviewer", "codex"},
+			change: func(cfg *domain.ProjectConfig) {
+				cfg.Reviewers = append(cfg.Reviewers, domain.ReviewerConfig{Harness: domain.ReviewerCodex})
+			},
+		},
+		{
 			name: "an empty flag value clears that field",
 			args: []string{"--session-prefix="},
 			change: func(cfg *domain.ProjectConfig) {

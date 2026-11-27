@@ -85,6 +85,7 @@ export function AgentModelCombobox({
 	agentId,
 	tuning,
 	disabled = false,
+	explicitDefault = false,
 	"aria-label": ariaLabel,
 }: {
 	value: string;
@@ -126,6 +127,12 @@ export function AgentModelCombobox({
 	/** Callers opt into a combined model and reasoning-effort menu. */
 	tuning?: ModelEffortSelection;
 	disabled?: boolean;
+	/**
+	 * For callers that store the pick: the catalog's default is saved as itself,
+	 * and an unset value reads as unset. The catalog's default is not always what
+	 * the agent launches with (Codex follows its own config.toml).
+	 */
+	explicitDefault?: boolean;
 	"aria-label": string;
 }) {
 	const { t } = useTranslation();
@@ -159,7 +166,7 @@ export function AgentModelCombobox({
 	// No provider default for these levels: AO picks one and saves it when the
 	// model is chosen, so the control never reads as unset.
 	const aoDefaultEffort = fallbackEffort(effortOptions, providerEffort);
-	const effectiveEffort = explicitEffort || defaultEffort || aoDefaultEffort || "";
+	const effectiveEffort = explicitEffort || (explicitDefault ? "" : defaultEffort) || aoDefaultEffort || "";
 	useApplyEffortDefault(
 		explicitModel,
 		tuning && !explicitEffort ? aoDefaultEffort : undefined,
@@ -182,7 +189,7 @@ export function AgentModelCombobox({
 	const normalizedSearch = normalizeSearch(search);
 	const searchIndex = useMemo(() => buildModelSearchIndex(listedModels), [listedModels]);
 	const defaultModel = concreteModels.find((model) => model.isDefault)?.id || "";
-	const effectiveModel = explicitModel || defaultModel;
+	const effectiveModel = explicitModel || (explicitDefault ? "" : defaultModel);
 	const variant = families ? findModelVariant(families, effectiveModel) : undefined;
 	// The row a Cursor variant id shows as is its model's.
 	const shownModel = variant?.family.id ?? effectiveModel;
@@ -247,7 +254,7 @@ export function AgentModelCombobox({
 			const next = rememberRecentModel(recentScope, modelID);
 			setSessionRecentModels((current) => ({ ...current, [recentScope]: next }));
 		}
-		onChange(modelID === defaultModel ? "" : modelID);
+		onChange(!explicitDefault && modelID === defaultModel ? "" : modelID);
 	};
 	const selectCatalogModel = (event: Event, item: IndexedModel) => {
 		const family = families?.find((entry) => entry.id === item.id);
@@ -301,7 +308,7 @@ export function AgentModelCombobox({
 					) : (
 						<span className="min-w-0 truncate">{currentLabel}</span>
 					)}
-					{showEffort && showEffortInTrigger && <span className="shrink-0 text-settings-muted"> · {currentEffortLabel}</span>}
+					{showEffort && showEffortInTrigger && (!explicitDefault || effectiveEffort) && <span className="shrink-0 text-settings-muted"> · {currentEffortLabel}</span>}
 					{variant?.variant.effort && tuning && showEffortInTrigger && <span className="shrink-0 text-settings-muted"> · {formatEffortLabel(variant.variant.effort, t)}</span>}
 					<ChevronDown
 						className="size-icon-sm shrink-0 opacity-70 transition-transform duration-300 ease-out group-data-[state=open]/agent-model-trigger:rotate-180"
@@ -569,7 +576,7 @@ export function AgentModelCombobox({
 						<OptionMenuSub open={effortMenuOpen} onOpenChange={(open) => {
 							if (open || !awaitingEffort) setEffortMenuOpen(open);
 						}}>
-							<OptionMenuSubTrigger ref={effortTriggerRef} label={t("settings.models.reasoningEffort", { defaultValue: "Reasoning effort" })} value={currentEffortLabel} />
+							<OptionMenuSubTrigger ref={effortTriggerRef} label={t("settings.models.reasoningEffort", { defaultValue: "Reasoning effort" })} value={explicitDefault && !effectiveEffort ? undefined : currentEffortLabel} />
 							<OptionMenuSubContent onEscapeKeyDown={(event) => {
 								event.preventDefault();
 								event.stopPropagation();
@@ -580,7 +587,7 @@ export function AgentModelCombobox({
 								{effortOptions.map((effort) => (
 									<OptionMenuItem key={effort} role="menuitemradio" aria-checked={effort === effectiveEffort}
 										active={effort === effectiveEffort} onSelect={() => {
-											tuning.onEffortChange(effort === defaultEffort ? "" : effort);
+											tuning.onEffortChange(!explicitDefault && effort === defaultEffort ? "" : effort);
 											setEffortMenuOpen(false);
 											setAwaitingEffort(false);
 											setMenuOpen(false);

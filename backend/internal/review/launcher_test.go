@@ -75,6 +75,37 @@ func (f *fakeReviewer) ReviewMessage(_ context.Context, inv ports.ReviewInvocati
 	return inv.Prompt, nil
 }
 
+func TestLauncherFillsOnlyAnUnconfiguredReviewerModel(t *testing.T) {
+	picked := func(context.Context, domain.ReviewerHarness) (string, error) { return "discovered", nil }
+	for _, tc := range []struct{ configured, want string }{{"", "discovered"}, {"chosen", "chosen"}} {
+		reviewer := &fakeReviewer{}
+		l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, t.TempDir(), WithDefaultModel(picked))
+		spec := launchSpec()
+		spec.AgentConfig.Model = tc.configured
+		if _, err := l.Spawn(context.Background(), spec); err != nil {
+			t.Fatalf("Spawn: %v", err)
+		}
+		if got := reviewer.gotInv.Config.Model; got != tc.want {
+			t.Fatalf("model = %q, want %q", got, tc.want)
+		}
+	}
+
+	rt := &fakeRuntime{}
+	l := NewLauncher(fakeReviewerResolver{reviewer: &fakeReviewer{}, ok: true}, rt, t.TempDir(),
+		WithDefaultModel(func(context.Context, domain.ReviewerHarness) (string, error) {
+			return "", errors.New("set reviewers[0].agentConfig.model")
+		}))
+	for name, launch := range map[string]func(context.Context, LaunchSpec) (LaunchResult, error){"spawn": l.Spawn, "restore": l.RestoreTerminal} {
+		_, err := launch(context.Background(), launchSpec())
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "reviewers[0].agentConfig.model") {
+			t.Fatalf("%s error = %v, want an invalid error naming the setting", name, err)
+		}
+	}
+	if rt.createCfg.Env != nil {
+		t.Fatalf("reviewer launched despite having no model: %v", rt.createCfg)
+	}
+}
+
 func TestLauncherSpawnEnvCannotOverrideWorkerContext(t *testing.T) {
 	reviewer := &fakeReviewer{env: map[string]string{
 		sessionmanager.EnvSessionID: "hacked-session",

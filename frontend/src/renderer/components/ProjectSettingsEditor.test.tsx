@@ -18,12 +18,13 @@ const initialValues: ProjectSettingsDraft = {
 function setup(cloud: boolean, save = vi.fn().mockResolvedValue({})) {
 	const onSaveState = vi.fn();
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-	render(<QueryClientProvider client={client}><TooltipProvider>
-		<ProjectSettingsEditor initialValues={initialValues} section="general"
+	const editor = (values: ProjectSettingsDraft) => <QueryClientProvider client={client}><TooltipProvider>
+		<ProjectSettingsEditor initialValues={values} section="general"
 			capabilities={{ workflow: true, sessionPrefix: !cloud, intake: !cloud, reviewer: true, requiredAgents: !cloud, requiredBranch: cloud, nameLimit: cloud ? 120 : 100, runtimeDefaults: cloud }}
 			details={[]} modelScope={() => ""} renderAgent={() => null} save={save} onSaveState={onSaveState} />
-	</TooltipProvider></QueryClientProvider>);
-	return { save, onSaveState };
+	</TooltipProvider></QueryClientProvider>;
+	const view = render(editor(initialValues));
+	return { save, onSaveState, reload: (values: ProjectSettingsDraft) => view.rerender(editor(values)) };
 }
 
 async function edit(label: string, value: string) {
@@ -40,10 +41,18 @@ describe.each([false, true])("shared settings page, Cloud=%s", (cloud) => {
 		expect(Boolean(screen.queryByRole("button", { name: "Edit Session prefix" }))).toBe(!cloud);
 		await edit("Project name", "Renamed project");
 		await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-		expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ displayName: "Renamed project", defaultBranch: "main" }));
+		expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ displayName: "Renamed project", defaultBranch: "main" }), expect.anything());
 		await edit("Default branch", "develop");
 		await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
-		expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ displayName: "Renamed project", defaultBranch: "develop" }));
+		expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ displayName: "Renamed project", defaultBranch: "develop" }), expect.anything());
+	});
+
+	it("shows settings saved elsewhere without writing them back", async () => {
+		const { save, reload } = setup(cloud);
+		reload({ ...initialValues, defaultBranch: "release" });
+		expect(await screen.findByText("release")).toBeInTheDocument();
+		await act(async () => { await new Promise((resolve) => setTimeout(resolve, 750)); });
+		expect(save).not.toHaveBeenCalled();
 	});
 
 	it("validates a blank name and recovers after editing without a write", async () => {
