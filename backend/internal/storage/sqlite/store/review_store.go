@@ -611,6 +611,54 @@ func (s *Store) ResumePausedReviewRunsByReview(ctx context.Context, reviewID str
 	return s.qw.ResumePausedReviewRunsByReview(ctx, reviewID)
 }
 
+// ListRunningReviewRuns returns every running pass of every worker, oldest
+// first, for the restart recovery and the reviewer watchdog.
+func (s *Store) ListRunningReviewRuns(ctx context.Context) ([]domain.ReviewRun, error) {
+	rows, err := s.qr.ListRunningReviewRuns(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list running review runs: %w", err)
+	}
+	out := make([]domain.ReviewRun, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, reviewRunFromRow(row))
+	}
+	return out, nil
+}
+
+// RelaunchReviewRun moves a running pass to the batch of its new reviewer
+// dispatch and notes why in its body. It reports false when the pass is no
+// longer running.
+func (s *Store) RelaunchReviewRun(ctx context.Context, id, batchID, body string) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.RelaunchReviewRun(ctx, gen.RelaunchReviewRunParams{BatchID: batchID, Body: body, ID: id})
+	if err != nil {
+		return false, fmt.Errorf("relaunch review run %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// ReviewChatLastActivity returns when a Chat reviewer's conversation last
+// changed, and false when it has no messages or activities.
+func (s *Store) ReviewChatLastActivity(ctx context.Context, reviewID string) (time.Time, bool, error) {
+	var last time.Time
+	for _, query := range []func(context.Context, sql.NullString) (time.Time, error){
+		s.qr.ReviewChatLastMessageAt, s.qr.ReviewChatLastActivityAt,
+	} {
+		at, err := query(ctx, sql.NullString{String: reviewID, Valid: true})
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return time.Time{}, false, fmt.Errorf("read reviewer %s chat activity: %w", reviewID, err)
+		}
+		if at.After(last) {
+			last = at
+		}
+	}
+	return last, !last.IsZero(), nil
+}
+
 // FailPausedReviewRunsByReview ends a reviewer's paused passes as failed, so
 // they stop holding the review slot, and reports how many it changed.
 func (s *Store) FailPausedReviewRunsByReview(ctx context.Context, reviewID, body string) (int64, error) {

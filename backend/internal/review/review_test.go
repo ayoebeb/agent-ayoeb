@@ -42,6 +42,7 @@ type fakeStore struct {
 	recoverableReviewsErr  error
 	recoveryErrors         map[string]string
 	settledReviewIDs       []string
+	chatActivityAt         time.Time
 }
 
 func (f *fakeStore) UpsertReview(_ context.Context, r domain.Review) error {
@@ -322,6 +323,30 @@ func (f *fakeStore) ListRunningReviewRunsBySession(_ context.Context, sessionID 
 	return out, nil
 }
 
+func (f *fakeStore) ListRunningReviewRuns(context.Context) ([]domain.ReviewRun, error) {
+	out := make([]domain.ReviewRun, 0)
+	for _, run := range f.runs {
+		if run.Status == domain.ReviewRunRunning && run.Verdict == domain.VerdictNone {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) RelaunchReviewRun(_ context.Context, id, batchID, body string) (bool, error) {
+	for i := range f.runs {
+		if f.runs[i].ID == id && f.runs[i].Status == domain.ReviewRunRunning {
+			f.runs[i].BatchID, f.runs[i].Body = batchID, body
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeStore) ReviewChatLastActivity(context.Context, string) (time.Time, bool, error) {
+	return f.chatActivityAt, !f.chatActivityAt.IsZero(), nil
+}
+
 func (f *fakeStore) ListRecoverableChatReviews(context.Context) ([]domain.Review, error) {
 	return f.recoverableReviews, f.recoverableReviewsErr
 }
@@ -394,6 +419,7 @@ func (sqliteReviewChatController) SendReviewChat(context.Context, string, string
 	return nil
 }
 func (sqliteReviewChatController) ReviewChatAlive(string) bool                       { return true }
+func (sqliteReviewChatController) ReviewChatBusy(string) bool                        { return false }
 func (sqliteReviewChatController) InterruptReviewChat(context.Context, string) error { return nil }
 func (sqliteReviewChatController) StopReviewChat(context.Context, string) error      { return nil }
 

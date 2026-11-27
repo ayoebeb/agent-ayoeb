@@ -175,7 +175,10 @@ WHERE pr.head_sha != ''
   );
 
 -- name: FailUnsubmittedReviewBatchForChatTurn :exec
-UPDATE review_run SET status = 'failed', body = 'reviewer Chat turn ended without submitting a result'
+-- The provider's own error is kept in the reason: without it a rejected model or
+-- login looks like a reviewer that simply forgot to submit.
+UPDATE review_run SET status = 'failed', body = 'reviewer Chat turn ended without submitting a result' || COALESCE(
+    (SELECT ': ' || NULLIF(failed.error_message, '') FROM conversation_turns AS failed WHERE failed.id = sqlc.arg(turn_id)), '')
 WHERE status = 'running' AND verdict = '' AND batch_id != ''
   AND EXISTS (
     SELECT 1 FROM conversation_turns AS turn
@@ -208,3 +211,22 @@ UPDATE review_run SET status = 'failed', body = ? WHERE review_id = ? AND status
 -- name: ListPausedReviewRunsByReview :many
 SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
 FROM review_run WHERE review_id = ? AND status = 'paused' AND verdict = '' ORDER BY created_at ASC, id ASC;
+
+-- name: ListRunningReviewRuns :many
+SELECT id, review_id, session_id, harness, pr_url, target_sha, status, verdict, body, created_at, github_review_id, delivered_at, batch_id, auto_inject_review, trigger_source
+FROM review_run WHERE status = 'running' AND verdict = '' ORDER BY created_at ASC, id ASC;
+
+-- A relaunched reviewer gets a new batch id, so its dispatch message is not
+-- dropped as a duplicate and the end of the old turn cannot fail the new pass.
+-- name: RelaunchReviewRun :execrows
+UPDATE review_run SET batch_id = ?, body = ? WHERE id = ? AND status = 'running' AND verdict = '';
+
+-- name: ReviewChatLastMessageAt :one
+SELECT m.updated_at FROM conversations AS c
+JOIN conversation_messages AS m ON m.conversation_id = c.id
+WHERE c.review_id = ? ORDER BY m.updated_at DESC LIMIT 1;
+
+-- name: ReviewChatLastActivityAt :one
+SELECT a.updated_at FROM conversations AS c
+JOIN conversation_activities AS a ON a.conversation_id = c.id
+WHERE c.review_id = ? ORDER BY a.updated_at DESC LIMIT 1;

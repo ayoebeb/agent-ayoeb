@@ -1637,6 +1637,14 @@ func Run(buildVersion string) error {
 			// agents are really gone, like the usage-limit resume.
 			workerKeeper.Run(ctx, done, workerkeeper.DefaultSweepEvery)
 		}()
+		if reviews, ok := reviewSvc.(reviewKeeper); ok {
+			go func() {
+				defer sentryobs.RecoverBackground()
+				// Reviewers have their own restart recovery and watchdog, behind
+				// the same boot reconciliation.
+				runReviewKeeper(ctx, done, workerkeeper.DefaultSweepEvery, reviews, reportSvc, log)
+			}()
+		}
 		go func() {
 			defer sentryobs.RecoverBackground()
 			// Recovery first, like the scheduled retries above: a stop is only

@@ -131,6 +131,8 @@ type ReviewerChatController interface {
 	RestoreReviewChat(context.Context, ReviewerChatStart) (string, error)
 	SendReviewChat(context.Context, string, string, string) error
 	ReviewChatAlive(string) bool
+	// ReviewChatBusy reports whether the reviewer has a turn in progress.
+	ReviewChatBusy(string) bool
 	InterruptReviewChat(context.Context, string) error
 	StopReviewChat(context.Context, string) error
 }
@@ -806,6 +808,20 @@ func (l *agentLauncher) Alive(ctx context.Context, handleID, launchID string) (b
 		return l.runtime.IsExactSupervisedProcessAlive(ctx, handle, ref)
 	}
 	return l.runtime.IsChildAlive(ctx, ports.RuntimeHandle{ID: handleID})
+}
+
+// Busy reports whether a Chat reviewer has a turn in progress.
+func (l *agentLauncher) Busy(handleID string) bool {
+	reviewID, ok := reviewerChatID(handleID)
+	return ok && l.chat != nil && l.chat.ReviewChatBusy(reviewID)
+}
+
+// Output returns a terminal reviewer's recent screen; a Chat reviewer has none.
+func (l *agentLauncher) Output(ctx context.Context, handleID string) (string, error) {
+	if _, ok := reviewerChatID(handleID); ok {
+		return "", nil
+	}
+	return l.runtime.GetOutput(ctx, ports.RuntimeHandle{ID: handleID}, 40)
 }
 
 func (l *agentLauncher) Reusable(harness domain.ReviewerHarness) bool {

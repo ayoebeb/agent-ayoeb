@@ -418,6 +418,8 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 			reviewcore.WithReviewerChat(reviewerChat)),
 
 		ChatRecoveryDone: reviewerRecoveryDone,
+		// The daemon runs the recovery once boot reconciliation settled.
+		RecoversRunningRuns: true,
 	})
 	reviewOpts := []reviewsvc.Option{
 		reviewsvc.WithTelemetry(telemetry),
@@ -812,6 +814,10 @@ func (c chatLauncher) SendReviewChat(ctx context.Context, reviewID, message, bat
 
 func (c chatLauncher) ReviewChatAlive(reviewID string) bool {
 	return c.svc.HasLiveControllerForOwner(domain.ReviewConversationOwner(reviewID))
+}
+
+func (c chatLauncher) ReviewChatBusy(reviewID string) bool {
+	return c.svc.TurnInProgressForOwner(domain.ReviewConversationOwner(reviewID))
 }
 
 func (c chatLauncher) InterruptReviewChat(ctx context.Context, reviewID string) error {
